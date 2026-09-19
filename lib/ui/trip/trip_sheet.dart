@@ -562,6 +562,19 @@ class _RideStepState extends ConsumerState<_RideStep> {
         ? const <(int, int)>[]
         : intermediateStops(ix, chosen, leg.fromStop, leg.toStop);
     final delay = rideDelaySeconds(ref, leg, chosen);
+    // Where the vehicle is right now, from the trip update: GTT sends no trip
+    // id on a vehicle, so the position comes from the delay, not the feed.
+    final midnight = DateTime(
+        journey.date.year, journey.date.month, journey.date.day);
+    final scheduled = [
+      leg.departure,
+      for (final (_, seconds) in stops) seconds,
+      leg.arrival,
+    ];
+    final passed = delay == null
+        ? null
+        : lastPassedIndex(
+            scheduled, delay, widget.now.difference(midnight).inSeconds);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -623,6 +636,7 @@ class _RideStepState extends ConsumerState<_RideStep> {
           _StopLine(
             stop: leg.fromStop,
             label: 'Sali a ${cleanStopName(ix.stopNames[leg.fromStop])}',
+            live: passed == 0,
           ),
         if (stops.isNotEmpty)
           InkWell(
@@ -640,17 +654,19 @@ class _RideStepState extends ConsumerState<_RideStep> {
             ),
           ),
         if (_open)
-          for (final (stop, seconds) in stops)
+          for (final (i, (stop, seconds)) in stops.indexed)
             _StopLine(
               stop: stop,
               label: '${hhmm(journey.timeOf(seconds))}  '
                   '${cleanStopName(ix.stopNames[stop])}',
               dense: true,
+              live: passed == i + 1,
             ),
         if (leg.toStop >= 0)
           _StopLine(
             stop: leg.toStop,
             label: 'Scendi a ${cleanStopName(ix.stopNames[leg.toStop])}',
+            live: passed == scheduled.length - 1,
           ),
         if (leg.options.length > 1) ...[
           const SheetSection('Altre linee per questa tratta'),
@@ -673,28 +689,58 @@ class _RideStepState extends ConsumerState<_RideStep> {
 }
 
 class _StopLine extends ConsumerWidget {
-  const _StopLine({required this.stop, required this.label, this.dense = false});
+  const _StopLine({
+    required this.stop,
+    required this.label,
+    this.dense = false,
+    this.live = false,
+  });
 
   final int stop;
   final String label;
   final bool dense;
 
+  /// The stop the live vehicle has just reached: marked by an icon as well as
+  /// a colour, never by colour alone.
+  final bool live;
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) => InkWell(
-        onTap: () => openEntity(context, ref, StopRef(stop)),
-        child: Container(
-          constraints:
-              BoxConstraints(minHeight: dense ? 32 : Gap.tapTarget),
-          alignment: Alignment.centerLeft,
-          padding: EdgeInsets.only(left: dense ? Gap.screen : 0),
-          child: Text(
-            label,
-            style: dense
-                ? Theme.of(context).textTheme.bodySmall
-                : Theme.of(context).textTheme.bodyMedium,
-          ),
+  Widget build(BuildContext context, WidgetRef ref) {
+    final base = dense
+        ? Theme.of(context).textTheme.bodySmall
+        : Theme.of(context).textTheme.bodyMedium;
+    return InkWell(
+      onTap: () => openEntity(context, ref, StopRef(stop)),
+      child: Container(
+        constraints: BoxConstraints(minHeight: dense ? 32 : Gap.tapTarget),
+        alignment: Alignment.centerLeft,
+        padding: EdgeInsets.only(left: dense && !live ? Gap.screen : 0),
+        child: Row(
+          children: [
+            if (live) ...[
+              Semantics(
+                label: 'Il mezzo è qui',
+                child: Icon(Icons.trip_origin,
+                    size: 14, color: context.tokens.live),
+              ),
+              const SizedBox(width: 4),
+            ],
+            Expanded(
+              child: Text(
+                label,
+                style: live
+                    ? base?.copyWith(
+                        color: context.tokens.live,
+                        fontWeight: FontWeight.w700,
+                      )
+                    : base,
+              ),
+            ),
+          ],
         ),
-      );
+      ),
+    );
+  }
 }
 
 /// Stops strictly between the board and alight stops of [option], each with

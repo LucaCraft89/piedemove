@@ -146,8 +146,28 @@ class PlanningControls extends ConsumerWidget {
                 selected: (settings.walkSpeed - speed).abs() < 0.01,
                 onSelected: (_) => changed((s) => s.copyWith(walkSpeed: speed)),
               ),
+            ChoiceChip(
+              label: const Text('Personalizzata'),
+              selected: isCustomWalkSpeed(settings.walkSpeed),
+              // Starts between normal and fast, then the slider takes over.
+              onSelected: (_) => changed((s) => s.copyWith(walkSpeed: 1.4)),
+            ),
           ],
         ),
+        if (isCustomWalkSpeed(settings.walkSpeed))
+          _SliderRow(
+            label: 'Velocità scelta',
+            value: '${settings.walkSpeed.toStringAsFixed(1)} m/s',
+            slider: Slider(
+              value: settings.walkSpeed.clamp(walkSpeedMin, walkSpeedMax),
+              min: walkSpeedMin,
+              max: walkSpeedMax,
+              divisions: 17,
+              onChanged: (v) => changed(
+                (s) => s.copyWith(walkSpeed: (v * 10).round() / 10),
+              ),
+            ),
+          ),
         const _Header('Mezzi'),
         Wrap(
           spacing: 8,

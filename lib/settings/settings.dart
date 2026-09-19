@@ -17,10 +17,18 @@ import 'package:piedemove/routing/footpaths.dart' show defaultWalkSpeed;
 
 const _key = 'pm.settings';
 
-/// The four walk speeds offered; custom is any other value.
+/// The three presets; any other value is a custom speed the user set by hand.
 const walkSpeedSlow = 0.9;
 const walkSpeedNormal = defaultWalkSpeed;
 const walkSpeedFast = 1.6;
+const walkSpeedMin = 0.5;
+const walkSpeedMax = 2.2;
+
+bool isCustomWalkSpeed(double speed) => ![
+      walkSpeedSlow,
+      walkSpeedNormal,
+      walkSpeedFast,
+    ].any((preset) => (speed - preset).abs() < 0.01);
 
 @immutable
 class PmSettings {

@@ -42,6 +42,22 @@ bool tightConnection(Journey journey, int legIndex) {
   return slack < tightConnectionSeconds;
 }
 
+/// The last stop of a ride the vehicle has already reached, as an index into
+/// [scheduled] (seconds on the journey's clock), or null when it has not
+/// started. [delaySeconds] comes from the trip update; on schedule data the
+/// caller passes null and nothing is highlighted.
+int? lastPassedIndex(List<int> scheduled, int delaySeconds, int nowSeconds) {
+  int? out;
+  for (var i = 0; i < scheduled.length; i++) {
+    if (scheduled[i] + delaySeconds <= nowSeconds) {
+      out = i;
+    } else {
+      break;
+    }
+  }
+  return out;
+}
+
 /// Transfer count as the card says it: `diretto`, `1 cambio`, `2 cambi`.
 String transfersLabel(int transfers) => switch (transfers) {
       0 => 'diretto',

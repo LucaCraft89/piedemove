@@ -59,6 +59,12 @@ void main() {
       expect(back.walkCapMetres, 800);
     });
 
+    test('a speed off the presets counts as custom', () {
+      expect(isCustomWalkSpeed(walkSpeedNormal), isFalse);
+      expect(isCustomWalkSpeed(walkSpeedFast), isFalse);
+      expect(isCustomWalkSpeed(1.4), isTrue);
+    });
+
     test('excluded modes are the complement of the chosen ones', () {
       const settings = PmSettings(modes: {RouteType.bus});
       expect(settings.excludedModes, {
@@ -171,6 +177,19 @@ void main() {
         ],
       );
       expect(legLines(leg), ['33', '42', '68']);
+    });
+
+    test('the live vehicle sits at the last stop its delay has reached', () {
+      // Board 10:00, two stops, alight 10:12, running 3 minutes late.
+      final scheduled = [36000, 36300, 36600, 36720];
+      // 3 min late: at 36400 only the board stop is behind it.
+      expect(lastPassedIndex(scheduled, 180, 36400), 0);
+      // 36600 + 180 is behind 36800, so it is at the second intermediate stop.
+      expect(lastPassedIndex(scheduled, 180, 36800), 2);
+      // Not started yet: nothing is highlighted.
+      expect(lastPassedIndex(scheduled, 180, 35000), isNull);
+      // On time it would already be one stop further at the same moment.
+      expect(lastPassedIndex(scheduled, 0, 36400), 1);
     });
 
     test('transfers read in Italian', () {
