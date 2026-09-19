@@ -72,6 +72,7 @@ flutter:
     - assets/ambient.json.gz
     - assets/connectors.json.gz
     - assets/lines.bin.gz
+    - assets/entrances.json.gz
 
   fonts:
     - family: Google Sans Flex

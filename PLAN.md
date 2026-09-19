@@ -17,7 +17,7 @@ Read this once per task. Do not paste it into prompts.
 | 6 | Lines (§9): fetch, graph, snap, merge, validate, ambient, taps, focus, walk | **done** |
 | — | **GATE 2** data: report `build/gate2/lines_report.txt`, samples `build/gate1/*.png` | ready |
 | 7 | Live trip: rules, strip, travelled/ahead | **built, awaiting a real ride** |
-| 8 | Metro entrances, favourites, advanced mode, About | todo |
+| 8 | Metro entrances, favourites, advanced mode, About | **done** |
 | 9 | Regional buses (scheduled only) | todo |
 | 10 | Release: README, licence, APK | todo |
 | — | **GATE 3** final acceptance on the phone | blocked on 10 |

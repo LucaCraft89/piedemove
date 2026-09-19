@@ -2,9 +2,12 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:piedemove/places/favourites.dart';
 import 'package:piedemove/realtime/gtfs_rt.dart';
+import 'package:piedemove/settings/settings.dart';
 import 'package:piedemove/ui/nav/entity.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
 
@@ -14,11 +17,13 @@ class SheetHeader extends ConsumerWidget {
     required this.title,
     this.subtitle,
     this.leading,
+    this.trailing,
   });
 
   final String title;
   final String? subtitle;
   final Widget? leading;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -42,6 +47,62 @@ class SheetHeader extends ConsumerWidget {
               if (subtitle != null)
                 Text(subtitle!, style: theme.textTheme.bodySmall),
             ],
+          ),
+        ),
+        ?trailing,
+      ],
+    );
+  }
+}
+
+/// The star every stop and line sheet carries (§11.3).
+class FavouriteButton extends ConsumerWidget {
+  const FavouriteButton(this.favouriteKey, {super.key});
+
+  final String favouriteKey;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final on = ref.watch(favouritesProvider).contains(favouriteKey);
+    return IconButton(
+      tooltip: on ? 'Togli dai preferiti' : 'Aggiungi ai preferiti',
+      onPressed: () =>
+          ref.read(favouritesProvider.notifier).toggle(favouriteKey),
+      icon: Icon(on ? Icons.star : Icons.star_border),
+      color: on ? Theme.of(context).colorScheme.primary : null,
+    );
+  }
+}
+
+/// Raw-data expander (§11.7): present only with advanced mode on. Long-press
+/// copies the record.
+class RawData extends ConsumerWidget {
+  const RawData(this.text, {super.key, this.label = 'Dati grezzi'});
+
+  final String label;
+  final String text;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (!ref.watch(settingsProvider).advanced) return const SizedBox.shrink();
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      title: Text(label, style: Theme.of(context).textTheme.labelLarge),
+      children: [
+        GestureDetector(
+          onLongPress: () async {
+            await Clipboard.setData(ClipboardData(text: text));
+            if (!context.mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Copiato')),
+            );
+          },
+          child: SizedBox(
+            width: double.infinity,
+            child: SelectableText(
+              text,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+            ),
           ),
         ),
       ],

@@ -39,6 +39,7 @@ const _connectorsSource = 'pm-connectors';
 const _focusStopsSource = 'pm-focus-stops';
 const _walkSource = 'pm-walk';
 const _vehiclesSource = 'pm-vehicles';
+const _entrancesSource = 'pm-entrances';
 
 /// Vehicles appear from z12 (§10.1).
 const vehicleMinZoom = 12.0;
@@ -84,6 +85,7 @@ class _MapViewState extends ConsumerState<MapView> {
   final _vehicleIds = <String>[];
 
   bool _linesAdded = false;
+  bool _entrancesAdded = false;
 
   /// The place currently pinned by search, as last drawn.
   Place? _pinned;
@@ -122,6 +124,12 @@ class _MapViewState extends ConsumerState<MapView> {
     final ambient = ref.watch(ambientLinesProvider).valueOrNull;
     if (_styleReady && ambient != null && !_linesAdded) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _addLines(ambient));
+    }
+
+    final entrances = ref.watch(metroEntrancesProvider).valueOrNull;
+    if (_styleReady && entrances != null && !_entrancesAdded) {
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _addEntrances(entrances));
     }
 
     final focus = ref.watch(mapFocusProvider);
@@ -172,6 +180,7 @@ class _MapViewState extends ConsumerState<MapView> {
         _stopsAdded = false;
         _vehiclesAdded = false;
         _linesAdded = false;
+        _entrancesAdded = false;
         _focusDrawn = false;
         _pinned = null;
         _addLines(ref.read(ambientLinesProvider).valueOrNull);
@@ -401,6 +410,55 @@ class _MapViewState extends ConsumerState<MapView> {
       );
     } catch (e) {
       debugPrint('pm: layer fermate percorso failed: $e');
+    }
+  }
+
+  /// Metro entrances (§10.5): small dots with labels, metro colour, from z15.
+  /// Its own try/catch like every other layer; failing costs the dots alone.
+  Future<void> _addEntrances(Map<String, dynamic> entrances) async {
+    final controller = _controller;
+    if (controller == null || !_styleReady || _entrancesAdded) return;
+    final tokens = Theme.of(context).brightness == Brightness.dark
+        ? PmTokens.darkTokens
+        : PmTokens.lightTokens;
+    final surface = Theme.of(context).colorScheme.surface;
+    _entrancesAdded = true;
+    try {
+      await controller.addSource(
+        _entrancesSource,
+        GeojsonSourceProperties(data: entrances),
+      );
+      await controller.addCircleLayer(
+        _entrancesSource,
+        'pm-entrance-dots',
+        CircleLayerProperties(
+          circleColor: _hex(tokens.modes.metro),
+          circleRadius: 3.5,
+          circleStrokeColor: _hex(surface),
+          circleStrokeWidth: 1.5,
+        ),
+        minzoom: poleMinZoom,
+        enableInteraction: false,
+      );
+      await controller.addSymbolLayer(
+        _entrancesSource,
+        'pm-entrance-labels',
+        SymbolLayerProperties(
+          textField: ['get', 'name'],
+          textFont: const ['Noto Sans Regular'],
+          textSize: 10,
+          textOffset: const [0, 1.0],
+          textAnchor: 'top',
+          textColor: _hex(tokens.modes.metro),
+          textHaloColor: _hex(surface),
+          textHaloWidth: 1.4,
+        ),
+        minzoom: poleMinZoom,
+        enableInteraction: false,
+      );
+    } catch (e) {
+      debugPrint('pm: layer ingressi metro failed: $e');
+      _entrancesAdded = false;
     }
   }
 

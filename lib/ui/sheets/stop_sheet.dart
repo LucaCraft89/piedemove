@@ -6,6 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:piedemove/data/providers.dart';
 import 'package:piedemove/data/transit_index.dart';
+import 'package:piedemove/geo/distance.dart';
+import 'package:piedemove/geo/line_providers.dart';
+import 'package:piedemove/places/favourites.dart';
 import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/routing/departures.dart';
 import 'package:piedemove/ui/nav/entity.dart';
@@ -14,6 +17,28 @@ import 'package:piedemove/ui/widgets/departure_row.dart';
 import 'package:piedemove/ui/widgets/line_badge.dart';
 
 import 'sheet_parts.dart';
+
+/// Entrances of [entrances] within [radius] of a point, nearest first (§10.5).
+List<(String name, double metres)> entrancesNear(
+  Map<String, dynamic>? entrances,
+  double lat,
+  double lon, {
+  double radius = 150,
+}) {
+  final out = <(String, double)>[];
+  for (final f in (entrances?['features'] as List? ?? const [])) {
+    final feature = f as Map<String, dynamic>;
+    final c = (feature['geometry'] as Map)['coordinates'] as List;
+    final d = haversineMetres(
+        lat, lon, (c[1] as num).toDouble(), (c[0] as num).toDouble());
+    if (d > radius) continue;
+    final name =
+        ((feature['properties'] as Map?)?['name'] ?? '').toString();
+    out.add((name.isEmpty ? 'Ingresso metro' : name, d));
+  }
+  out.sort((a, b) => a.$2.compareTo(b.$2));
+  return out;
+}
 
 class StopBody extends ConsumerStatefulWidget {
   const StopBody({super.key, required this.stop, required this.controller});
@@ -46,6 +71,15 @@ class _StopBodyState extends ConsumerState<StopBody> {
         .alertsFor(stopId: ix.stopIds[stop]);
 
     final routes = ix.routesAt(stop);
+    final isMetro =
+        routes.any((r) => ix.routeTypes[r] == RouteType.metro);
+    final entrances = isMetro
+        ? entrancesNear(
+            ref.watch(metroEntrancesProvider).valueOrNull,
+            ix.stopLat[stop],
+            ix.stopLon[stop],
+          )
+        : const <(String, double)>[];
     final shown = _filter == null
         ? departures
         : [for (final d in departures) if (d.routeShortName == _filter) d];
@@ -58,6 +92,7 @@ class _StopBodyState extends ConsumerState<StopBody> {
         SheetHeader(
           title: cleanStopName(ix.stopNames[stop]),
           subtitle: 'Fermata ${ix.stopCodes[stop]}',
+          trailing: FavouriteButton(stopFavourite(ix.stopIds[stop])),
         ),
         AlertTiles(alerts: alerts),
         if (routes.length > 1)
@@ -94,6 +129,18 @@ class _StopBodyState extends ConsumerState<StopBody> {
               ),
               child: DepartureRow(departure: d, now: now),
             ),
+        if (entrances.isNotEmpty) ...[
+          const SheetSection('Ingressi della metro'),
+          for (final (name, metres) in entrances)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              minTileHeight: Gap.row,
+              leading: Icon(Icons.subdirectory_arrow_right,
+                  color: context.tokens.modes.metro),
+              title: Text(name),
+              trailing: Text('${metres.round()} m'),
+            ),
+        ],
         const SheetSection('Linee'),
         Wrap(
           spacing: 8,
@@ -108,6 +155,14 @@ class _StopBodyState extends ConsumerState<StopBody> {
                 ),
               ),
           ],
+        ),
+        RawData(
+          'stop_id ${ix.stopIds[stop]}\n'
+          'stop_code ${ix.stopCodes[stop]}\n'
+          'stop_name ${ix.stopNames[stop]}\n'
+          'lat ${ix.stopLat[stop]}\nlon ${ix.stopLon[stop]}\n'
+          'index $stop\n'
+          'routes ${[for (final r in routes) ix.routeShortNames[r]].join(', ')}',
         ),
       ],
     );

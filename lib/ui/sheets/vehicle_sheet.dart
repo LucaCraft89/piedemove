@@ -138,6 +138,16 @@ class VehicleBody extends ConsumerWidget {
                 StopRef(ix.patternStopAt(pattern, p)),
               ),
             ),
+        RawData(
+          'vehicle ${vehicle.id}\n'
+          'label ${vehicle.label}\n'
+          'trip_id ${vehicle.tripId}\n'
+          'route_id ${vehicle.routeId}\n'
+          'lat ${vehicle.lat} lon ${vehicle.lon} bearing ${vehicle.bearing}\n'
+          'stop_sequence ${vehicle.stopSequence} stop_id ${vehicle.stopId}\n'
+          'status ${vehicle.status.name}\n'
+          'timestamp ${vehicle.timestamp}',
+        ),
       ],
     );
   }

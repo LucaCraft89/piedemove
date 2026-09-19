@@ -40,6 +40,11 @@ final stopConnectorsProvider = FutureProvider<Map<String, dynamic>?>(
   (_) => _loadJson('assets/connectors.json.gz'),
 );
 
+/// Metro entrances (§10.5), built on the desktop by `tool/fetch_entrances.dart`.
+final metroEntrancesProvider = FutureProvider<Map<String, dynamic>?>(
+  (_) => _loadJson('assets/entrances.json.gz'),
+);
+
 LineNetwork? _decode(Uint8List gz) =>
     decodeLines(Uint8List.fromList(gzip.decode(gz)));
 

@@ -39,6 +39,7 @@ class PmSettings {
     this.minTransferSeconds = 60,
     this.modes = allModes,
     this.themeMode = ThemeMode.system,
+    this.advanced = false,
   });
 
   static const allModes = <int>{
@@ -59,6 +60,9 @@ class PmSettings {
   final Set<int> modes;
   final ThemeMode themeMode;
 
+  /// Raw-data mode (§11.7): record expanders and the feed screen.
+  final bool advanced;
+
   Set<int> get excludedModes => allModes.difference(modes);
 
   PmSettings copyWith({
@@ -68,6 +72,7 @@ class PmSettings {
     int? minTransferSeconds,
     Set<int>? modes,
     ThemeMode? themeMode,
+    bool? advanced,
   }) =>
       PmSettings(
         maxExtraMinutes: maxExtraMinutes ?? this.maxExtraMinutes,
@@ -76,6 +81,7 @@ class PmSettings {
         minTransferSeconds: minTransferSeconds ?? this.minTransferSeconds,
         modes: modes == null || modes.isEmpty ? this.modes : modes,
         themeMode: themeMode ?? this.themeMode,
+        advanced: advanced ?? this.advanced,
       );
 
   Map<String, dynamic> toJson() => {
@@ -85,6 +91,7 @@ class PmSettings {
         'transfer': minTransferSeconds,
         'modes': modes.toList()..sort(),
         'theme': themeMode.name,
+        'advanced': advanced,
       };
 
   static PmSettings fromJson(Map<String, dynamic> j) {
@@ -101,6 +108,7 @@ class PmSettings {
         (m) => m.name == j['theme'],
         orElse: () => ThemeMode.system,
       ),
+      advanced: j['advanced'] as bool? ?? false,
     );
   }
 }

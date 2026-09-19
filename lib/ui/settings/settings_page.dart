@@ -1,18 +1,19 @@
 /// Settings (§11.7) and the Filtri sheet: the same planning controls in both.
 ///
-/// Advanced/raw-data mode and About land in phase 8; language needs l10n first,
-/// so the app stays Italian here.
+/// Language needs l10n first, so the app stays Italian here.
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:piedemove/data/feeds.dart';
 import 'package:piedemove/data/providers.dart';
 import 'package:piedemove/data/transit_index.dart';
 import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/settings/settings.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
 import 'package:piedemove/ui/trip/trip_plan.dart';
+import 'package:piedemove/ui/settings/about_page.dart';
 import 'package:piedemove/ui/widgets/line_badge.dart';
 
 Future<void> openSettings(BuildContext context) => Navigator.of(context).push(
@@ -41,9 +42,12 @@ class SettingsPage extends ConsumerWidget {
     final controller = ref.read(settingsProvider.notifier);
     return Scaffold(
       appBar: AppBar(title: const Text('Impostazioni')),
-      body: ListView(
-        padding: const EdgeInsets.all(Gap.screen),
-        children: [
+      // The last row must clear the system navigation bar.
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.all(Gap.screen),
+          children: [
           const PlanningControls(),
           const _Header('Aspetto'),
           SegmentedButton<ThemeMode>(
@@ -66,7 +70,27 @@ class SettingsPage extends ConsumerWidget {
           ),
           const _Header('Stato dei dati'),
           const _DataStatus(),
-        ],
+          const _Header('Avanzate'),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: settings.advanced,
+            title: const Text('Modalità dati grezzi'),
+            subtitle: const Text(
+                'Mostra il record originale in fermate, linee, veicoli e '
+                'avvisi, e le sorgenti qui sotto.'),
+            onChanged: (on) =>
+                controller.edit((s) => s.copyWith(advanced: on)),
+          ),
+          if (settings.advanced) const _FeedSources(),
+          const _Header('Informazioni'),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.info_outline),
+            title: const Text('Dati, licenze e privacy'),
+            onTap: () => openAbout(context),
+          ),
+          ],
+        ),
       ),
     );
   }
@@ -259,6 +283,27 @@ class _DataStatus extends ConsumerWidget {
       ],
     );
   }
+}
+
+/// The feed screen behind raw-data mode (§11.7): every source URL, verbatim.
+class _FeedSources extends StatelessWidget {
+  const _FeedSources();
+
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final entry in Feeds.all.entries)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(entry.key),
+              subtitle: SelectableText(
+                entry.value,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+              ),
+            ),
+        ],
+      );
 }
 
 String _feedLabel(RtFeedKind kind) => switch (kind) {

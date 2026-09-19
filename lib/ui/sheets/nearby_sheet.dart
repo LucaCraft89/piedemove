@@ -1,6 +1,6 @@
 /// Home sheet: next arrivals at the stops around you, soonest first.
 ///
-/// Favourites join this list in phase 8.
+/// Favourite stops sit above the nearby ones (§11.3).
 library;
 
 import 'package:flutter/material.dart';
@@ -10,6 +10,7 @@ import 'package:piedemove/data/providers.dart';
 import 'package:piedemove/data/transit_index.dart';
 import 'package:piedemove/geo/distance.dart';
 import 'package:piedemove/location/device_location.dart';
+import 'package:piedemove/places/favourites.dart';
 import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/routing/departures.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
@@ -77,6 +78,35 @@ class _NearbyList extends ConsumerWidget {
 
     final children = <Widget>[const _Grabber()];
     final ix = index.valueOrNull;
+    if (ix != null) {
+      final favourites = [
+        for (final key in ref.watch(favouritesProvider))
+          if (key.startsWith('stop:'))
+            ix.stopIndexById[key.substring(5)],
+      ].whereType<int>().toList();
+      if (favourites.isNotEmpty) {
+        children.add(const _Note('Preferiti'));
+        for (final stop in favourites) {
+          final departures = nextDepartures(
+            ix,
+            stop,
+            now,
+            _departuresPerStop,
+            delays: ref.watch(delayLookupProvider),
+          );
+          children.add(_StopBlock(
+            name: cleanStopName(ix.stopNames[stop]),
+            metres: position == null
+                ? null
+                : haversineMetres(position.latitude, position.longitude,
+                    ix.stopLat[stop], ix.stopLon[stop]),
+            departures: departures,
+            now: now,
+            onTap: () => onStopTap(stop),
+          ));
+        }
+      }
+    }
     if (index.isLoading) {
       children.add(const _Note('Preparo gli orari GTT…'));
     } else if (index.hasError) {
@@ -85,6 +115,8 @@ class _NearbyList extends ConsumerWidget {
       children.add(const _Note('Posizione sconosciuta: tocca il mirino.'));
     } else if (ix != null) {
       final near = stopsNear(ix, position.latitude, position.longitude);
+      // Only labelled when favourites are above it: alone, the list is obvious.
+      if (children.length > 1) children.add(const _Note('Vicino a te'));
       if (near.isEmpty) {
         children.add(const _Note('Nessuna fermata entro 400 m.'));
       }
@@ -126,14 +158,18 @@ class _StopBlock extends StatelessWidget {
   });
 
   final String name;
-  final double metres;
+
+  /// Null when the phone has no position yet: a favourite still lists.
+  final double? metres;
   final List<Departure> departures;
   final DateTime now;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final walk = context.tokens.walk.ofMetres(metres);
+    final metres = this.metres;
+    final walk =
+        metres == null ? null : context.tokens.walk.ofMetres(metres);
     return InkWell(
       onTap: onTap,
       child: Padding(
@@ -149,8 +185,10 @@ class _StopBlock extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.titleSmall),
                 ),
-                Text('${metres.round()} m',
-                    style: TextStyle(color: walk, fontWeight: FontWeight.w700)),
+                if (metres != null)
+                  Text('${metres.round()} m',
+                      style:
+                          TextStyle(color: walk, fontWeight: FontWeight.w700)),
               ],
             ),
             for (final d in departures) DepartureRow(departure: d, now: now),

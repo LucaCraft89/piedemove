@@ -278,3 +278,28 @@ for approval of look, palette and line style before phase 6.
   line and vehicle sections.
 - The journey is **not drawn on the map yet** — journey geometry belongs to the
   line work in phase 6.
+
+## Built in phase 8 (entrances, favourites, raw data, About)
+
+- **Metro entrances** are a *desktop-built asset*, not a runtime Overpass query:
+  `dart tool/fetch_entrances.dart` unions `node(around:150,…)
+  [railway=subway_entrance]` over the metro stops of `build/index.bin` and
+  writes `assets/entrances.json.gz` (85 points, 1.2 kB). The phone only loads
+  it, through `metroEntrancesProvider` in `lib/geo/line_providers.dart`. Re-run
+  the tool when the metro changes; there is no cache to expire.
+  `map_view._addEntrances` draws dots + labels in the metro colour from z15, in
+  its own try/catch. `entrancesNear` in `stop_sheet.dart` lists the ones within
+  150 m on a metro stop sheet.
+- **Favourites** (`lib/places/favourites.dart`): one `Set<String>` in
+  SharedPreferences, keyed `stop:<gtfs stop_id>` / `line:<short name>` — never
+  by index, which moves with every feed rebuild. `FavouriteButton` is the
+  `trailing` of `SheetHeader` on the stop and line sheets; the nearby sheet puts
+  favourite stops above the nearby ones ("Preferiti" / "Vicino a te").
+- **Raw-data mode**: `PmSettings.advanced`. `RawData` in `sheet_parts.dart` is
+  self-gating (nothing rendered when the mode is off) and long-press copies the
+  record; stop, line, vehicle and alert sheets each end with one. Settings gains
+  the switch plus `_FeedSources`, every feed URL verbatim.
+- **About**: `lib/ui/settings/about_page.dart` — GTT CC-BY, OSM ODbL,
+  OpenFreeMap/OpenMapTiles, Photon, Regione Piemonte, "no Google data or APIs",
+  licence and version. Both Settings and About wrap the list in a
+  `SafeArea(top: false)`: the last row was landing under the navigation bar.

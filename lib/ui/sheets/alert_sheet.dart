@@ -143,6 +143,16 @@ class AlertBody extends ConsumerWidget {
               onTap: () => openEntity(context, ref, StopRef(stop)),
             ),
         ],
+        RawData(
+          'id ${alert.id}\n'
+          'cause ${alert.cause} effect ${alert.effect}\n'
+          'route_ids ${alert.routeIds.join(', ')}\n'
+          'stop_ids ${alert.stopIds.join(', ')}\n'
+          'trip_ids ${alert.tripIds.join(', ')}\n'
+          'from ${alert.from} to ${alert.to}\n'
+          'header ${alert.header}\n'
+          'description ${alert.description}',
+        ),
       ],
     );
   }

@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:piedemove/data/providers.dart';
 import 'package:piedemove/data/transit_index.dart';
+import 'package:piedemove/places/favourites.dart';
 import 'package:piedemove/realtime/gtfs_rt.dart';
 import 'package:piedemove/realtime/link.dart';
 import 'package:piedemove/realtime/store.dart';
@@ -111,6 +112,9 @@ class LineBody extends ConsumerWidget {
             shortName: ix.routeShortNames[route],
             routeType: ix.routeTypes[route],
           ),
+          trailing: FavouriteButton(
+            lineFavourite(ix.routeShortNames[route]),
+          ),
         ),
         AlertTiles(alerts: alerts),
         const SizedBox(height: Gap.element),
@@ -164,6 +168,14 @@ class LineBody extends ConsumerWidget {
                 StopRef(ix.patternStopAt(pattern, p)),
               ),
             ),
+        RawData(
+          'route_id ${ix.routeIds[route]}\n'
+          'short_name ${ix.routeShortNames[route]}\n'
+          'long_name ${ix.routeLongNames[route]}\n'
+          'route_type ${ix.routeTypes[route]}\n'
+          'direction $direction · pattern $pattern\n'
+          'corse oggi ${departures.length}',
+        ),
       ],
     );
   }
