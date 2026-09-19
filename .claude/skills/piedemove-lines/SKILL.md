@@ -25,6 +25,29 @@ affects routing. Copy nothing from `../piemove-maps`. High-effort work.
    Comma-separated strings and numbers only.
 7. One layer failing blanked everything. -> Each layer added in its own
    try/catch, plus a visible feed-health indicator.
+8. Stops snapped to the `service=parking_aisle` way beside the kerb, and
+   routing (which refuses service ways mid-route) then had nowhere to go: 2802
+   dead hops. -> Aisles and driveways are out of the graph, and a stop never
+   snaps to a service edge while a road edge is in reach.
+9. Heading alone cannot tell a main carriageway from its controviale. -> The
+   stop-snap score adds the candidate's distance to the pattern's GTFS shape.
+   Chorded hops fell 10.3% -> 3.6% from lessons 8 and 9 together.
+10. Overpass times out (504) on a regex over `highway` values, and answers in
+   ~2 s for the bare `way["highway"]` key; `overpass.osm.ch` holds Switzerland
+   only and answers **200 with an empty element list**. -> Bare key query,
+   local filtering in `wayInMode`, and a tile shorter than 2 KB counts as a
+   miss, not as an empty area.
+
+## Build
+
+    dart tool/build_lines.dart [--force-osm] [--reverse]   # -> build/lines.bin
+    dart tool/lines_report.dart [--full]                   # 9.12 validation
+
+Tiles are cached gzipped in `build/osm/`. Two processes (the second with
+`--reverse`) halve the fetch: Overpass gives an IP two slots. Current state:
+78 tiles, bus graph 1.08M nodes / 2.03M directed edges, 1433 patterns,
+36 215 hops, **3.64% chorded**, 0 off-shape, 0 oneway violations, 0 vertices
+off the graph.
 
 ## 9.1 OSM fetch
 

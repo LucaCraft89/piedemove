@@ -14,8 +14,8 @@ Read this once per task. Do not paste it into prompts.
 | — | **GATE 1** design: palette, line style, UI samples | ready |
 | 4 | Search (Photon, stops, lines, vehicles) | **done** |
 | 5 | Planning UI + settings | **done** |
-| 6 | Lines (§9): fetch, graph, snap, validate, ambient, focus, walk | todo |
-| — | **GATE 2** data: validation report + 3 sample spots | blocked on 6 |
+| 6 | Lines (§9): fetch, graph, snap, validate **done**; ambient, focus, walk todo | part |
+| — | **GATE 2** data: validation report + 3 sample spots | ready |
 | 7 | Live trip (needs a real ride) | todo |
 | 8 | Metro entrances, favourites, advanced mode, About | todo |
 | 9 | Regional buses (scheduled only) | todo |

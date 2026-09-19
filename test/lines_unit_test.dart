@@ -1,0 +1,154 @@
+import 'dart:typed_data';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:piedemove/geo/line_build.dart';
+import 'package:piedemove/geo/lines_io.dart';
+import 'package:piedemove/geo/pattern_snap.dart';
+import 'package:piedemove/geo/road_graph.dart';
+
+OsmWay way(int id, List<List<double>> points, [Map<String, String> tags = const {'highway': 'residential'}]) =>
+    OsmWay(
+      id,
+      {...tags},
+      Float64List.fromList([for (final p in points) p[0]]),
+      Float64List.fromList([for (final p in points) p[1]]),
+    );
+
+SnappedPattern snapStops(RoadGraph g, List<List<double>> stops) =>
+    PatternSnapper(g).snap(
+      pattern: 0,
+      stopLat: Float64List.fromList([for (final s in stops) s[0]]),
+      stopLon: Float64List.fromList([for (final s in stops) s[1]]),
+    );
+
+Set<int> waysOf(SnappedPattern p) =>
+    {for (final w in p.vertexWay) if (w >= 0) w};
+
+void main() {
+  test('two-way junction: a hop routes through the shared node', () {
+    final g = RoadGraph.build([
+      way(1, [
+        [45.000, 7.600],
+        [45.000, 7.601],
+        [45.000, 7.602],
+      ]),
+      way(2, [
+        [45.000, 7.601],
+        [45.001, 7.601],
+      ]),
+    ], GraphMode.bus);
+
+    // The junction coordinate is shared exactly, so it is one node.
+    expect(g.nodeCount, 4);
+
+    final p = snapStops(g, [
+      [45.0000, 7.6001],
+      [45.0010, 7.6010],
+    ]);
+    expect(p.hopApprox.first, 0, reason: 'hop must route, not chord');
+    expect(waysOf(p), {1, 2});
+    expect(p.stopVertex.last, p.vertexCount - 1);
+  });
+
+  test('oneway pair: the two directions take different edges', () {
+    final ways = [
+      way(10, [
+        [45.000, 7.600],
+        [45.000, 7.602],
+      ], {'highway': 'primary', 'oneway': 'yes'}),
+      way(11, [
+        [45.0005, 7.602],
+        [45.0005, 7.600],
+      ], {'highway': 'primary', 'oneway': 'yes'}),
+      way(12, [
+        [45.000, 7.602],
+        [45.0005, 7.602],
+      ]),
+      way(13, [
+        [45.0005, 7.600],
+        [45.000, 7.600],
+      ]),
+    ];
+    final g = RoadGraph.build(ways, GraphMode.bus);
+
+    final east = snapStops(g, [
+      [45.0000, 7.6002],
+      [45.0000, 7.6018],
+    ]);
+    final west = snapStops(g, [
+      [45.0005, 7.6018],
+      [45.0005, 7.6002],
+    ]);
+    expect(east.hopApprox.first, 0);
+    expect(west.hopApprox.first, 0);
+    expect(waysOf(east), {10});
+    expect(waysOf(west), {11});
+  });
+
+  test('loop route: a stop visited twice slices on the right pass', () {
+    // One-way square, counter-clockwise, closed at the start coordinate.
+    final g = RoadGraph.build([
+      way(20, [
+        [45.000, 7.600],
+        [45.000, 7.602],
+        [45.002, 7.602],
+        [45.002, 7.600],
+        [45.000, 7.600],
+      ], {'highway': 'residential', 'oneway': 'yes'}),
+    ], GraphMode.bus);
+
+    final p = snapStops(g, [
+      [45.0000, 7.6005], // south side, first pass
+      [45.0010, 7.6020], // east side
+      [45.0020, 7.6010], // north side
+      [45.0000, 7.6005], // south side again, last pass
+    ]);
+    expect(p.hopApprox.every((f) => f == 0), isTrue);
+    for (var i = 1; i < p.stopVertex.length; i++) {
+      expect(p.stopVertex[i], greaterThan(p.stopVertex[i - 1]),
+          reason: 'stop vertices must advance along the pattern');
+    }
+    expect(p.stopVertex.last, p.vertexCount - 1);
+  });
+
+  test('oneway:bus=no reopens the reverse direction for buses only', () {
+    final w = way(30, [
+      [45.000, 7.600],
+      [45.000, 7.601],
+    ], {'highway': 'residential', 'oneway': 'yes', 'oneway:bus': 'no'});
+    expect(wayDirections(w, GraphMode.bus), (true, true));
+    expect(wayDirections(w, GraphMode.tram), (true, false));
+  });
+
+  test('lines.bin round-trips and rejects another feed', () {
+    final g = RoadGraph.build([
+      way(40, [
+        [45.000, 7.600],
+        [45.000, 7.602],
+      ]),
+    ], GraphMode.bus);
+    final net = LineNetwork('feed-a', [
+      snapStops(g, [
+        [45.0000, 7.6002],
+        [45.0000, 7.6018],
+      ]),
+    ]);
+    final bytes = encodeLines(net);
+    final back = decodeLines(bytes, feedVersion: 'feed-a');
+    expect(back, isNotNull);
+    expect(back![0]!.vertexWay, net.patterns.first.vertexWay);
+    expect(back[0]!.stopVertex, net.patterns.first.stopVertex);
+    expect(decodeLines(bytes, feedVersion: 'feed-b'), isNull);
+  });
+
+  test('a pattern without a graph falls back to its stop chain', () {
+    final p = shapeChainPattern(
+      7,
+      Float64List.fromList([45.0, 45.01]),
+      Float64List.fromList([7.6, 7.61]),
+    );
+    expect(p.vertexCount, 2);
+    expect(p.stopVertex, [0, 1]);
+    expect(p.vertexWay.every((w) => w == -1), isTrue);
+  });
+}

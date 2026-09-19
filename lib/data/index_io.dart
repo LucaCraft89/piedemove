@@ -21,7 +21,8 @@ class IndexFormatException implements Exception {
   String toString() => 'IndexFormatException: $message';
 }
 
-class _Writer {
+/// Shared little-endian writer; also used by `lib/geo/lines_io.dart`.
+class BinWriter {
   final _out = BytesBuilder(copy: false);
   int get length => _out.length;
 
@@ -48,6 +49,12 @@ class _Writer {
     _out.add(Uint8List.view(a.buffer, a.offsetInBytes, a.length * 4));
   }
 
+  void i64(Int64List a) {
+    int32(a.length);
+    _align();
+    _out.add(Uint8List.view(a.buffer, a.offsetInBytes, a.length * 8));
+  }
+
   void f64(Float64List a) {
     int32(a.length);
     _align();
@@ -63,8 +70,8 @@ class _Writer {
   Uint8List take() => _out.takeBytes();
 }
 
-class _Reader {
-  _Reader(this.data) : _view = ByteData.view(data.buffer, data.offsetInBytes, data.length);
+class BinReader {
+  BinReader(this.data) : _view = ByteData.view(data.buffer, data.offsetInBytes, data.length);
   final Uint8List data;
   final ByteData _view;
   int _at = 0;
@@ -100,6 +107,14 @@ class _Reader {
     return v;
   }
 
+  Int64List i64() {
+    final n = int32();
+    _align();
+    final v = Int64List.view(data.buffer, data.offsetInBytes + _at, n);
+    _at += n * 8;
+    return v;
+  }
+
   Float64List f64() {
     final n = int32();
     _align();
@@ -117,7 +132,7 @@ class _Reader {
 }
 
 Uint8List encodeIndex(TransitIndex ix) {
-  final w = _Writer()
+  final w = BinWriter()
     ..int32(_magic)
     ..int32(indexFormatVersion);
   w.strings([ix.feedVersion]);
@@ -153,7 +168,7 @@ Uint8List encodeIndex(TransitIndex ix) {
 }
 
 TransitIndex decodeIndex(Uint8List data) {
-  final r = _Reader(data);
+  final r = BinReader(data);
   if (r.int32() != _magic) throw IndexFormatException('not an index file');
   final version = r.int32();
   if (version != indexFormatVersion) {
