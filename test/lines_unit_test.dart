@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:piedemove/data/transit_index.dart';
 import 'package:piedemove/geo/line_build.dart';
+import 'package:piedemove/geo/ambient.dart';
 import 'package:piedemove/geo/line_merge.dart';
 import 'package:piedemove/geo/lines_io.dart';
 import 'package:piedemove/geo/pattern_snap.dart';
@@ -27,6 +28,8 @@ Set<int> waysOf(SnappedPattern p) =>
     {for (final w in p.vertexWay) if (w >= 0) w};
 
 void main() {
+  moreLineTests();
+
   test('two-way junction: a hop routes through the shared node', () {
     final g = RoadGraph.build([
       way(1, [
@@ -208,4 +211,59 @@ void main() {
     expect(mergedWidth(20), 12.0); // capped at 3x
   });
 
+}
+
+MergedSeg seg(int mode, double aLat, double aLon, double bLat, double bLon,
+    String route) {
+  final m = LineMerger()
+    ..add(
+      mode: mode,
+      route: route,
+      way: mode,
+      aLat: aLat,
+      aLon: aLon,
+      bLat: bLat,
+      bLon: bLon,
+    );
+  return m.segments.single;
+}
+
+void moreLineTests() {
+  test('consecutive segments of the same routes chain into one line', () {
+    final m = LineMerger();
+    for (var i = 0; i < 3; i++) {
+      m.add(
+        mode: RouteType.bus,
+        route: '5',
+        way: 1,
+        aLat: 45.0 + i * 0.001,
+        aLon: 7.0,
+        bLat: 45.0 + (i + 1) * 0.001,
+        bLon: 7.0,
+      );
+    }
+    final chains = chainSegments(m.segments);
+    expect(chains, hasLength(1));
+    expect(chains.single.pts, hasLength(8)); // 4 points, lat/lon each
+    expect(chains.single.oneDirection, isTrue);
+  });
+
+  test('a shared bus/tram street pushes the two apart, not onto each other',
+      () {
+    final bus = seg(RouteType.bus, 45.0, 7.0, 45.0, 7.001, '55');
+    final tram = seg(RouteType.tram, 45.00002, 7.0, 45.00002, 7.001, '4');
+    final before = (bus.aLat - tram.aLat).abs();
+    offsetSharedBusTram([bus, tram]);
+    final after = (bus.aLat - tram.aLat).abs();
+    expect(after, greaterThan(before));
+    expect(after * 111320, closeTo(2 * sharedShiftMetres, 2.5));
+  });
+
+  test('a bus street with no tram beside it is not offset', () {
+    final bus = seg(RouteType.bus, 45.0, 7.0, 45.0, 7.001, '55');
+    final tram = seg(RouteType.tram, 45.01, 7.0, 45.01, 7.001, '4');
+    final lat = bus.aLat;
+    offsetSharedBusTram([bus, tram]);
+    expect(bus.aLat, lat);
+  });
 }

@@ -4,10 +4,13 @@
 ///     dart tool/build_lines.dart [--force-osm] [--reverse] [--zip path]
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:piedemove/data/gtfs_zip.dart';
 import 'package:piedemove/data/index_io.dart';
+import 'package:piedemove/data/transit_index.dart';
+import 'package:piedemove/geo/ambient.dart';
 import 'package:piedemove/geo/line_build.dart';
 import 'package:piedemove/geo/lines_io.dart';
 import 'package:piedemove/geo/osm_fetch.dart';
@@ -26,6 +29,17 @@ Future<void> main(List<String> args) async {
     exit(1);
   }
   stdout.writeln('index ${ix.patternCount} patterns, feed ${ix.feedVersion}');
+
+  // Re-pack the phone assets from an existing lines.bin, no Overpass, no snap.
+  if (args.contains('--assets-only')) {
+    final net = await readLinesFile(linesPath, feedVersion: ix.feedVersion);
+    if (net == null) {
+      stderr.writeln('no usable $linesPath for --assets-only');
+      exit(1);
+    }
+    await writeAssets(ix, net);
+    return;
+  }
 
   // Two fetchers (Overpass allows two slots per IP) halve the wall time: run
   // a second process with --reverse, it skips whatever the first has cached.
@@ -66,6 +80,7 @@ Future<void> main(List<String> args) async {
     log: (m) => stdout.writeln('  $m'),
   );
   await writeLinesFile(net, linesPath);
+  await writeAssets(ix, net);
 
   var hops = 0, chords = 0;
   for (final p in net.patterns) {
@@ -77,4 +92,20 @@ patterns   ${net.patterns.length}
 hops       $hops, chorded $chords (${(100 * chords / (hops == 0 ? 1 : hops)).toStringAsFixed(1)}%)
 lines.bin  ${(File(linesPath).lengthSync() / 1e6).toStringAsFixed(1)} MB
 built in   ${DateTime.now().difference(started).inSeconds}s''');
+}
+
+/// Ships the phone's two line assets: the snapped patterns (focus mode needs
+/// per-pattern geometry) and the pre-merged ambient network (§9.4).
+Future<void> writeAssets(TransitIndex ix, LineNetwork net) async {
+  Directory('assets').createSync(recursive: true);
+  final lines = File('assets/lines.bin.gz');
+  lines.writeAsBytesSync(gzip.encode(File(linesPath).readAsBytesSync()));
+  final ambient = File('assets/ambient.json.gz');
+  ambient.writeAsBytesSync(gzip.encode(utf8.encode(ambientGeoJson(ix, net))));
+  final connectors = File('assets/connectors.json.gz');
+  connectors.writeAsBytesSync(gzip.encode(utf8.encode(connectorsGeoJson(ix, net))));
+  stdout.writeln('assets     lines.bin.gz '
+      '${(lines.lengthSync() / 1e6).toStringAsFixed(1)} MB, ambient.json.gz '
+      '${(ambient.lengthSync() / 1e6).toStringAsFixed(1)} MB, connectors.json.gz '
+      '${(connectors.lengthSync() / 1e6).toStringAsFixed(1)} MB');
 }

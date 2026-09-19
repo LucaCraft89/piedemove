@@ -11,7 +11,7 @@ import 'dart:typed_data';
 
 import 'distance.dart';
 
-enum GraphMode { bus, tram }
+enum GraphMode { bus, tram, foot }
 
 class OsmWay {
   OsmWay(this.id, this.tags, this.lat, this.lon);
@@ -72,6 +72,7 @@ bool _busAllowed(Map<String, String> tags) {
 /// Whether a way belongs to [mode]'s graph at all.
 bool wayInMode(OsmWay w, GraphMode mode) {
   if (mode == GraphMode.tram) return w.tags['railway'] == 'tram';
+  if (mode == GraphMode.foot) return _footAllowed(w.tags);
   if (w.tags['railway'] == 'tram' && w.tags['highway'] == null) return false;
   final hw = w.tags['highway'];
   if (hw == null || !_drivableHighways.contains(hw)) return false;
@@ -82,8 +83,21 @@ bool wayInMode(OsmWay w, GraphMode mode) {
   return _busAllowed(w.tags);
 }
 
+/// On foot: anything with a highway tag except the roads that forbid walking.
+bool _footAllowed(Map<String, String> tags) {
+  final hw = tags['highway'];
+  if (hw == null) return false;
+  const never = {'motorway', 'motorway_link', 'trunk', 'trunk_link'};
+  if (never.contains(hw)) return false;
+  final foot = tags['foot'];
+  if (foot != null) return !const {'no', 'private'}.contains(foot);
+  final access = tags['access'];
+  return access == null || !const {'no', 'private'}.contains(access);
+}
+
 /// (forward, backward) travel allowed along the way's own point order.
 (bool, bool) wayDirections(OsmWay w, GraphMode mode) {
+  if (mode == GraphMode.foot) return (true, true); // oneway is for vehicles
   final oneway = w.tags['oneway'];
   final junction = w.tags['junction'];
   var forward = true;

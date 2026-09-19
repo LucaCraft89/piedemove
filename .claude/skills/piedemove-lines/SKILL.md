@@ -41,8 +41,15 @@ affects routing. Copy nothing from `../piemove-maps`. High-effort work.
 ## Build
 
     dart tool/build_lines.dart [--force-osm] [--reverse]   # -> build/lines.bin
+    dart tool/build_lines.dart --assets-only               # -> assets/*.gz only
     dart tool/lines_report.dart [--full]                   # 9.12 validation
     dart tool/gate1_samples.dart                           # GATE 2 sample spots
+
+The phone ships three gzipped assets, all written by the same tool and keyed
+to the feed: `assets/ambient.json.gz` (the merged network, pre-built because
+merging costs hundreds of MB of transient objects), `assets/connectors.json.gz`
+and `assets/lines.bin.gz` (pattern geometry, loaded only when focus mode needs
+it). A stale or missing asset costs the map its lines and nothing else.
 
 Tiles are cached gzipped in `build/osm/`. Two processes (the second with
 `--reverse`) halve the fetch: Overpass gives an IP two slots. Current state:
@@ -135,6 +142,9 @@ Per mode, from the snapped patterns:
 
 ## 9.5 Bus + tram on one street
 
+Implemented at build time in `offsetSharedBusTram`: the shift is baked into
+the geometry in metres (3 m each way), not applied as a pixel `line-offset`.
+
 Tram tracks are separate OSM ways, so identity cannot merge them. One narrow
 documented exception: where a tram segment and a bus segment are **within 12 m
 and within 15° of parallel**, draw two parallel strokes offset
@@ -174,6 +184,11 @@ and stops are absent, not dimmed**.
 
 ## 9.10 Walking lines
 
+`lib/geo/walk_path.dart`: one Overpass call over the leg bbox, a
+`GraphMode.foot` graph over the answer, one Dijkstra, cached for the session;
+any failure leaves the straight dotted line. The displayed walk distance always
+carries the "≈" marker (`metresLabel(..., approximate: true)`).
+
 Dotted, round caps, white casing, ~5 px, coloured by a 3-tier distance scale
 (<=150 m, <=400 m, >400 m). Tier colours must differ from every mode colour and
 hold >= 3:1 contrast on both light and dark basemaps. Geometry: after a journey
@@ -208,3 +223,9 @@ Device check: a scripted tour of fixed viewports — a corso with dual
 carriageways, a shared bus/tram street, the Peschiera/Racconigi corridor, a loop
 route's turnaround, the city centre at z12/z14/z16 — inspected for gaps,
 off-road segments, doubled lines, missing lines, wrong colours, wrong lane.
+
+## Lessons (continued)
+
+11. `queryRenderedFeaturesInRect` hands the feature id back as a **String** on
+   Android and a num elsewhere; casting to `num?` threw and swallowed every
+   segment tap. Parse either.

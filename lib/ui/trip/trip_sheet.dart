@@ -311,7 +311,7 @@ class _WalkChip extends StatelessWidget {
             Icon(Icons.directions_walk, size: 14, color: color),
             const SizedBox(width: 4),
             Text(
-              metresLabel(metres),
+              metresLabel(metres, approximate: true),
               style: TextStyle(color: color, fontWeight: FontWeight.w700),
             ),
           ],
@@ -378,7 +378,7 @@ class _LegChain extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.directions_walk, size: 16, color: color),
-            Text(metresLabel(leg.walkMetres),
+            Text(metresLabel(leg.walkMetres, approximate: true),
                 style: TextStyle(color: color, fontWeight: FontWeight.w700)),
           ],
         ));
@@ -515,7 +515,7 @@ class _WalkStep extends ConsumerWidget {
       leading: Icon(Icons.directions_walk, color: color),
       title: Text(
         '${transfer ? 'Cambio' : 'A piedi'} '
-        '${metresLabel(leg.walkMetres)} · '
+        '${metresLabel(leg.walkMetres, approximate: true)} · '
         '${durationLabel(leg.arrival - leg.departure)}',
         style: TextStyle(color: color, fontWeight: FontWeight.w700),
       ),

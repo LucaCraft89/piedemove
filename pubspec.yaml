@@ -67,6 +67,11 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  assets:
+    - assets/ambient.json.gz
+    - assets/connectors.json.gz
+    - assets/lines.bin.gz
+
   fonts:
     - family: Google Sans Flex
       fonts:

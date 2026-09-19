@@ -4,6 +4,7 @@
 /// chip, it never blanks the map (see CLAUDE.md, "Isolate failures").
 library;
 
+import 'dart:async' show unawaited;
 import 'dart:math' show Point;
 
 import 'package:flutter/material.dart';
@@ -11,18 +12,31 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 
 import 'package:piedemove/data/providers.dart';
+import 'package:piedemove/geo/line_providers.dart';
 import 'package:piedemove/places/photon.dart';
 import 'package:piedemove/places/saved.dart';
+import 'package:piedemove/data/transit_index.dart';
+import 'package:piedemove/geo/lines_io.dart';
+import 'package:piedemove/geo/walk_path.dart';
 import 'package:piedemove/realtime/gtfs_rt.dart';
 import 'package:piedemove/realtime/store.dart';
+import 'package:piedemove/routing/journey.dart';
+import 'package:piedemove/ui/nav/entity.dart';
+import 'package:piedemove/ui/sheets/line_picker.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
 
+import 'line_features.dart';
+import 'map_focus.dart';
 import 'stop_features.dart';
 import 'vehicle_features.dart';
 
 /// Turin, Porta Nuova.
 const turin = LatLng(45.0625, 7.6785);
 const _stopsSource = 'pm-stops';
+const _linesSource = 'pm-lines';
+const _connectorsSource = 'pm-connectors';
+const _focusStopsSource = 'pm-focus-stops';
+const _walkSource = 'pm-walk';
 const _vehiclesSource = 'pm-vehicles';
 
 /// Vehicles appear from z12 (§10.1).
@@ -36,6 +50,10 @@ final mapStatusProvider = StateProvider<String?>((_) => null);
 
 /// The "Veicoli" pill; off hides the layer without stopping the feed.
 final vehiclesVisibleProvider = StateProvider<bool>((_) => true);
+
+/// Routes a segment tap offered for picking; they draw thicker while the
+/// picker is open (§9.8).
+final linePickerProvider = StateProvider<List<int>>((_) => const []);
 
 final mapControllerProvider = StateProvider<MapLibreMapController?>((_) => null);
 
@@ -64,8 +82,21 @@ class _MapViewState extends ConsumerState<MapView> {
   /// Feature id -> vehicle id, in the order the collection was built.
   final _vehicleIds = <String>[];
 
+  bool _linesAdded = false;
+
   /// The place currently pinned by search, as last drawn.
   Place? _pinned;
+
+  /// Focus last drawn, so a rebuild with the same focus costs nothing.
+  MapFocus? _focus;
+  bool _focusDrawn = false;
+  List<int> _highlighted = const [];
+
+  /// The focus the camera was last moved for: a redraw must not re-fit.
+  MapFocus? _fitted;
+
+  /// Walked geometry per leg index, once §9.10 has fetched it.
+  final _walkPaths = <int, List<List<double>>>{};
 
   @override
   Widget build(BuildContext context) {
@@ -82,6 +113,24 @@ class _MapViewState extends ConsumerState<MapView> {
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => _updateVehicles(showVehicles ? vehicles.values : const []),
       );
+    }
+
+    final ambient = ref.watch(ambientLinesProvider).valueOrNull;
+    if (_styleReady && ambient != null && !_linesAdded) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _addLines(ambient));
+    }
+
+    final focus = ref.watch(mapFocusProvider);
+    // The pattern geometry asset is only loaded once something is focused.
+    final net = focus == null ? null : ref.watch(lineNetworkProvider).valueOrNull;
+    if (_styleReady && _linesAdded && (focus != _focus || !_focusDrawn)) {
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _applyFocus(focus, net, ambient));
+    }
+
+    final picked = ref.watch(linePickerProvider);
+    if (_styleReady && _linesAdded) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _highlight(picked));
     }
 
     final place = ref.watch(selectedPlaceProvider);
@@ -106,11 +155,15 @@ class _MapViewState extends ConsumerState<MapView> {
           (_) => ref.read(mapControllerProvider.notifier).state = c,
         );
       },
+      onMapClick: (point, _) => _onMapClick(point),
       onStyleLoadedCallback: () {
         _styleReady = true;
         _stopsAdded = false;
         _vehiclesAdded = false;
+        _linesAdded = false;
+        _focusDrawn = false;
         _pinned = null;
+        _addLines(ref.read(ambientLinesProvider).valueOrNull);
         _addStops();
       },
     );
@@ -141,6 +194,413 @@ class _MapViewState extends ConsumerState<MapView> {
     }
     final stop = int.tryParse(id);
     if (stop != null) widget.onStopTap?.call(stop);
+  }
+
+
+  /// Ambient network, connectors, focus stops and walking legs (§9.4-§9.10).
+  /// Added below the stop layers, so a stop dot is never buried under a line.
+  Future<void> _addLines(Map<String, dynamic>? ambient) async {
+    final controller = _controller;
+    if (controller == null || ambient == null || !_styleReady) return;
+    // Read the theme before any await: the context may be gone afterwards.
+    final tokens = Theme.of(context).brightness == Brightness.dark
+        ? PmTokens.darkTokens
+        : PmTokens.lightTokens;
+    final surface = Theme.of(context).colorScheme.surface;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final below = _stopsAdded ? 'pm-stop-clusters' : null;
+    final empty = <String, dynamic>{'type': 'FeatureCollection', 'features': []};
+
+    if (_linesAdded) {
+      try {
+        await controller.setGeoJsonSource(_linesSource, ambient);
+        return;
+      } catch (_) {
+        _linesAdded = false;
+      }
+    }
+
+    _linesAdded = true;
+    try {
+      await controller.addSource(
+        _linesSource,
+        GeojsonSourceProperties(data: ambient),
+      );
+      await controller.addLineLayer(
+        _linesSource,
+        'pm-line-casing',
+        LineLayerProperties(
+          lineColor: _hex(surface),
+          lineWidth: ['+', ambientWidth, 2.0],
+          lineOpacity: ['*', tierOpacity, 0.8],
+          lineCap: 'round',
+          lineJoin: 'round',
+        ),
+        belowLayerId: below,
+        enableInteraction: false,
+      );
+      await controller.addLineLayer(
+        _linesSource,
+        'pm-lines',
+        LineLayerProperties(
+          lineColor: ambientColor(tokens.modes),
+          // A journey's context line stays thin; everything else is ambient.
+          lineWidth: [
+            'case',
+            ['==', ['get', 'ridden'], 0], 1.6,
+            ambientWidth,
+          ],
+          lineOpacity: tierOpacity,
+          lineCap: 'round',
+          lineJoin: 'round',
+        ),
+        belowLayerId: below,
+        enableInteraction: false,
+      );
+      // Picker candidates (§9.8): same source, thicker, filtered to the tap.
+      await controller.addLineLayer(
+        _linesSource,
+        'pm-line-picked',
+        LineLayerProperties(
+          lineColor: ambientColor(tokens.modes),
+          lineWidth: ['+', ambientWidth, 4.0],
+          lineOpacity: 0.9,
+          lineCap: 'round',
+        ),
+        belowLayerId: below,
+        filter: ['in', r'$id', -1],
+        enableInteraction: false,
+      );
+      // Arrows only where the segment is used in exactly one direction (§9.6).
+      await controller.addSymbolLayer(
+        _linesSource,
+        'pm-line-arrows',
+        SymbolLayerProperties(
+          textField: '›',
+          textFont: const ['Noto Sans Regular'],
+          textSize: 16,
+          textColor: _hex(onSurface),
+          textHaloColor: _hex(surface),
+          textHaloWidth: 1.0,
+          textAllowOverlap: true,
+          textIgnorePlacement: true,
+          symbolPlacement: 'line',
+          symbolSpacing: 90,
+          textKeepUpright: false,
+        ),
+        belowLayerId: below,
+        filter: ['==', ['get', 'arrow'], 1],
+        minzoom: tier2MinZoom,
+        enableInteraction: false,
+      );
+    } catch (e) {
+      debugPrint('pm: layer linee failed: $e');
+      _linesAdded = false;
+      if (mounted) {
+        ref.read(mapStatusProvider.notifier).state = 'Linee non disponibili';
+      }
+      return;
+    }
+
+    // Everything below is optional dressing: its own try/catch each.
+    try {
+      final connectors =
+          await ref.read(stopConnectorsProvider.future) ?? empty;
+      await controller.addSource(
+        _connectorsSource,
+        GeojsonSourceProperties(data: connectors),
+      );
+      await controller.addLineLayer(
+        _connectorsSource,
+        'pm-stop-connectors',
+        LineLayerProperties(
+          lineColor: _hex(onSurface),
+          lineOpacity: 0.5,
+          lineWidth: 1.2,
+          lineDasharray: const [2.0, 2.0],
+        ),
+        belowLayerId: below,
+        minzoom: poleMinZoom,
+        enableInteraction: false,
+      );
+    } catch (e) {
+      debugPrint('pm: layer raccordi failed: $e');
+    }
+
+    try {
+      await controller.addSource(
+        _walkSource,
+        GeojsonSourceProperties(data: empty),
+      );
+      await controller.addLineLayer(
+        _walkSource,
+        'pm-walk-lines',
+        LineLayerProperties(
+          lineColor: walkColor(tokens.walk),
+          lineWidth: 5.0,
+          lineCap: 'round',
+          lineDasharray: const [0.1, 1.8],
+        ),
+        enableInteraction: false,
+      );
+    } catch (e) {
+      debugPrint('pm: layer piedi failed: $e');
+    }
+
+    try {
+      await controller.addSource(
+        _focusStopsSource,
+        GeojsonSourceProperties(data: empty),
+      );
+      await controller.addCircleLayer(
+        _focusStopsSource,
+        'pm-focus-stop-dots',
+        CircleLayerProperties(
+          circleColor: modeColor(tokens.modes),
+          circleRadius: ['case', ['==', ['get', 'big'], 1], 7.0, 3.5],
+          circleStrokeColor: _hex(surface),
+          circleStrokeWidth: 2.0,
+        ),
+      );
+      await controller.addSymbolLayer(
+        _focusStopsSource,
+        'pm-focus-stop-labels',
+        SymbolLayerProperties(
+          textField: ['get', 'name'],
+          textFont: const ['Noto Sans Regular'],
+          textSize: 11,
+          textOffset: const [0, 1.2],
+          textAnchor: 'top',
+          textColor: _hex(onSurface),
+          textHaloColor: _hex(surface),
+          textHaloWidth: 1.4,
+        ),
+        filter: ['==', ['get', 'big'], 1],
+        enableInteraction: false,
+      );
+    } catch (e) {
+      debugPrint('pm: layer fermate percorso failed: $e');
+    }
+  }
+
+  /// Focus rebuilds the sources so unrelated lines and stops are **absent**,
+  /// never dimmed (§9.9). Clearing focus puts the ambient network back.
+  Future<void> _applyFocus(
+    MapFocus? focus,
+    LineNetwork? net,
+    Map<String, dynamic>? ambient,
+  ) async {
+    final controller = _controller;
+    final ix = ref.read(transitIndexProvider).valueOrNull;
+    if (controller == null || !_styleReady || !_linesAdded || ix == null) return;
+    // A focus whose geometry has not landed yet redraws when it does.
+    if (focus != null && net == null) return;
+    if (focus != _focus) _walkPaths.clear(); // leg indices are per journey
+    final wasFitted = _fitted;
+    _fitted = focus;
+    _focus = focus;
+    _focusDrawn = true;
+    final empty = <String, dynamic>{'type': 'FeatureCollection', 'features': []};
+
+    try {
+      switch (focus) {
+        case null:
+          await controller.setGeoJsonSource(_linesSource, ambient ?? empty);
+          await controller.setGeoJsonSource(_focusStopsSource, empty);
+          await controller.setGeoJsonSource(_walkSource, empty);
+          await controller.setLayerVisibility('pm-stop-poles', true);
+          await controller.setLayerVisibility('pm-stop-labels', true);
+          await controller.setLayerVisibility('pm-stop-clusters', true);
+          await controller.setLayerVisibility('pm-stop-cluster-count', true);
+        case RouteFocus(:final route):
+          final lines = routeFocusLines(ix, net!, route);
+          await controller.setGeoJsonSource(_linesSource, lines);
+          if (focus != wasFitted) await _fitTo(controller, lines);
+          await controller.setGeoJsonSource(
+              _focusStopsSource, routeFocusStops(ix, route));
+          await controller.setGeoJsonSource(_walkSource, empty);
+          await _hideAmbientStops(controller);
+        case JourneyFocus(:final journey):
+          final lines = journeyFocusLines(ix, net!, journey);
+          await controller.setGeoJsonSource(_linesSource, lines);
+          if (focus != wasFitted) {
+            await _fitTo(controller, journeyFocusStops(ix, journey));
+          }
+          await controller.setGeoJsonSource(
+              _focusStopsSource, journeyFocusStops(ix, journey));
+          final place = ref.read(selectedPlaceProvider);
+          await controller.setGeoJsonSource(
+            _walkSource,
+            walkFeatures(
+              ix,
+              journey,
+              path: (leg) => _walkPaths[leg],
+              destLat: place?.lat,
+              destLon: place?.lon,
+            ),
+          );
+          await _hideAmbientStops(controller);
+          unawaited(_fetchWalkPaths(journey, ix));
+      }
+    } catch (e) {
+      debugPrint('pm: focus failed: $e');
+      _focusDrawn = false;
+    }
+  }
+
+  /// Walks the real streets for each walk leg (§9.10), then redraws. Failure
+  /// is normal — the leg simply stays a straight dotted line marked "≈".
+  Future<void> _fetchWalkPaths(Journey journey, TransitIndex ix) async {
+    final place = ref.read(selectedPlaceProvider);
+    var found = false;
+    for (var i = 0; i < journey.legs.length; i++) {
+      final leg = journey.legs[i];
+      if (leg.kind != LegKind.walk || _walkPaths.containsKey(i)) continue;
+      final a = leg.fromStop >= 0
+          ? (ix.stopLat[leg.fromStop], ix.stopLon[leg.fromStop])
+          : null;
+      final b = leg.toStop >= 0
+          ? (ix.stopLat[leg.toStop], ix.stopLon[leg.toStop])
+          : (place == null ? null : (place.lat, place.lon));
+      if (a == null || b == null) continue;
+      final path = await walkPath(a.$1, a.$2, b.$1, b.$2);
+      if (path == null) continue;
+      _walkPaths[i] = path;
+      found = true;
+    }
+    if (!found || !mounted) return;
+    final controller = _controller;
+    if (controller == null) return;
+    try {
+      await controller.setGeoJsonSource(
+        _walkSource,
+        walkFeatures(ix, journey,
+            path: (leg) => _walkPaths[leg],
+            destLat: place?.lat,
+            destLon: place?.lon),
+      );
+    } catch (e) {
+      debugPrint('pm: walk path redraw failed: $e');
+    }
+  }
+
+  /// Brings the focused route or journey into view; without it the map keeps
+  /// whatever viewport it had and the selection is off screen.
+  Future<void> _fitTo(
+    MapLibreMapController controller,
+    Map<String, dynamic> collection,
+  ) async {
+    var minLat = 90.0, maxLat = -90.0, minLon = 180.0, maxLon = -180.0;
+    for (final f in collection['features'] as List) {
+      final coords = f['geometry']['coordinates'] as List;
+      // Point geometry is one pair; a LineString is a list of them.
+      final pairs = coords.first is List ? coords.cast<List>() : [coords];
+      for (final c in pairs) {
+        final lon = (c[0] as num).toDouble(), lat = (c[1] as num).toDouble();
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+        if (lon < minLon) minLon = lon;
+        if (lon > maxLon) maxLon = lon;
+      }
+    }
+    if (minLat > maxLat) return;
+    try {
+      await controller.animateCamera(
+        CameraUpdate.newLatLngBounds(
+          LatLngBounds(
+            southwest: LatLng(minLat, minLon),
+            northeast: LatLng(maxLat, maxLon),
+          ),
+          left: 40,
+          right: 40,
+          top: 160,
+          // The sheet covers the lower half of the screen.
+          bottom: 360,
+        ),
+      );
+    } catch (e) {
+      debugPrint('pm: fit to focus failed: $e');
+    }
+  }
+
+  Future<void> _hideAmbientStops(MapLibreMapController controller) async {
+    for (final layer in const [
+      'pm-stop-poles',
+      'pm-stop-labels',
+      'pm-stop-clusters',
+      'pm-stop-cluster-count',
+    ]) {
+      await controller.setLayerVisibility(layer, false);
+    }
+  }
+
+  /// Thickens the segments a picker is currently offering (§9.8).
+  Future<void> _highlight(List<int> featureIds) async {
+    final controller = _controller;
+    if (controller == null || !_linesAdded) return;
+    if (featureIds.join(',') == _highlighted.join(',')) return;
+    _highlighted = featureIds;
+    try {
+      await controller.setFilter(
+        'pm-line-picked',
+        ['in', r'$id', ...featureIds.isEmpty ? [-1] : featureIds],
+      );
+    } catch (e) {
+      debugPrint('pm: picker highlight failed: $e');
+    }
+  }
+
+  /// A tap on the map away from a stop or vehicle: what line is under it?
+  Future<void> _onMapClick(Point<double> point) async {
+    final controller = _controller;
+    final ix = ref.read(transitIndexProvider).valueOrNull;
+    if (controller == null || ix == null || !_linesAdded) return;
+    const pad = 22.0; // 44 px box (§9.8)
+    List<dynamic> hits;
+    try {
+      hits = await controller.queryRenderedFeaturesInRect(
+        Rect.fromLTRB(
+            point.x - pad, point.y - pad, point.x + pad, point.y + pad),
+        const ['pm-lines'],
+        null,
+      );
+    } catch (e) {
+      debugPrint('pm: query linee failed: $e');
+      return;
+    }
+
+    final routes = <String, int>{}; // short name -> feature id
+    for (final hit in hits) {
+      final props = (hit as Map)['properties'] as Map?;
+      final ids = (props?['routes'] as String?)?.split(',') ?? const [];
+      // The platform hands the feature id back as a num on one side and a
+      // String on the other; take either.
+      final raw = hit['id'];
+      final fid = raw is num ? raw.toInt() : int.tryParse('$raw');
+      for (final r in ids) {
+        if (r.isNotEmpty) routes.putIfAbsent(r, () => fid ?? -1);
+      }
+    }
+    if (routes.isEmpty || !mounted) return;
+
+    final byName = <String, int>{
+      for (var r = 0; r < ix.routeCount; r++) ix.routeShortNames[r]: r,
+    };
+    final picks = [
+      for (final name in routes.keys)
+        if (byName[name] != null) (name, byName[name]!),
+    ]..sort((a, b) => compareRouteNames(a.$1, b.$1));
+    if (picks.isEmpty) return;
+    if (picks.length == 1) {
+      openEntity(context, ref, LineRef(picks.first.$2));
+      return;
+    }
+    showLinePicker(
+      context,
+      ref,
+      picks,
+      featureIds: [for (final r in routes.values) if (r >= 0) r],
+    );
   }
 
   Future<void> _addStops() async {

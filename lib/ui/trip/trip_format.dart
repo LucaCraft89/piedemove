@@ -17,9 +17,15 @@ String durationLabel(int seconds) {
   return '${minutes ~/ 60} h ${(minutes % 60).toString().padLeft(2, '0')}';
 }
 
-String metresLabel(double metres) => metres < 950
-    ? '${metres.round()} m'
-    : '${(metres / 1000).toStringAsFixed(1)} km';
+/// Walking distances are the footpath generator's estimate, not a measured
+/// path, so they carry the "approximate" marker until §9.10 has walked the
+/// real streets for that leg.
+String metresLabel(double metres, {bool approximate = false}) {
+  final value = metres < 950
+      ? '${metres.round()} m'
+      : '${(metres / 1000).toStringAsFixed(1)} km';
+  return approximate ? '≈ $value' : value;
+}
 
 /// The live countdown on a card: `parte ora`, `parte tra 4 min`, `partito`.
 String leavesInLabel(DateTime departure, DateTime now) {
