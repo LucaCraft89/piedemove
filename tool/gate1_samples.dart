@@ -17,6 +17,7 @@ import 'dart:math' as math;
 
 import 'package:piedemove/data/index_io.dart';
 import 'package:piedemove/data/transit_index.dart';
+import 'package:piedemove/geo/line_merge.dart';
 import 'package:piedemove/geo/lines_io.dart';
 
 /// The three spots the gate asks for, each a 600 m box.
@@ -45,14 +46,6 @@ String colourOfMode(int routeType) => switch (routeType) {
   _ => busColour,
 };
 
-class Seg {
-  Seg(this.aLat, this.aLon, this.bLat, this.bLon, this.mode);
-  final double aLat, aLon, bLat, bLon;
-  final int mode;
-  final Set<String> routes = {};
-  final Set<int> dirs = {};
-}
-
 Future<void> main(List<String> args) async {
   final ix = await readIndexFile('build/index.bin');
   final net = await readLinesFile('build/lines.bin');
@@ -76,7 +69,7 @@ Future<void> main(List<String> args) async {
 }
 
 /// Merge by (mode, way, segment), never by proximity.
-List<Seg> _mergeAround(
+List<MergedSeg> _mergeAround(
   TransitIndex ix,
   LineNetwork net,
   double lat,
@@ -84,39 +77,30 @@ List<Seg> _mergeAround(
 ) {
   final dLat = boxMetres / 2 / 111320;
   final dLon = dLat / math.cos(lat * math.pi / 180);
-  final merged = <String, Seg>{};
+  final merger = LineMerger();
 
   for (final p in net.patterns) {
     final mode = ix.routeTypeOfPattern(p.pattern);
     final name = ix.routeShortNameOfPattern(p.pattern);
     for (var i = 1; i < p.vertexCount; i++) {
-      final way = p.vertexWay[i];
-      if (way < 0) continue; // chord: excluded from the ambient network
       final aLat = p.vertexLat[i - 1] / 1e6, aLon = p.vertexLon[i - 1] / 1e6;
       final bLat = p.vertexLat[i] / 1e6, bLon = p.vertexLon[i] / 1e6;
       if (!_inBox(aLat, aLon, lat, lon, dLat, dLon) &&
           !_inBox(bLat, bLon, lat, lon, dLat, dLon)) {
         continue;
       }
-      // Both directions on one two-way way collapse into one feature, so the
-      // key orders the endpoints; the direction set keeps what was used.
-      final forward = (aLat < bLat) || (aLat == bLat && aLon <= bLon);
-      final key = '$mode/$way/'
-          '${forward ? '$aLat,$aLon,$bLat,$bLon' : '$bLat,$bLon,$aLat,$aLon'}';
-      final seg = merged.putIfAbsent(
-        key,
-        () => forward
-            ? Seg(aLat, aLon, bLat, bLon, mode)
-            : Seg(bLat, bLon, aLat, aLon, mode),
+      merger.add(
+        mode: mode,
+        route: name,
+        way: p.vertexWay[i],
+        aLat: aLat,
+        aLon: aLon,
+        bLat: bLat,
+        bLon: bLon,
       );
-      seg.routes.add(name);
-      seg.dirs.add(forward ? 0 : 1);
     }
   }
-  final segs = merged.values.toList();
-  // Tram over bus: the shared-street exception draws both, tram on top.
-  segs.sort((a, b) => a.mode.compareTo(b.mode));
-  return segs;
+  return merger.segments;
 }
 
 bool _inBox(
@@ -131,7 +115,7 @@ bool _inBox(
 
 String _svg(
   TransitIndex ix,
-  List<Seg> segs,
+  List<MergedSeg> segs,
   String title,
   double cLat,
   double cLon,
@@ -155,8 +139,7 @@ String _svg(
   // Casings first, then the lines: one pass each, so no casing sits on a line.
   for (final pass in [0, 1]) {
     for (final seg in segs) {
-      final n = seg.routes.length;
-      final w = 4.0 * math.min(1 + 0.4 * (n - 1), 3.0);
+      final w = mergedWidth(seg.routes.length);
       final colour = pass == 0 ? casing : colourOfMode(seg.mode);
       final width = pass == 0 ? w + 3 : w;
       // §9.5: a tram and a bus on the same street are separate OSM ways, so
@@ -167,7 +150,7 @@ String _svg(
         math.pow(x(seg.bLon) - x(seg.aLon), 2) +
             math.pow(y(seg.bLat) - y(seg.aLat), 2),
       );
-      final marker = pass == 1 && seg.dirs.length == 1 && px > 45
+      final marker = pass == 1 && seg.oneDirection && px > 45
           ? ' marker-end="url(#chev)"'
           : '';
       b.writeln('<line x1="${x(seg.aLon).toStringAsFixed(1)}" '

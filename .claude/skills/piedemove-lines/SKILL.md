@@ -42,6 +42,7 @@ affects routing. Copy nothing from `../piemove-maps`. High-effort work.
 
     dart tool/build_lines.dart [--force-osm] [--reverse]   # -> build/lines.bin
     dart tool/lines_report.dart [--full]                   # 9.12 validation
+    dart tool/gate1_samples.dart                           # GATE 2 sample spots
 
 Tiles are cached gzipped in `build/osm/`. Two processes (the second with
 `--reverse`) halve the fetch: Overpass gives an IP two slots. Current state:
@@ -196,10 +197,12 @@ colour. Walk legs split the same way.
 hops chorded, hops off-shape, edges violating a oneway, vertices more than 8 m
 from any graph edge (chords excluded).
 
-Unit tests on synthetic graphs: a two-way junction; a oneway pair where
-directions 0 and 1 take different edges; a loop route where a shared stop
-appears twice (index slicing takes the right pass); a same-way merge of three
-routes giving `n = 3` with width capped at 3x.
+Unit tests on synthetic graphs (`test/lines_unit_test.dart`), all green: a
+two-way junction; a oneway pair where directions 0 and 1 take different edges;
+a loop route where a shared stop appears twice (index slicing takes the right
+pass); a same-way merge of three routes giving `n = 3` with width capped at 3x
+(`lib/geo/line_merge.dart`, shared by `tool/gate1_samples.dart` and, from 9.4,
+by the app layer).
 
 Device check: a scripted tour of fixed viewports — a corso with dual
 carriageways, a shared bus/tram street, the Peschiera/Racconigi corridor, a loop

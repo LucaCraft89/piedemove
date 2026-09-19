@@ -1,7 +1,9 @@
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:piedemove/data/transit_index.dart';
 import 'package:piedemove/geo/line_build.dart';
+import 'package:piedemove/geo/line_merge.dart';
 import 'package:piedemove/geo/lines_io.dart';
 import 'package:piedemove/geo/pattern_snap.dart';
 import 'package:piedemove/geo/road_graph.dart';
@@ -151,4 +153,59 @@ void main() {
     expect(p.stopVertex, [0, 1]);
     expect(p.vertexWay.every((w) => w == -1), isTrue);
   });
+
+  test('same-way merge: three routes give n = 3, width capped at 3x', () {
+    final m = LineMerger();
+    for (final route in ['4', '10', '55']) {
+      m.add(
+        mode: RouteType.bus,
+        route: route,
+        way: 77,
+        aLat: 45.07,
+        aLon: 7.66,
+        bLat: 45.071,
+        bLon: 7.661,
+      );
+    }
+    // The reverse direction of the same way collapses into the same segment.
+    m.add(
+      mode: RouteType.bus,
+      route: '4',
+      way: 77,
+      aLat: 45.071,
+      aLon: 7.661,
+      bLat: 45.07,
+      bLon: 7.66,
+    );
+    // A tram on the same street is another way: its own segment.
+    m.add(
+      mode: RouteType.tram,
+      route: '13',
+      way: 78,
+      aLat: 45.07,
+      aLon: 7.66,
+      bLat: 45.071,
+      bLon: 7.661,
+    );
+    // A chord (way < 0) is not part of the ambient network.
+    m.add(
+      mode: RouteType.bus,
+      route: '9',
+      way: -1,
+      aLat: 45.07,
+      aLon: 7.66,
+      bLat: 45.071,
+      bLon: 7.661,
+    );
+
+    final segs = m.segments;
+    expect(segs.length, 2);
+    final bus = segs.firstWhere((s) => s.mode == RouteType.bus);
+    expect(bus.routes.length, 3);
+    expect(bus.oneDirection, isFalse);
+    expect(mergedWidth(1), 4.0);
+    expect(mergedWidth(3), closeTo(4.0 * 1.8, 1e-9));
+    expect(mergedWidth(20), 12.0); // capped at 3x
+  });
+
 }
