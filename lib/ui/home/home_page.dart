@@ -13,6 +13,7 @@ import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:piedemove/data/index_source.dart';
 import 'package:piedemove/data/providers.dart';
 import 'package:piedemove/location/device_location.dart';
+import 'package:piedemove/location/live_trip.dart';
 import 'package:piedemove/places/photon.dart';
 import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/ui/map/map_view.dart';
@@ -22,6 +23,7 @@ import 'package:piedemove/ui/search/search_page.dart';
 import 'package:piedemove/ui/settings/settings_page.dart';
 import 'package:piedemove/ui/sheets/nearby_sheet.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
+import 'package:piedemove/ui/trip/live_strip.dart';
 import 'package:piedemove/ui/trip/trip_plan.dart';
 import 'package:piedemove/ui/trip/trip_sheet.dart';
 
@@ -59,6 +61,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     final stage = ref.watch(indexStageProvider);
     final stale = ref.watch(realtimeProvider).staleFeeds();
     final trip = ref.watch(tripPlanProvider);
+    final live = ref.watch(liveTripProvider);
     final showTrip =
         !trip.sheetHidden && (trip.planning || trip.result != null);
 
@@ -106,7 +109,10 @@ class _HomePageState extends ConsumerState<HomePage> {
               child: const Icon(Icons.my_location),
             ),
           ),
-          if (showTrip)
+          // A running trip owns the bottom of the screen (§12).
+          if (live != null)
+            const LiveStrip()
+          else if (showTrip)
             const TripSheet()
           else
             NearbySheet(

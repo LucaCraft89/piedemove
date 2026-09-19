@@ -8,8 +8,10 @@ import 'package:flutter/material.dart';
 
 import 'package:piedemove/data/transit_index.dart';
 import 'package:piedemove/geo/ambient.dart';
+import 'package:piedemove/geo/distance.dart';
 import 'package:piedemove/geo/lines_io.dart';
 import 'package:piedemove/geo/pattern_snap.dart';
+import 'package:piedemove/location/live_trip.dart';
 import 'package:piedemove/routing/journey.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
 
@@ -179,14 +181,19 @@ int patternPositionOf(TransitIndex ix, int p, int stop, {int after = 0}) {
 
 /// Focused journey (§9.9): the ridden slice thick, the rest of each pattern
 /// thin context, in the leg's mode colour.
+///
+/// With [live] the ridden slice is split at the rider's progress (§9.11):
+/// `travelled = 1` behind them, `0` ahead. No gradient, and legs already
+/// finished are travelled whole.
 Map<String, dynamic> journeyFocusLines(
   TransitIndex ix,
   LineNetwork net,
-  Journey journey,
-) {
+  Journey journey, {
+  LiveTripState? live,
+}) {
   final out = _emptyCollection();
   var id = 0;
-  for (final leg in journey.legs) {
+  for (final (legIndex, leg) in journey.legs.indexed) {
     if (leg.kind != LegKind.ride || leg.options.isEmpty) continue;
     final option = leg.options.first;
     final geom = net[option.pattern];
@@ -202,7 +209,7 @@ Map<String, dynamic> journeyFocusLines(
     out['features'].add(_line(
       id++,
       _slice(geom, 0, geom.vertexCount - 1),
-      {...props, 'arrow': 0, 'ridden': 0},
+      {...props, 'arrow': 0, 'ridden': 0, 'travelled': 0},
     ));
 
     final from = patternPositionOf(ix, option.pattern, leg.fromStop);
@@ -211,11 +218,28 @@ Map<String, dynamic> journeyFocusLines(
         : patternPositionOf(ix, option.pattern, leg.toStop, after: from + 1);
     if (from < 0 || to < 0) continue;
     // Slice by the stored stop vertex index, never by nearest-vertex search.
-    out['features'].add(_line(
-      id++,
-      _slice(geom, geom.stopVertex[from], geom.stopVertex[to]),
-      {...props, 'arrow': 1, 'ridden': 1},
-    ));
+    final a = geom.stopVertex[from], b = geom.stopVertex[to];
+    final split = live == null
+        ? a
+        : legIndex < live.legIndex
+            ? b
+            : legIndex == live.legIndex
+                ? (a + live.vertex).clamp(a, b)
+                : a;
+    if (split > a) {
+      out['features'].add(_line(
+        id++,
+        _slice(geom, a, split),
+        {...props, 'arrow': 1, 'ridden': 1, 'travelled': 1},
+      ));
+    }
+    if (split < b) {
+      out['features'].add(_line(
+        id++,
+        _slice(geom, split, b),
+        {...props, 'arrow': 1, 'ridden': 1, 'travelled': 0},
+      ));
+    }
   }
   return out;
 }
@@ -262,6 +286,9 @@ Map<String, dynamic> journeyFocusStops(TransitIndex ix, Journey journey) {
 
 /// Walking legs (§9.10). [path] gives the walked geometry when it is known;
 /// without one the leg is a straight line and stays marked approximate.
+///
+/// With [live] a walk leg splits into travelled and ahead like a ride (§9.11),
+/// by the fraction of the leg still to go.
 Map<String, dynamic> walkFeatures(
   TransitIndex ix,
   Journey journey, {
@@ -270,6 +297,7 @@ Map<String, dynamic> walkFeatures(
   double? originLon,
   double? destLat,
   double? destLon,
+  LiveTripState? live,
 }) {
   final out = _emptyCollection();
   for (var i = 0; i < journey.legs.length; i++) {
@@ -283,14 +311,25 @@ Map<String, dynamic> walkFeatures(
         : (destLon == null || destLat == null ? null : [destLon, destLat]);
     if (a == null || b == null) continue;
     final walked = path(i);
-    out['features'].add(_line(
-      i,
-      walked ?? [a, b],
-      {
-        'metres': leg.walkMetres.round(),
-        'approx': walked == null ? 1 : 0,
-      },
-    ));
+    final points = walked ?? [a, b];
+    final props = {
+      'metres': leg.walkMetres.round(),
+      'approx': walked == null ? 1 : 0,
+    };
+    final done = live == null
+        ? 0.0
+        : i < live.legIndex
+            ? 1.0
+            : i == live.legIndex && leg.walkMetres > 0
+                ? (1 - live.metresToEnd / leg.walkMetres).clamp(0.0, 1.0)
+                : 0.0;
+    for (final (part, travelled) in splitWalk(points, done)) {
+      out['features'].add(_line(
+        i * 2 + travelled,
+        part,
+        {...props, 'travelled': travelled},
+      ));
+    }
   }
   return out;
 }
@@ -302,3 +341,33 @@ List<Object> walkColor(WalkColors walk) => [
       ['<=', ['get', 'metres'], 400], hexOf(walk.medium),
       hexOf(walk.long),
     ];
+
+/// Splits [points] at [done] (0..1 of its length) into the travelled part and
+/// the part ahead. Either side may be absent; each comes with its flag.
+List<(List<List<double>>, int)> splitWalk(
+  List<List<double>> points,
+  double done,
+) {
+  if (points.length < 2 || done <= 0) return [(points, 0)];
+  if (done >= 1) return [(points, 1)];
+  var total = 0.0;
+  final steps = <double>[];
+  for (var i = 1; i < points.length; i++) {
+    final d = haversineMetres(
+        points[i - 1][1], points[i - 1][0], points[i][1], points[i][0]);
+    steps.add(d);
+    total += d;
+  }
+  if (total <= 0) return [(points, 0)];
+  var target = total * done;
+  var cut = 0;
+  for (var i = 0; i < steps.length && target > steps[i]; i++) {
+    target -= steps[i];
+    cut = i + 1;
+  }
+  if (cut == 0) return [(points, 0)];
+  return [
+    (points.sublist(0, cut + 1), 1),
+    (points.sublist(cut), 0),
+  ];
+}

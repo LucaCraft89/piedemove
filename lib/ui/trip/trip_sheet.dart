@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:piedemove/data/providers.dart';
 import 'package:piedemove/data/transit_index.dart';
+import 'package:piedemove/location/live_trip.dart';
 import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/routing/journey.dart';
 import 'package:piedemove/routing/providers.dart';
@@ -469,9 +470,9 @@ class _Detail extends ConsumerWidget {
             ),
             const SizedBox(width: Gap.element),
             Expanded(
-              // Live trip is phase 7: it needs a real ride to verify.
               child: FilledButton.icon(
-                onPressed: null,
+                onPressed: () =>
+                    ref.read(liveTripProvider.notifier).start(journey),
                 icon: const Icon(Icons.play_arrow),
                 label: const Text('Avvia'),
               ),

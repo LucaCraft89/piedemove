@@ -66,5 +66,25 @@ app is resumed, cancelled on pause, re-synced on resume. Screen kept awake with
   `piedemove-lines` §9.11).
 - Leave a comment where sensor fusion would go: none is done.
 
+### As built (phase 7)
+
+`lib/location/live_trip.dart` holds the rules as pure functions —
+`buildLiveRoute`, `advanceLive`, `staleLive`, `nextLeg` — with
+`LiveTripController` wiring geolocator, `HapticFeedback.vibrate()` and
+`wakelock_plus` around them. Thresholds are the constants at the top of that
+file. The strip is `lib/ui/trip/live_strip.dart`; home swaps it in for the trip
+sheet while a trip runs. The travelled/ahead split is `travelled = 1/0` in
+`journeyFocusLines` / `walkFeatures`, painted at 0.4 opacity in `map_view`;
+`test/live_trip_test.dart` pins the progress rules on a synthetic line.
+
+Progress is vertex-granular on the snapped polyline, and no sensor fusion is
+done — both marked `ponytail:` in the source.
+
 Phase 7 needs a real walk + bus ride. **State clearly which parts were verified
 on the road and which only by code.**
+
+Verified stationary on 2026-09-19 (db4ae341): Avvia starts the trip, the strip
+replaces the sheet, the ride leg reads "Scendi a TRAPANI tra 6 fermate" with
+"posizione stimata" on a poor indoor fix, and the manual button and close work.
+**Not yet on the road**: boarding detection, the two alight vibrations, the
+off-route banner, the metro/tunnel fallback, travelled-vs-ahead as it moves.

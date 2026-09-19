@@ -20,6 +20,7 @@ import 'package:piedemove/geo/lines_io.dart';
 import 'package:piedemove/geo/walk_path.dart';
 import 'package:piedemove/realtime/gtfs_rt.dart';
 import 'package:piedemove/realtime/store.dart';
+import 'package:piedemove/location/live_trip.dart';
 import 'package:piedemove/routing/journey.dart';
 import 'package:piedemove/ui/nav/entity.dart';
 import 'package:piedemove/ui/sheets/line_picker.dart';
@@ -95,6 +96,9 @@ class _MapViewState extends ConsumerState<MapView> {
   /// The focus the camera was last moved for: a redraw must not re-fit.
   MapFocus? _fitted;
 
+  /// Live progress last drawn, packed as leg * 100000 + vertex; -1 = no trip.
+  int _progress = -1;
+
   /// Walked geometry per leg index, once §9.10 has fetched it.
   final _walkPaths = <int, List<List<double>>>{};
 
@@ -121,6 +125,13 @@ class _MapViewState extends ConsumerState<MapView> {
     }
 
     final focus = ref.watch(mapFocusProvider);
+    // Live progress redraws the same focus: the travelled split moved (§9.11).
+    final progress = ref.watch(liveTripProvider
+        .select((l) => l == null ? -1 : l.legIndex * 100000 + l.vertex));
+    if (progress != _progress) {
+      _progress = progress;
+      _focusDrawn = false;
+    }
     // The pattern geometry asset is only loaded once something is focused.
     final net = focus == null ? null : ref.watch(lineNetworkProvider).valueOrNull;
     if (_styleReady && _linesAdded && (focus != _focus || !_focusDrawn)) {
@@ -250,7 +261,12 @@ class _MapViewState extends ConsumerState<MapView> {
             ['==', ['get', 'ridden'], 0], 1.6,
             ambientWidth,
           ],
-          lineOpacity: tierOpacity,
+          // Travelled ground fades; what is ahead keeps full colour (§9.11).
+          lineOpacity: [
+            'case',
+            ['==', ['get', 'travelled'], 1], 0.4,
+            tierOpacity,
+          ],
           lineCap: 'round',
           lineJoin: 'round',
         ),
@@ -337,6 +353,11 @@ class _MapViewState extends ConsumerState<MapView> {
         'pm-walk-lines',
         LineLayerProperties(
           lineColor: walkColor(tokens.walk),
+          lineOpacity: [
+            'case',
+            ['==', ['get', 'travelled'], 1], 0.4,
+            1.0,
+          ],
           lineWidth: 5.0,
           lineCap: 'round',
           lineDasharray: const [0.1, 1.8],
@@ -421,7 +442,8 @@ class _MapViewState extends ConsumerState<MapView> {
           await controller.setGeoJsonSource(_walkSource, empty);
           await _hideAmbientStops(controller);
         case JourneyFocus(:final journey):
-          final lines = journeyFocusLines(ix, net!, journey);
+          final live = ref.read(liveTripProvider);
+          final lines = journeyFocusLines(ix, net!, journey, live: live);
           await controller.setGeoJsonSource(_linesSource, lines);
           if (focus != wasFitted) {
             await _fitTo(controller, journeyFocusStops(ix, journey));
@@ -437,6 +459,7 @@ class _MapViewState extends ConsumerState<MapView> {
               path: (leg) => _walkPaths[leg],
               destLat: place?.lat,
               destLon: place?.lon,
+              live: live,
             ),
           );
           await _hideAmbientStops(controller);
