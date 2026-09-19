@@ -45,12 +45,15 @@ List<int> searchStops(
   double? lon,
   int limit = 12,
 }) {
+  final q = fold(query.trim());
   final hits = <(int, double)>[];
   for (var s = 0; s < ix.stopCount; s++) {
     // Stops no line serves are noise in a result list.
     if (ix.stopPatternOffset[s] == ix.stopPatternOffset[s + 1]) continue;
     final name = cleanStopName(ix.stopNames[s]);
-    if (!matchesQuery(name, query) && !matchesQuery(ix.stopCodes[s], query)) continue;
+    // Names match by token prefix; a code only matches whole, or "68" drags
+    // in every pole numbered 68x.
+    if (!matchesQuery(name, query) && fold(ix.stopCodes[s]) != q) continue;
     final d = (lat == null || lon == null)
         ? 0.0
         : haversineMetres(lat, lon, ix.stopLat[s], ix.stopLon[s]);
@@ -59,6 +62,10 @@ List<int> searchStops(
   hits.sort((a, b) => a.$2.compareTo(b.$2));
   return [for (final h in hits.take(limit)) h.$1];
 }
+
+/// A line number typed on its own: "68", "4", "10B", "58/".
+bool looksLikeLineNumber(String query) =>
+    RegExp(r'^[0-9]{1,3}[a-z/]?$').hasMatch(fold(query.trim()));
 
 /// Route indices matching [query], by number or name.
 List<int> searchRoutes(TransitIndex ix, String query, {int limit = 12}) {

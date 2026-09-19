@@ -31,8 +31,10 @@ void main() {
   test('stops match by cleaned name, nearest first', () {
     final ix = _index();
     expect(searchStops(ix, 'studi'), [1]);
-    // The stop code finds a pole on its own.
+    // A code matches whole only: no 68 -> 683/684 noise.
     expect(searchStops(ix, 's3'), [2]);
+    // 's' prefixes every code, but only the name match survives.
+    expect(searchStops(ix, 's'), [1]);
     // Two matches: the nearer pole leads.
     expect(searchStops(ix, 'citta', lat: 45.0800, lon: 7.6500), [2, 1]);
   });
@@ -41,6 +43,12 @@ void main() {
     final ix = _index();
     expect(searchRoutes(ix, '3'), [1]);
     expect(searchRoutes(ix, '2').first, 0);
+  });
+
+  test('a bare line number is a line query', () {
+    expect(looksLikeLineNumber('68'), isTrue);
+    expect(looksLikeLineNumber('58/'), isTrue);
+    expect(looksLikeLineNumber('porta'), isFalse);
   });
 
   test('photon feature keeps the street address, never the district', () {

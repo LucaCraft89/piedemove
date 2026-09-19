@@ -127,6 +127,12 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     final saved = ref.watch(savedPlacesProvider);
     final recents = ref.watch(recentPlacesProvider);
     final empty = _query.isEmpty;
+    // A bare line number means the line, not the poles numbered like it.
+    final linesFirst = !widget.pick && looksLikeLineNumber(_query);
+    final stopTiles = [
+      if (stops.isNotEmpty) const _Section('Fermate'),
+      for (final s in stops) _stopTile(ix!, s, me),
+    ];
 
     return Scaffold(
       appBar: AppBar(
@@ -182,8 +188,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
               ),
             if (_places.isNotEmpty) const _Section('Luoghi'),
             for (final p in _places) _placeTile(p),
-            if (stops.isNotEmpty) const _Section('Fermate'),
-            for (final s in stops) _stopTile(ix!, s, me),
+            if (!linesFirst) ...stopTiles,
             if (routes.isNotEmpty && !widget.pick) const _Section('Linee'),
             if (!widget.pick)
               for (final r in routes)
@@ -200,6 +205,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                   openEntity(context, ref, LineRef(r));
                 },
               ),
+            if (linesFirst) ...stopTiles,
             if (vehicles.isNotEmpty && !widget.pick) const _Section('Veicoli'),
             if (!widget.pick)
               for (final v in vehicles)
