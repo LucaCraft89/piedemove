@@ -10,6 +10,7 @@ import 'package:piedemove/data/providers.dart';
 import 'package:piedemove/data/transit_index.dart';
 import 'package:piedemove/geo/distance.dart';
 import 'package:piedemove/location/device_location.dart';
+import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/routing/departures.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
 import 'package:piedemove/ui/widgets/departure_row.dart';
@@ -84,7 +85,13 @@ class _NearbyList extends ConsumerWidget {
         children.add(const _Note('Nessuna fermata entro 400 m.'));
       }
       for (final (stop, metres) in near.take(12)) {
-        final departures = nextDepartures(ix, stop, now, _departuresPerStop);
+        final departures = nextDepartures(
+          ix,
+          stop,
+          now,
+          _departuresPerStop,
+          delays: ref.watch(delayLookupProvider),
+        );
         if (departures.isEmpty) continue;
         children.add(_StopBlock(
           name: cleanStopName(ix.stopNames[stop]),

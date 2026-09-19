@@ -179,3 +179,27 @@ for approval of look, palette and line style before phase 6.
 - `lib/ui/widgets/`: `line_badge.dart`, `departure_row.dart`.
 - `lib/location/device_location.dart`: `locateMe()` — permission, one fix,
   never throws; callers keep working with a null position.
+
+## Built in phase 3 (realtime, vehicles, entity sheets)
+
+- `lib/ui/nav/entity.dart`: `EntityRef` (`StopRef`, `LineRef`, `VehicleRef`,
+  `AlertRef`), `entityNavProvider` (the stack) and **`openEntity(context, ref,
+  ref)`** — the only way a sheet opens. One modal `DraggableScrollableSheet`
+  (0.15/0.5/0.92) hosts every body; `PopScope` makes back step out one level and
+  close at the bottom.
+- `lib/ui/sheets/`: `stop_sheet.dart` (alerts, line filter chips, live
+  departures, lines), `line_sheet.dart` (alerts, Andata/Ritorno toggle, today's
+  span + median headway, live vehicles, itinerary; also exports `StopStep` and
+  `statusLabel`), `vehicle_sheet.dart` (line badge, LIVE chip, delay, itinerary —
+  degrades to line-only because GTT sends no trip id), `alert_sheet.dart` (text,
+  cause/effect chips, affected lines/stops, plus `showAlertList` behind the
+  Avvisi pill), `sheet_parts.dart` (`SheetHeader` with back, `Grabber`,
+  `AlertTiles`, `SheetSection`).
+- Map: `lib/ui/map/vehicle_features.dart` draws one PNG sprite per mode at
+  startup (`addImage('pm-veh-<mode>')`) — black disc, mode-colour ring, white
+  glyph — and builds the GeoJSON; feature id is the list position, mapped back to
+  the vehicle id on tap. Layers `pm-vehicle-halos`, `pm-vehicle-icons`
+  (iconSize 0.8 at z11 to 1.6 at z17), `pm-vehicle-touch` (r=22), all from z12,
+  all in one try/catch. `vehiclesVisibleProvider` is the Veicoli pill.
+- Home: stop and vehicle taps call `openEntity`; the Avvisi pill shows the live
+  alert count; a chip appears when realtime feeds go stale.

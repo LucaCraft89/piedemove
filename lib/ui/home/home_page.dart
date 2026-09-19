@@ -12,9 +12,11 @@ import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:piedemove/data/index_source.dart';
 import 'package:piedemove/data/providers.dart';
 import 'package:piedemove/location/device_location.dart';
+import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/ui/map/map_view.dart';
+import 'package:piedemove/ui/nav/entity.dart';
+import 'package:piedemove/ui/sheets/alert_sheet.dart';
 import 'package:piedemove/ui/sheets/nearby_sheet.dart';
-import 'package:piedemove/ui/sheets/stop_sheet.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
 
 class HomePage extends ConsumerStatefulWidget {
@@ -49,11 +51,15 @@ class _HomePageState extends ConsumerState<HomePage> {
     final status = ref.watch(mapStatusProvider);
     final indexState = ref.watch(transitIndexProvider);
     final stage = ref.watch(indexStageProvider);
+    final stale = ref.watch(realtimeProvider).staleFeeds();
 
     return Scaffold(
       body: Stack(
         children: [
-          MapView(onStopTap: (stop) => showStopSheet(context, stop)),
+          MapView(
+            onStopTap: (stop) => openEntity(context, ref, StopRef(stop)),
+            onVehicleTap: (id) => openEntity(context, ref, VehicleRef(id)),
+          ),
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(Gap.screen),
@@ -68,6 +74,10 @@ class _HomePageState extends ConsumerState<HomePage> {
                   if (indexState.hasError)
                     const _Chip('Orari non disponibili'),
                   if (status != null) _Chip(status),
+                  if (stale.length == RtFeedKind.values.length)
+                    const _Chip('Dati in tempo reale non disponibili')
+                  else if (stale.isNotEmpty)
+                    const _Chip('Alcuni dati in tempo reale sono fermi'),
                 ],
               ),
             ),
@@ -82,7 +92,9 @@ class _HomePageState extends ConsumerState<HomePage> {
               child: const Icon(Icons.my_location),
             ),
           ),
-          NearbySheet(onStopTap: (stop) => showStopSheet(context, stop)),
+          NearbySheet(
+            onStopTap: (stop) => openEntity(context, ref, StopRef(stop)),
+          ),
         ],
       ),
     );
@@ -133,34 +145,48 @@ class _SearchBar extends StatelessWidget {
   }
 }
 
-class _PillRow extends StatelessWidget {
+/// Veicoli and Avvisi work from phase 3; the rest arrive with their phases.
+class _PillRow extends ConsumerWidget {
   const _PillRow();
 
-  static const _pills = [
-    ('Veicoli', Icons.directions_bus),
-    ('Avvisi', Icons.warning_amber),
-    ('Filtri', Icons.tune),
-    ('Linee', Icons.timeline),
-    ('Impostazioni', Icons.settings),
-  ];
-
   @override
-  Widget build(BuildContext context) => SizedBox(
-        height: 36,
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          itemCount: _pills.length,
-          separatorBuilder: (_, _) => const SizedBox(width: 8),
-          itemBuilder: (context, i) {
-            final (label, icon) = _pills[i];
-            return ActionChip(
+  Widget build(BuildContext context, WidgetRef ref) {
+    final vehiclesOn = ref.watch(vehiclesVisibleProvider);
+    final alerts = ref.watch(realtimeProvider).alerts.length;
+    return SizedBox(
+      height: 36,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: [
+          FilterChip(
+            avatar: const Icon(Icons.directions_bus, size: 16),
+            label: const Text('Veicoli'),
+            selected: vehiclesOn,
+            onSelected: (on) =>
+                ref.read(vehiclesVisibleProvider.notifier).state = on,
+          ),
+          const SizedBox(width: 8),
+          ActionChip(
+            avatar: const Icon(Icons.warning_amber, size: 16),
+            label: Text(alerts == 0 ? 'Avvisi' : 'Avvisi ($alerts)'),
+            onPressed: () => showAlertList(context, ref),
+          ),
+          for (final (label, icon) in const [
+            ('Filtri', Icons.tune),
+            ('Linee', Icons.timeline),
+            ('Impostazioni', Icons.settings),
+          ]) ...[
+            const SizedBox(width: 8),
+            ActionChip(
               avatar: Icon(icon, size: 16),
               label: Text(label),
               onPressed: null,
-            );
-          },
-        ),
-      );
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 }
 
 class _Chip extends StatelessWidget {

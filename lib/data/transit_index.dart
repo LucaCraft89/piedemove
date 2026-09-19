@@ -101,6 +101,18 @@ class TransitIndex {
         for (var i = 0; i < stopIds.length; i++) stopIds[i]: i,
       };
 
+  Map<String, int>? _tripByIdCache;
+
+  /// Realtime feeds identify a run by its GTFS `trip_id`.
+  Map<String, int> get tripIndexById => _tripByIdCache ??= {
+        for (var i = 0; i < tripIds.length; i++) tripIds[i]: i,
+      };
+
+  Map<String, int>? _routeByIdCache;
+  Map<String, int> get routeIndexById => _routeByIdCache ??= {
+        for (var i = 0; i < routeIds.length; i++) routeIds[i]: i,
+      };
+
   int patternLength(int p) => patternStopOffset[p + 1] - patternStopOffset[p];
 
   int patternStopAt(int p, int pos) => patternStop[patternStopOffset[p] + pos];

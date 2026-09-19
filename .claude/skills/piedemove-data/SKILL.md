@@ -64,23 +64,35 @@ including one in Moncalieri. **Routing always uses individual stops.**
 
 ## Realtime
 
-Dart bindings generated from `gtfs-realtime.proto` with `protoc` + the
-`protobuf` package, **committed** to the repo. (`protoc` is not installed on
-this machine yet.)
+**No protoc, no generated bindings.** `lib/realtime/pb.dart` is a ~60-line
+protobuf wire reader (`Pb.decode` -> field number -> values);
+`lib/realtime/gtfs_rt.dart` pulls the ~20 GTFS-RT fields the app uses out of it.
+A malformed entity is dropped, never patched. `dart tool/rt_check.dart` decodes
+the three live feeds and prints what came back — run it when a feed looks wrong.
 
-- **Vehicle positions**: poll every 20 s while the map is visible. Fields: vehicle
-  id/label, trip id, lat/lon, bearing, `current_stop_sequence`, `current_status`,
-  timestamp. Vehicle -> pattern link comes from its trip id. "Next stop" derives
-  from `current_stop_sequence` + status (INCOMING_AT / STOPPED_AT / IN_TRANSIT_TO).
-- **Trip updates**: poll every 30 s while a trip, line, stop or vehicle sheet is
-  open. Delays are offsets onto the static index; a `stop_time_update` delay
-  **carries forward** to later stops until the next update.
-- **Alerts**: poll every 5 min. Read cause, effect, active periods, informed
-  entities (route/stop/trip), translations (prefer Italian, fall back to any).
-- Pause all polling when backgrounded. Backoff on error. Track last-success per
-  feed; expose it in the feed-health chip and the Settings data screen.
-- Regional legs and any leg without realtime show scheduled times with a
-  "no live data" marker.
+What GTT actually sends (checked 2026-09-19, not what the spec suggests):
+
+- **Vehicle positions** (~20 KB, 355 vehicles): `VehicleDescriptor.id` is the
+  fleet number and is unique; `TripDescriptor` carries **`route_id` only — no
+  `trip_id`, no `stop_id`, no `current_stop_sequence`**. So a vehicle links to a
+  *line*, never to a run: no next stop, no itinerary, no delay for it. Position,
+  bearing and `current_status` are present. Poll 20 s.
+- **Trip updates** (~68 KB, ~385 trips, all known to the index): keyed by
+  **`stop_sequence`, 1-based and contiguous, with no `stop_id`**, a rolling
+  window of ~7 stops ahead. Two thirds give `delay`, one third an absolute
+  `time` instead; `TripUpdate.delay` is absent. Poll 30 s.
+- **Alerts** (~197 KB, ~185 alerts): cause/effect, informed entities, Italian
+  translations present. Poll 5 min.
+
+`buildDelayLookup(ix, rt)` turns that into `DelayLookup(trip, position)`:
+position `p` is sequence `p + 1`, an absolute `time` becomes a delay against
+`start_date` + the scheduled second, and a value **carries forward** to later
+stops. Stops outside the window return null and show as scheduled.
+
+`RealtimeController` (`lib/realtime/store.dart`) polls the three feeds on their
+own timers, doubles the interval per feed on error up to 5 min, and stops every
+feed when the app is not resumed. `FeedHealth` per feed feeds the home chip:
+stale = three intervals without a good answer.
 
 ## Persistence
 

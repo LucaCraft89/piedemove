@@ -10,8 +10,8 @@ Read this once per task. Do not paste it into prompts.
 | 0 | Token/workflow setup: repo, skills, graphify | **done** |
 | 1 | Data + routing core, no UI | **done** |
 | 2 | Shell, map, stops | **done** |
-| 3 | Realtime + vehicles + entity sheets | todo |
-| — | **GATE 1** design: palette, line style, UI samples | blocked on 3 |
+| 3 | Realtime + vehicles + entity sheets | **done** |
+| — | **GATE 1** design: palette, line style, UI samples | ready |
 | 4 | Search (Photon, stops, lines, vehicles) | todo |
 | 5 | Planning UI + settings | todo |
 | 6 | Lines (§9): fetch, graph, snap, validate, ambient, focus, walk | todo |
@@ -61,8 +61,11 @@ tour. README, licence and in-app About complete.
 ## Known environment facts
 
 - Phone serial changes between sessions: run `adb devices` first.
-- `protoc` is NOT installed; needed in phase 3 for the GTFS-RT bindings
-  (generate once, commit the Dart output).
+- `protoc` is NOT installed, and is not needed: phase 3 reads the GTFS-RT wire
+  format directly (`lib/realtime/pb.dart`). `dart tool/rt_check.dart` checks the
+  decoder against the live feeds.
+- GTT vehicle positions carry **no trip id** — a vehicle links to a line, not a
+  run. Trip updates are keyed by `stop_sequence`, not `stop_id`.
 - graphify: graph built (code-only; `GRAPH_REPORT.md` needs an LLM key).
 - Golden case: the literal Trapani->Peschiera chain is dominated in the real
   feed; the planner finds a 233 m answer against Google's 551 m. See the

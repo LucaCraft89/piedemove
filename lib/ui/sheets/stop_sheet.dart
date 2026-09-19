@@ -1,7 +1,4 @@
-/// Minimal stop sheet: name and next arrivals.
-///
-/// Phase 3 replaces this with the one `openEntity(EntityRef)` system; the call
-/// site stays [showStopSheet] so only this file changes.
+/// Stop sheet (§11.5): next arrivals, line filter, lines serving it, alerts.
 library;
 
 import 'package:flutter/material.dart';
@@ -9,57 +6,116 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:piedemove/data/providers.dart';
 import 'package:piedemove/data/transit_index.dart';
+import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/routing/departures.dart';
+import 'package:piedemove/ui/nav/entity.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
 import 'package:piedemove/ui/widgets/departure_row.dart';
+import 'package:piedemove/ui/widgets/line_badge.dart';
 
-void showStopSheet(BuildContext context, int stop) {
-  showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    builder: (_) => DraggableScrollableSheet(
-      initialChildSize: 0.5,
-      minChildSize: 0.15,
-      maxChildSize: 0.92,
-      snap: true,
-      snapSizes: const [0.15, 0.5, 0.92],
-      expand: false,
-      builder: (context, controller) => Material(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        clipBehavior: Clip.antiAlias,
-        child: _StopBody(stop: stop, controller: controller),
-      ),
-    ),
-  );
-}
+import 'sheet_parts.dart';
 
-class _StopBody extends ConsumerWidget {
-  const _StopBody({required this.stop, required this.controller});
+class StopBody extends ConsumerStatefulWidget {
+  const StopBody({super.key, required this.stop, required this.controller});
 
   final int stop;
   final ScrollController controller;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<StopBody> createState() => _StopBodyState();
+}
+
+class _StopBodyState extends ConsumerState<StopBody> {
+  String? _filter;
+
+  @override
+  Widget build(BuildContext context) {
     final ix = ref.watch(transitIndexProvider).valueOrNull;
     if (ix == null) return const SizedBox.shrink();
+    final stop = widget.stop;
     final now = DateTime.now();
-    final departures = nextDepartures(ix, stop, now, 20);
+    final departures = nextDepartures(
+      ix,
+      stop,
+      now,
+      20,
+      delays: ref.watch(delayLookupProvider),
+    );
+    final alerts = ref
+        .watch(realtimeProvider)
+        .alertsFor(stopId: ix.stopIds[stop]);
+
+    // Distinct routes serving the stop, in the order they first appear.
+    final routes = <int>[];
+    for (var i = ix.stopPatternOffset[stop];
+        i < ix.stopPatternOffset[stop + 1];
+        i++) {
+      final route = ix.patternRoute[ix.stopPattern[i]];
+      if (!routes.contains(route)) routes.add(route);
+    }
+    final shown = _filter == null
+        ? departures
+        : [for (final d in departures) if (d.routeShortName == _filter) d];
+
     return ListView(
-      controller: controller,
+      controller: widget.controller,
       padding: const EdgeInsets.all(Gap.screen),
       children: [
-        Text(cleanStopName(ix.stopNames[stop]),
-            style: Theme.of(context).textTheme.headlineSmall),
-        Text(ix.stopCodes[stop],
-            style: Theme.of(context).textTheme.bodySmall),
-        const SizedBox(height: Gap.element),
-        if (departures.isEmpty)
+        const Grabber(),
+        SheetHeader(
+          title: cleanStopName(ix.stopNames[stop]),
+          subtitle: 'Fermata ${ix.stopCodes[stop]}',
+        ),
+        AlertTiles(alerts: alerts),
+        if (routes.length > 1)
+          SizedBox(
+            height: 40,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                for (final route in routes)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: FilterChip(
+                      selected: _filter == ix.routeShortNames[route],
+                      label: Text(ix.routeShortNames[route]),
+                      onSelected: (on) => setState(
+                        () => _filter = on ? ix.routeShortNames[route] : null,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        const SheetSection('Prossimi passaggi'),
+        if (shown.isEmpty)
           const Text('Nessuna corsa nelle prossime ore.')
         else
-          for (final d in departures) DepartureRow(departure: d, now: now),
+          for (final d in shown)
+            InkWell(
+              onTap: () => openEntity(
+                context,
+                ref,
+                LineRef(ix.patternRoute[d.pattern],
+                    direction: ix.patternDir[d.pattern]),
+              ),
+              child: DepartureRow(departure: d, now: now),
+            ),
+        const SheetSection('Linee'),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final route in routes)
+              InkWell(
+                onTap: () => openEntity(context, ref, LineRef(route)),
+                child: LineBadge(
+                  shortName: ix.routeShortNames[route],
+                  routeType: ix.routeTypes[route],
+                ),
+              ),
+          ],
+        ),
       ],
     );
   }

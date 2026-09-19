@@ -11,13 +11,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 
 import 'package:piedemove/data/providers.dart';
+import 'package:piedemove/realtime/gtfs_rt.dart';
+import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
 
 import 'stop_features.dart';
+import 'vehicle_features.dart';
 
 /// Turin, Porta Nuova.
 const turin = LatLng(45.0625, 7.6785);
 const _stopsSource = 'pm-stops';
+const _vehiclesSource = 'pm-vehicles';
+
+/// Vehicles appear from z12 (§10.1).
+const vehicleMinZoom = 12.0;
 
 /// Individual poles from z15; clusters below it.
 const poleMinZoom = 15.0;
@@ -25,14 +32,19 @@ const poleMinZoom = 15.0;
 /// Non-null when a map layer failed to load; shown as a chip, never a blank map.
 final mapStatusProvider = StateProvider<String?>((_) => null);
 
+/// The "Veicoli" pill; off hides the layer without stopping the feed.
+final vehiclesVisibleProvider = StateProvider<bool>((_) => true);
+
 final mapControllerProvider = StateProvider<MapLibreMapController?>((_) => null);
 
 typedef StopTap = void Function(int stopIndex);
+typedef VehicleTap = void Function(String vehicleId);
 
 class MapView extends ConsumerStatefulWidget {
-  const MapView({super.key, this.onStopTap});
+  const MapView({super.key, this.onStopTap, this.onVehicleTap});
 
   final StopTap? onStopTap;
+  final VehicleTap? onVehicleTap;
 
   @override
   ConsumerState<MapView> createState() => _MapViewState();
@@ -45,6 +57,10 @@ class _MapViewState extends ConsumerState<MapView> {
   /// A style reload drops every source, and `setGeoJsonSource` does not fail
   /// loudly on Android when the source is gone — so track it here.
   bool _stopsAdded = false;
+  bool _vehiclesAdded = false;
+
+  /// Feature id -> vehicle id, in the order the collection was built.
+  final _vehicleIds = <String>[];
 
   @override
   Widget build(BuildContext context) {
@@ -53,6 +69,14 @@ class _MapViewState extends ConsumerState<MapView> {
     // this. Watching, not listening — a value already there fires no event.
     if (ref.watch(transitIndexProvider).valueOrNull != null && !_stopsAdded) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _addStops());
+    }
+
+    final vehicles = ref.watch(realtimeProvider.select((s) => s.vehicles));
+    final showVehicles = ref.watch(vehiclesVisibleProvider);
+    if (_styleReady) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _updateVehicles(showVehicles ? vehicles.values : const []),
+      );
     }
 
     return MapLibreMap(
@@ -75,6 +99,7 @@ class _MapViewState extends ConsumerState<MapView> {
       onStyleLoadedCallback: () {
         _styleReady = true;
         _stopsAdded = false;
+        _vehiclesAdded = false;
         _addStops();
       },
     );
@@ -89,6 +114,13 @@ class _MapViewState extends ConsumerState<MapView> {
   ) {
     final controller = _controller;
     if (controller == null) return;
+    if (layerId == 'pm-vehicle-touch') {
+      final i = int.tryParse(id);
+      if (i != null && i < _vehicleIds.length) {
+        widget.onVehicleTap?.call(_vehicleIds[i]);
+      }
+      return;
+    }
     if (layerId == 'pm-stop-clusters') {
       controller.animateCamera(CameraUpdate.newLatLngZoom(
         coordinates,
@@ -247,6 +279,87 @@ class _MapViewState extends ConsumerState<MapView> {
         enableInteraction: false,
       );
     });
+  }
+
+  /// Rebuilds the vehicle layer. Adding it is isolated like every other layer:
+  /// a failure shows a chip, the map and the stops stay up.
+  Future<void> _updateVehicles(Iterable<RtVehicle> vehicles) async {
+    final controller = _controller;
+    if (controller == null || !_styleReady) return;
+    final ix = ref.read(transitIndexProvider).valueOrNull;
+    final data = vehicleFeatureCollection(ix, vehicles, _vehicleIds);
+    // Read the theme before any await: the context may be gone afterwards.
+    final tokens = Theme.of(context).brightness == Brightness.dark
+        ? PmTokens.darkTokens
+        : PmTokens.lightTokens;
+    final surface = Theme.of(context).colorScheme.surface;
+
+    if (_vehiclesAdded) {
+      try {
+        await controller.setGeoJsonSource(_vehiclesSource, data);
+        return;
+      } catch (_) {
+        _vehiclesAdded = false;
+      }
+    }
+
+    _vehiclesAdded = true;
+    try {
+      await addVehicleIcons(controller, tokens.modes);
+      await controller.addSource(
+        _vehiclesSource,
+        GeojsonSourceProperties(data: data),
+      );
+      // White halo under the icon, then a >= 44 px invisible tap target.
+      await controller.addCircleLayer(
+        _vehiclesSource,
+        'pm-vehicle-halos',
+        CircleLayerProperties(
+          circleColor: _hex(surface),
+          circleOpacity: 0.9,
+          circleRadius: [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            11, 9.0,
+            17, 17.0,
+          ],
+        ),
+        minzoom: vehicleMinZoom,
+        enableInteraction: false,
+      );
+      await controller.addSymbolLayer(
+        _vehiclesSource,
+        'pm-vehicle-icons',
+        const SymbolLayerProperties(
+          iconImage: ['concat', 'pm-veh-', ['get', 'mode']],
+          iconSize: [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            11, 0.8,
+            17, 1.6,
+          ],
+          iconAllowOverlap: true,
+          iconIgnorePlacement: true,
+        ),
+        minzoom: vehicleMinZoom,
+        enableInteraction: false,
+      );
+      await controller.addCircleLayer(
+        _vehiclesSource,
+        'pm-vehicle-touch',
+        const CircleLayerProperties(circleRadius: 22.0, circleOpacity: 0.0),
+        minzoom: vehicleMinZoom,
+      );
+    } catch (e) {
+      debugPrint('pm: layer veicoli failed: $e');
+      _vehiclesAdded = false;
+      if (mounted) {
+        ref.read(mapStatusProvider.notifier).state =
+            'Livello veicoli non disponibile';
+      }
+    }
   }
 }
 
