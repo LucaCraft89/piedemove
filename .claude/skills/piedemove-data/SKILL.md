@@ -87,3 +87,26 @@ this machine yet.)
 `shared_preferences`: settings, favourites, saved places, recents.
 Documents dir: `index.bin`, `lines.bin`, cached Overpass results, metro
 entrances. All versioned and all safe to delete — rebuilt on next launch.
+
+## Built in phase 1
+
+`lib/data`: `feeds.dart` (URLs), `csv.dart`, `gtfs_zip.dart` (member -> temp
+file -> line stream), `index_build.dart`, `transit_index.dart`,
+`index_io.dart` (`indexFormatVersion = 1`), `clustering.dart`.
+`dart tool/build_index.dart` downloads to `build/gtt_gtfs.zip`, writes
+`build/index.bin`. Both are gitignored; tests skip when the index is missing.
+
+Feed facts as built on 2026-09-19 (`feed_version` 20260919):
+7,054 boardable stops, 217 routes, **1,433 patterns**, 44,653 trips,
+723 services over 136 days, index **12.6 MB**, build **~4 s** on a laptop.
+
+- **`stop_times.txt` is ordered by stop, not by trip.** A trip's rows are
+  scattered over 83 MB, so a one-pass "flush on trip change" parser keeps ~50
+  trips and silently throws the feed away. The builder makes two streaming
+  passes: count rows per trip, then fill a CSR table sorted per trip by
+  `stop_sequence`. Peak ~40 MB of typed arrays.
+- Stops with `location_type != 0` are dropped (stations, entrances).
+- Trips without a usable time or with a broken sequence are dropped, never
+  patched.
+- Feed smoke test: `PIEDEMOVE_NETWORK=1 flutter test test/feeds_smoke_test.dart`.
+  All four GTT URLs answered 200 on 2026-09-19.

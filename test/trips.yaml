@@ -1,0 +1,16 @@
+# Real trips, used as extra pass/fail cases against the real index (§15.1).
+# Add your own: any trip you actually make. Times are never pinned, only
+# structure and walking metres.
+#
+#   name:      what the trip is
+#   from/to:   lat, lon
+#   at:        HH:MM on the next weekday
+#   maxWalk:   the balanced best must not walk more than this (metres)
+#   maxRides:  optional cap on the number of rides
+trips:
+  - name: Politecnico -> Via Cristalliera
+    from: [45.06277, 7.66304]
+    to: [45.0738, 7.6400]
+    at: "18:00"
+    maxWalk: 450
+    maxRides: 3

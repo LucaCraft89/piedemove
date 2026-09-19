@@ -8,7 +8,7 @@ Read this once per task. Do not paste it into prompts.
 | Phase | What | State |
 |---|---|---|
 | 0 | Token/workflow setup: repo, skills, graphify | **done** |
-| 1 | Data + routing core, no UI | todo |
+| 1 | Data + routing core, no UI | **done** |
 | 2 | Shell, map, stops | todo |
 | 3 | Realtime + vehicles + entity sheets | todo |
 | — | **GATE 1** design: palette, line style, UI samples | blocked on 3 |
@@ -63,5 +63,8 @@ tour. README, licence and in-app About complete.
 - Phone serial changes between sessions: run `adb devices` first.
 - `protoc` is NOT installed; needed in phase 3 for the GTFS-RT bindings
   (generate once, commit the Dart output).
-- graphify: graph built at the end of phase 1, when there is real code to index.
+- graphify: graph built (code-only; `GRAPH_REPORT.md` needs an LLM key).
+- Golden case: the literal Trapani->Peschiera chain is dominated in the real
+  feed; the planner finds a 233 m answer against Google's 551 m. See the
+  `piedemove-routing` skill for the evidence and what the golden test pins.
 - Old project: `../piemove-maps`, read-only, data facts only, copy no code.

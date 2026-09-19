@@ -87,3 +87,51 @@ exist, opening the full list.
 
 Routing is high-effort work. It must keep working with every live feed and the
 whole line network unavailable.
+
+## Built in phase 1
+
+`lib/routing`: `footpaths.dart` (grid + CSR table + cluster closure),
+`raptor.dart` (`Planner`, `PlanRequest`, `sortFastest`, `sortBalanced`),
+`journey.dart`, `score.dart`, `departures.dart`. `tool/discover_hops.dart`
+compares the real footpath table against a no-transfer baseline.
+
+Decisions the code makes, with their ceilings:
+
+- **Pareto front per number of rides.** Merging the rounds at the egress hides
+  two-ride footpath answers behind three-ride chains that beat them on both
+  arrival and metres. Bags are capped at 8 labels, walk-first.
+- **One departure, not a range.** McRAPTOR runs once from the requested time;
+  the window is used by the every-line post-pass. A later departure never walks
+  less, so the front does not change. Upgrade to a real range search only if a
+  missing journey is demonstrated.
+- **No chained footpaths**: a label reached on foot cannot start another walk.
+- Arrive-by runs one forward search from `deadline - window - 1 h` and keeps
+  what lands in time.
+
+### The golden case, as the real feed actually behaves (2026-09-19)
+
+The spec's literal expectation does not hold, and the reasons are in the data:
+
+- **No pattern from POLITECNICO pole 670 (`3454`) reaches TRAPANI.** Line 33
+  leaves from pole 376 (`2829`), 30 m away, which the access walk covers.
+- **Line 42 does not serve Politecnico at all** (its lines are 10, 33, 58, 91,
+  W15), so "the first leg's chips include both 33 and 42" cannot ever pass.
+- Line 2 towards BARDONECCHIA is boarded at PESCHIERA pole 121 (`241`), 155 m
+  from TRAPANI 872 — not at pole 120 (`230`), which is the 126 m one.
+- The literal TRAPANI -> PESCHIERA -> line 2 chain is genuinely dominated:
+  boarding line 2 further upstream reaches BARDONECCHIA with 128 m of walking
+  instead of 185 m, no later.
+
+What the planner returns at 18:00 on a weekday: `10` -> walk 18 m -> `29` ->
+walk 13 m -> `2` -> BARDONECCHIA, **233 m of walking**. Google's "33 then walk"
+answer is in the same result set at **551 m**. Same intent as the golden case —
+reach line 2 through short footpath hops instead of a long walk — but a better
+journey, so `test/golden_politecnico_cristalliera_test.dart` pins that: the
+126 m footpath exists in the table, the balanced best rides line 2 into
+BARDONECCHIA using only transfers <= 200 m, it walks strictly less than the
+ride-and-walk journey, and some ride leg carries more than one line.
+
+`test/trips.yaml` holds the user's own trips (`name/from/to/at/maxWalk/maxRides`)
+and is run by `test/trips_test.dart`. The §15 "pin the top five discovered
+hops" step is still open: the wins shift with the daily feed, so they need
+picking by hand from `dart tool/discover_hops.dart`.
