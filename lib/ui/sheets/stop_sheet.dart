@@ -45,14 +45,7 @@ class _StopBodyState extends ConsumerState<StopBody> {
         .watch(realtimeProvider)
         .alertsFor(stopId: ix.stopIds[stop]);
 
-    // Distinct routes serving the stop, in the order they first appear.
-    final routes = <int>[];
-    for (var i = ix.stopPatternOffset[stop];
-        i < ix.stopPatternOffset[stop + 1];
-        i++) {
-      final route = ix.patternRoute[ix.stopPattern[i]];
-      if (!routes.contains(route)) routes.add(route);
-    }
+    final routes = ix.routesAt(stop);
     final shown = _filter == null
         ? departures
         : [for (final d in departures) if (d.routeShortName == _filter) d];

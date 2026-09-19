@@ -11,6 +11,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 
 import 'package:piedemove/data/providers.dart';
+import 'package:piedemove/places/photon.dart';
+import 'package:piedemove/places/saved.dart';
 import 'package:piedemove/realtime/gtfs_rt.dart';
 import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
@@ -62,6 +64,9 @@ class _MapViewState extends ConsumerState<MapView> {
   /// Feature id -> vehicle id, in the order the collection was built.
   final _vehicleIds = <String>[];
 
+  /// The place currently pinned by search, as last drawn.
+  Place? _pinned;
+
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
@@ -77,6 +82,11 @@ class _MapViewState extends ConsumerState<MapView> {
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => _updateVehicles(showVehicles ? vehicles.values : const []),
       );
+    }
+
+    final place = ref.watch(selectedPlaceProvider);
+    if (_styleReady && !identical(place, _pinned)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _updatePin(place));
     }
 
     return MapLibreMap(
@@ -100,6 +110,7 @@ class _MapViewState extends ConsumerState<MapView> {
         _styleReady = true;
         _stopsAdded = false;
         _vehiclesAdded = false;
+        _pinned = null;
         _addStops();
       },
     );
@@ -279,6 +290,33 @@ class _MapViewState extends ConsumerState<MapView> {
         enableInteraction: false,
       );
     });
+  }
+
+  /// The search pin (§11.3): one circle annotation, cleared and redrawn.
+  Future<void> _updatePin(Place? place) async {
+    final controller = _controller;
+    if (controller == null || !_styleReady) return;
+    _pinned = place;
+    final scheme = Theme.of(context).colorScheme;
+    try {
+      await controller.clearCircles();
+      if (place == null) return;
+      await controller.addCircle(
+        CircleOptions(
+          geometry: LatLng(place.lat, place.lon),
+          circleRadius: 9,
+          circleColor: _hex(scheme.primary),
+          circleStrokeColor: _hex(scheme.surface),
+          circleStrokeWidth: 3,
+        ),
+      );
+    } catch (e) {
+      debugPrint('pm: layer segnaposto failed: $e');
+      if (mounted) {
+        ref.read(mapStatusProvider.notifier).state =
+            'Segnaposto non disponibile';
+      }
+    }
   }
 
   /// Rebuilds the vehicle layer. Adding it is isolated like every other layer:

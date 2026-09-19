@@ -12,10 +12,12 @@ import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:piedemove/data/index_source.dart';
 import 'package:piedemove/data/providers.dart';
 import 'package:piedemove/location/device_location.dart';
+import 'package:piedemove/places/saved.dart';
 import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/ui/map/map_view.dart';
 import 'package:piedemove/ui/nav/entity.dart';
 import 'package:piedemove/ui/sheets/alert_sheet.dart';
+import 'package:piedemove/ui/search/search_page.dart';
 import 'package:piedemove/ui/sheets/nearby_sheet.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
 
@@ -107,20 +109,20 @@ String _stageLabel(IndexStage stage) => switch (stage) {
       _ => 'Carico gli orari…',
     };
 
-class _SearchBar extends StatelessWidget {
+class _SearchBar extends ConsumerWidget {
   const _SearchBar();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
+    final pinned = ref.watch(selectedPlaceProvider);
     return Material(
       elevation: 3,
       color: scheme.surface,
       borderRadius: BorderRadius.circular(28),
       child: InkWell(
         borderRadius: BorderRadius.circular(28),
-        // Search arrives in phase 4.
-        onTap: null,
+        onTap: () => openSearch(context),
         child: SizedBox(
           height: Gap.row,
           child: Row(
@@ -129,14 +131,30 @@ class _SearchBar extends StatelessWidget {
               Icon(Icons.search, color: scheme.onSurfaceVariant),
               const SizedBox(width: Gap.element),
               Expanded(
-                child: Text('Dove vai?',
-                    style: TextStyle(color: scheme.onSurfaceVariant)),
+                child: Text(
+                  pinned?.name ?? 'Dove vai?',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: pinned == null
+                        ? scheme.onSurfaceVariant
+                        : scheme.onSurface,
+                  ),
+                ),
               ),
-              IconButton(
-                tooltip: 'Inverti partenza e arrivo',
-                onPressed: null,
-                icon: const Icon(Icons.swap_vert),
-              ),
+              if (pinned != null)
+                IconButton(
+                  tooltip: 'Togli il segnaposto',
+                  onPressed: () =>
+                      ref.read(selectedPlaceProvider.notifier).state = null,
+                  icon: const Icon(Icons.close),
+                )
+              else
+                // Swap needs an origin and a destination: phase 5.
+                const IconButton(
+                  tooltip: 'Inverti partenza e arrivo',
+                  onPressed: null,
+                  icon: Icon(Icons.swap_vert),
+                ),
             ],
           ),
         ),

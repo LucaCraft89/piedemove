@@ -12,7 +12,7 @@ Read this once per task. Do not paste it into prompts.
 | 2 | Shell, map, stops | **done** |
 | 3 | Realtime + vehicles + entity sheets | **done** |
 | — | **GATE 1** design: palette, line style, UI samples | ready |
-| 4 | Search (Photon, stops, lines, vehicles) | todo |
+| 4 | Search (Photon, stops, lines, vehicles) | **done** |
 | 5 | Planning UI + settings | todo |
 | 6 | Lines (§9): fetch, graph, snap, validate, ambient, focus, walk | todo |
 | — | **GATE 2** data: validation report + 3 sample spots | blocked on 6 |
@@ -73,5 +73,6 @@ tour. README, licence and in-app About complete.
 - Old project: `../piemove-maps`, read-only, data facts only, copy no code.
 - Map: `maplibre_gl` over OpenFreeMap. Its glyphs are **Noto Sans Regular** —
   every symbol layer must set `textFont`, or the style 404s the default stack.
+- Photon rejects `lang=it` and answers 403 without a `User-Agent`.
 - The phone must be unlocked (secure keyguard, encrypted storage) before `adb`
   can launch the app at all; a locked phone lands in `FallbackHome`.

@@ -113,6 +113,16 @@ class TransitIndex {
         for (var i = 0; i < routeIds.length; i++) routeIds[i]: i,
       };
 
+  /// Distinct routes serving [stop], in the order they first appear.
+  List<int> routesAt(int stop) {
+    final out = <int>[];
+    for (var i = stopPatternOffset[stop]; i < stopPatternOffset[stop + 1]; i++) {
+      final route = patternRoute[stopPattern[i]];
+      if (!out.contains(route)) out.add(route);
+    }
+    return out;
+  }
+
   int patternLength(int p) => patternStopOffset[p + 1] - patternStopOffset[p];
 
   int patternStopAt(int p, int pos) => patternStop[patternStopOffset[p] + pos];

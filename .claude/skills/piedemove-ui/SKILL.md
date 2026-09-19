@@ -171,7 +171,7 @@ for approval of look, palette and line style before phase 6.
   `pm-stop-cluster-count`, `pm-stop-touch` (invisible r=22 tap target),
   `pm-stop-poles`, `pm-stop-labels`. Poles and labels from `poleMinZoom` 15,
   clusters below it (`clusterMaxZoom` 14), labels at constant opacity.
-- `lib/ui/home/home_page.dart`: search bar (inert until phase 4), pill row,
+- `lib/ui/home/home_page.dart`: search bar (live from phase 4), pill row,
   my-position FAB in the corner, index/map status chips, nearby sheet.
 - `lib/ui/sheets/`: `nearby_sheet.dart` (stops within 400 m, 3 departures each,
   snaps 0.15/0.5/0.92) and `stop_sheet.dart` — a placeholder with one call site,
@@ -203,3 +203,33 @@ for approval of look, palette and line style before phase 6.
   all in one try/catch. `vehiclesVisibleProvider` is the Veicoli pill.
 - Home: stop and vehicle taps call `openEntity`; the Avvisi pill shows the live
   alert count; a chip appears when realtime feeds go stale.
+
+## Built in phase 4 (search)
+
+- `lib/places/photon.dart`: `PhotonClient.search` — Piemonte bbox
+  (6.6,44.0,9.3,46.6), location bias, `limit` 8, in-memory cache keyed by the
+  folded query, throws on failure. **Two facts the API forces:** `lang=it` is
+  rejected (`default`/`de`/`en`/`fr` only, use `default` to keep Italian names)
+  and a missing `User-Agent` gets **403** — send `userAgent`. `Place.fromFeature`
+  builds the full street address (`street housenumber, city`), never the
+  district, and drops features without a point.
+- `lib/places/search_index.dart`: `fold` (diacritics + case), `matchesQuery`
+  (every query token must prefix a target token), `searchStops` (nearest first,
+  poles no line serves skipped), `searchRoutes` (exact short name first, then
+  numeric), `searchVehicles` (fleet id or label). All pure: search works with
+  every feed down.
+- `lib/places/saved.dart`: `recentPlacesProvider` (cap 10) and
+  `savedPlacesProvider` — `PlaceList` over SharedPreferences JSON, corrupt data
+  resets instead of breaking the box. Also `selectedPlaceProvider` (the pin) and
+  `photonClientProvider`.
+- `lib/ui/search/search_page.dart`: `openSearch(context)` pushes it. 300 ms
+  debounce, min 3 chars, a ticket counter drops stale replies, Photon failure
+  shows one tile and leaves the local sections working. Empty query lists "La
+  mia posizione", Salvati, Recenti; a star toggles saved. Stop/line/vehicle rows
+  call `openEntity`; a place pins and recentres the map.
+- Map: the pin is **one circle annotation** (`addCircle`/`clearCircles`), not a
+  layer — `_updatePin` in `map_view.dart`, isolated like every layer.
+- A GTT pole has no street address in GTFS: the stop row shows
+  `Fermata <code> · <metres>` plus the line badges instead.
+- `TransitIndex.routesAt(stop)` is the shared "lines serving this stop" helper
+  (stop sheet and search both use it).
