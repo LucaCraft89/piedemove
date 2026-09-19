@@ -155,3 +155,27 @@ Show the user static samples built from **real data**: line style and UI
 (results card, stop sheet, vehicle sheet, palette, walk tiers) at three spots —
 a corso with two carriageways, a bus/tram shared street, a plain street. Wait
 for approval of look, palette and line style before phase 6.
+
+## Built in phase 2 (shell, map, stops)
+
+- `lib/ui/theme/tokens.dart`: `PmTokens` theme extension — `ModeColors`,
+  `WalkColors` (3 tiers), `live`, and `Gap` (screen 16, element 12, row 48,
+  tapTarget 44). Read with `context.tokens`. `app_theme.dart` builds the two
+  themes; the system font stands in until Google Sans Flex is verified at
+  GATE 1.
+- `lib/ui/map/map_view.dart`: MapLibre (`maplibre_gl` 0.27) over OpenFreeMap —
+  `styles/dark` when the phone is dark, `styles/positron` when light. The stop
+  source is one clustered GeoJSON source (`pm-stops`), rebuilt with
+  `setGeoJsonSource` when the index arrives after the style. Layers, each in
+  its own try/catch feeding `mapStatusProvider`: `pm-stop-clusters`,
+  `pm-stop-cluster-count`, `pm-stop-touch` (invisible r=22 tap target),
+  `pm-stop-poles`, `pm-stop-labels`. Poles and labels from `poleMinZoom` 15,
+  clusters below it (`clusterMaxZoom` 14), labels at constant opacity.
+- `lib/ui/home/home_page.dart`: search bar (inert until phase 4), pill row,
+  my-position FAB in the corner, index/map status chips, nearby sheet.
+- `lib/ui/sheets/`: `nearby_sheet.dart` (stops within 400 m, 3 departures each,
+  snaps 0.15/0.5/0.92) and `stop_sheet.dart` — a placeholder with one call site,
+  `showStopSheet(context, stop)`, that phase 3 swaps for `openEntity`.
+- `lib/ui/widgets/`: `line_badge.dart`, `departure_row.dart`.
+- `lib/location/device_location.dart`: `locateMe()` — permission, one fix,
+  never throws; callers keep working with a null position.

@@ -1,30 +1,35 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:piedemove/main.dart';
+import 'package:piedemove/ui/theme/app_theme.dart';
+import 'package:piedemove/ui/theme/tokens.dart';
+import 'package:piedemove/ui/widgets/line_badge.dart';
+import 'package:piedemove/data/transit_index.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('line badge carries number and icon, not colour alone',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: darkTheme(),
+      home: const Scaffold(
+        body: LineBadge(shortName: '13', routeType: RouteType.tram),
+      ),
+    ));
+    expect(find.text('13'), findsOneWidget);
+    expect(find.byIcon(Icons.tram), findsOneWidget);
+  });
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+  test('walk tiers never collapse to one colour', () {
+    const walk = WalkColors.dark;
+    expect(walk.ofMetres(100), walk.short);
+    expect(walk.ofMetres(400), walk.medium);
+    expect(walk.ofMetres(900), walk.long);
+  });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+  test('mixed stops take the most distinctive mode', () {
+    expect(
+      ModeColors.dark.ofModes({RouteType.bus, RouteType.metro}),
+      ModeColors.dark.metro,
+    );
+    expect(ModeColors.dark.ofModes({RouteType.bus}), ModeColors.dark.bus);
   });
 }

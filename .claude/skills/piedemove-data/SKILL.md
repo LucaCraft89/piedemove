@@ -85,8 +85,21 @@ this machine yet.)
 ## Persistence
 
 `shared_preferences`: settings, favourites, saved places, recents.
-Documents dir: `index.bin`, `lines.bin`, cached Overpass results, metro
-entrances. All versioned and all safe to delete — rebuilt on next launch.
+Application-support dir: `index.bin`, `lines.bin`, cached Overpass results,
+metro entrances. All versioned and all safe to delete — rebuilt on next launch.
+
+## On-device index (phase 2)
+
+`lib/data/index_source.dart` — `IndexStore(dir).load()`: a cached `index.bin`
+younger than `maxIndexAge` (7 days) is used as is; otherwise the zip is
+downloaded, `buildIndex` runs in an `Isolate.run` (the parse is seconds of CPU
+and must never block a frame) and writes `index.bin`. **Any failure falls back
+to the cached index** — the planner has to work with every feed down. Coarse
+progress only (`IndexStage`): the isolate reports no intermediate stages.
+
+`lib/data/providers.dart` — `transitIndexProvider` (FutureProvider),
+`indexStageProvider` (first-run chip), `stopClustersProvider`,
+`stopModesProvider` (route types per stop, for the map dot colour).
 
 ## Built in phase 1
 

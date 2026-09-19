@@ -9,7 +9,7 @@ Read this once per task. Do not paste it into prompts.
 |---|---|---|
 | 0 | Token/workflow setup: repo, skills, graphify | **done** |
 | 1 | Data + routing core, no UI | **done** |
-| 2 | Shell, map, stops | todo |
+| 2 | Shell, map, stops | **done** |
 | 3 | Realtime + vehicles + entity sheets | todo |
 | — | **GATE 1** design: palette, line style, UI samples | blocked on 3 |
 | 4 | Search (Photon, stops, lines, vehicles) | todo |
@@ -68,3 +68,7 @@ tour. README, licence and in-app About complete.
   feed; the planner finds a 233 m answer against Google's 551 m. See the
   `piedemove-routing` skill for the evidence and what the golden test pins.
 - Old project: `../piemove-maps`, read-only, data facts only, copy no code.
+- Map: `maplibre_gl` over OpenFreeMap. Its glyphs are **Noto Sans Regular** —
+  every symbol layer must set `textFont`, or the style 404s the default stack.
+- The phone must be unlocked (secure keyguard, encrypted storage) before `adb`
+  can launch the app at all; a locked phone lands in `FallbackHome`.
