@@ -88,7 +88,8 @@ navigation. A navigation stack backs it; back steps out one level.
   active period.
 
 **Every sheet is a `DraggableScrollableSheet`** with snaps at ~15%, ~50%, ~92% —
-including the trip results list.
+including the trip results list. Each sheet body sits in a `SafeArea(top:
+false)`: without it the last row hides under the system navigation bar.
 
 ## Trip detail (§11.6)
 
@@ -161,13 +162,20 @@ for approval of look, palette and line style before phase 6.
 - `lib/ui/theme/tokens.dart`: `PmTokens` theme extension — `ModeColors`,
   `WalkColors` (3 tiers), `live`, and `Gap` (screen 16, element 12, row 48,
   tapTarget 44). Read with `context.tokens`. `app_theme.dart` builds the two
-  themes; the system font stands in until Google Sans Flex is verified at
-  GATE 1.
+  themes.
+- **Google Sans Flex is bundled** (`assets/fonts/GoogleSansFlex.ttf`, OFL 1.1,
+  verified with fonttools: axes wght 1-1000, wdth 25-151, opsz, GRAD, ROND,
+  slnt). One variable file, so every `TextTheme` style carries an explicit
+  `FontVariation('wght', ...)` — Flutter fakes the weight otherwise.
+  `pmCondensed(style)` adds the width axis for times and distances.
 - `lib/ui/map/map_view.dart`: MapLibre (`maplibre_gl` 0.27) over OpenFreeMap —
   `styles/dark` when the phone is dark, `styles/positron` when light. The stop
   source is one clustered GeoJSON source (`pm-stops`), rebuilt with
   `setGeoJsonSource` when the index arrives after the style. Layers, each in
-  its own try/catch feeding `mapStatusProvider`: `pm-stop-clusters`,
+  its own try/catch feeding `mapStatusProvider`: `pm-stop-clusters` (circle,
+  coloured by the cluster's most distinctive mode from the `b`/`t`/`m`/`f`
+  flags aggregated with `max`; a split-pie **sprite** was tried and dropped —
+  maplibre-native never showed the registered images),
   `pm-stop-cluster-count`, `pm-stop-touch` (invisible r=22 tap target),
   `pm-stop-poles`, `pm-stop-labels`. Poles and labels from `poleMinZoom` 15,
   clusters below it (`clusterMaxZoom` 14), labels at constant opacity.

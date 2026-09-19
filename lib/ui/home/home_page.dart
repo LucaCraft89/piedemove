@@ -315,16 +315,18 @@ class _WhenRow extends ConsumerWidget {
           const SizedBox(width: 8),
           ChoiceChip(
             label: Text(query.whenMode == WhenMode.departAt && label != null
-                ? 'Parti alle $label'
+                ? 'Parti $label'
                 : 'Parti alle'),
             selected: query.whenMode == WhenMode.departAt,
             onSelected: (_) => pickTime(WhenMode.departAt),
           ),
           const SizedBox(width: 8),
           ChoiceChip(
+            // Short labels: the three chips plus Cerca must fit one row
+            // without the last one being cut mid-word.
             label: Text(query.whenMode == WhenMode.arriveBy && label != null
-                ? 'Arriva entro $label'
-                : 'Arriva entro'),
+                ? 'Arriva $label'
+                : 'Arriva'),
             selected: query.whenMode == WhenMode.arriveBy,
             onSelected: (_) => pickTime(WhenMode.arriveBy),
           ),

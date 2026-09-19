@@ -186,6 +186,13 @@ class _MapViewState extends ConsumerState<MapView> {
           cluster: true,
           clusterRadius: 60,
           clusterMaxZoom: poleMinZoom - 1,
+          // Which modes ended up in this bubble: `max` over the per-stop flags.
+          clusterProperties: {
+            'b': ['max', ['get', 'b']],
+            't': ['max', ['get', 't']],
+            'm': ['max', ['get', 'm']],
+            'f': ['max', ['get', 'f']],
+          },
         ),
       );
     });
@@ -202,13 +209,25 @@ class _MapViewState extends ConsumerState<MapView> {
       _hex(tokens.modes.bus),
     ];
 
+    // A bubble takes the most distinctive mode inside it: metro > funicular >
+    // tram > bus, the same order as a mixed pole (`ModeColors.ofModes`).
+    // ponytail: one colour, not a pie split — a split bubble needs a sprite per
+    // combination, and maplibre-native would not show them.
+    final clusterColor = [
+      'case',
+      ['==', ['get', 'm'], 1], _hex(tokens.modes.metro),
+      ['==', ['get', 'f'], 1], _hex(tokens.modes.funicular),
+      ['==', ['get', 't'], 1], _hex(tokens.modes.tram),
+      _hex(tokens.modes.bus),
+    ];
+
     await layer('gruppi', () async {
       await controller.addCircleLayer(
         _stopsSource,
         'pm-stop-clusters',
         CircleLayerProperties(
-          circleColor: _hex(tokens.modes.bus),
-          circleOpacity: 0.85,
+          circleColor: clusterColor,
+          circleOpacity: 0.9,
           circleStrokeColor: _hex(surface),
           circleStrokeWidth: 2,
           circleRadius: [

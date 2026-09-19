@@ -100,7 +100,10 @@ class _EntitySheet extends ConsumerWidget {
           color: Theme.of(context).colorScheme.surface,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
           clipBehavior: Clip.antiAlias,
-          child: switch (entity) {
+          // Every sheet body ends above the system navigation bar.
+          child: SafeArea(
+            top: false,
+            child: switch (entity) {
             StopRef(:final stop) =>
               StopBody(stop: stop, controller: controller),
             LineRef(:final route, :final direction) => LineBody(
@@ -112,7 +115,8 @@ class _EntitySheet extends ConsumerWidget {
               VehicleBody(vehicleId: vehicleId, controller: controller),
             AlertRef(:final alertId) =>
               AlertBody(alertId: alertId, controller: controller),
-          },
+            },
+          ),
         ),
       ),
     );

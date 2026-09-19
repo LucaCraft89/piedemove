@@ -65,13 +65,17 @@ class _TripSheetState extends ConsumerState<TripSheet> {
         color: Theme.of(context).colorScheme.surface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
         clipBehavior: Clip.antiAlias,
-        child: trip.selected == null
+        // The list must end above the system navigation bar, not under it.
+        child: SafeArea(
+          top: false,
+          child: trip.selected == null
             ? _Results(controller: controller, now: DateTime.now())
             : _Detail(
                 controller: controller,
                 index: trip.selected!,
                 now: DateTime.now(),
               ),
+        ),
       ),
     );
   }

@@ -27,6 +27,12 @@ Map<String, dynamic> stopFeatureCollection(
         'stop': s,
         'name': cleanStopName(ix.stopNames[s]),
         'mode': _modeKey(modes),
+        // Per-mode flags, so a cluster can aggregate them with `max` and pick
+        // the sprite split between the modes it actually contains.
+        'b': modes.contains(RouteType.bus) ? 1 : 0,
+        't': modes.contains(RouteType.tram) ? 1 : 0,
+        'm': modes.contains(RouteType.metro) ? 1 : 0,
+        'f': modes.contains(RouteType.funicular) ? 1 : 0,
       },
     });
   }

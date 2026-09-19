@@ -53,7 +53,11 @@ class NearbySheet extends ConsumerWidget {
         color: Theme.of(context).colorScheme.surface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
         clipBehavior: Clip.antiAlias,
-        child: _NearbyList(controller: scrollController, onStopTap: onStopTap),
+        // The list must end above the system navigation bar, not under it.
+        child: SafeArea(
+          top: false,
+          child: _NearbyList(controller: scrollController, onStopTap: onStopTap),
+        ),
       ),
     );
   }
