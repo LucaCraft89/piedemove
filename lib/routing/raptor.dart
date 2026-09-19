@@ -31,6 +31,7 @@ class PlanRequest {
     this.maxExtraMinutes = 20,
     this.windowMinutes = 60,
     this.suspendedStops = const <int>{},
+    this.excludedRouteTypes = const <int>{},
     this.detouredRoutes = const <int>{},
   });
 
@@ -49,6 +50,9 @@ class PlanRequest {
   final int maxExtraMinutes;
   final int windowMinutes;
   final Set<int> suspendedStops;
+
+  /// GTFS `route_type`s the user switched off in Settings (§11.7).
+  final Set<int> excludedRouteTypes;
   final Set<int> detouredRoutes;
 }
 
@@ -166,6 +170,9 @@ class Planner {
 
       final newlyMarked = <int>{};
       patternStart.forEach((pattern, startPos) {
+        if (req.excludedRouteTypes.contains(ix.routeTypeOfPattern(pattern))) {
+          return;
+        }
         final active = <_Active>[];
         final length = ix.patternLength(pattern);
         for (var pos = startPos; pos < length; pos++) {
@@ -400,6 +407,9 @@ class Planner {
         i < ix.stopPatternOffset[boardStop + 1];
         i++) {
       final pattern = ix.stopPattern[i];
+      if (req.excludedRouteTypes.contains(ix.routeTypeOfPattern(pattern))) {
+        continue;
+      }
       final boardPos = ix.stopPatternPos[i];
       var alightPos = -1;
       for (var pos = boardPos + 1; pos < ix.patternLength(pattern); pos++) {

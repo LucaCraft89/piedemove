@@ -233,3 +233,40 @@ for approval of look, palette and line style before phase 6.
   `Fermata <code> · <metres>` plus the line badges instead.
 - `TransitIndex.routesAt(stop)` is the shared "lines serving this stop" helper
   (stop sheet and search both use it).
+
+## Built in phase 5 (planning UI, settings)
+
+- `lib/settings/settings.dart`: `PmSettings` (max extra minutes, walk cap, walk
+  speed, min transfer, modes, theme) + `settingsProvider`, persisted as one JSON
+  blob in SharedPreferences; a corrupt or older shape resets to the defaults.
+  `toggleMode` never lets the last mode go off. Language stays Italian: the
+  switch needs l10n, which no phase has done yet.
+- `lib/ui/trip/trip_plan.dart`: `TripQuery` (from/to as `Place`, `WhenMode` now /
+  departAt / arriveBy), `TripState` (result, tab, selected leg card, sheet
+  hidden) and `TripPlanController`. **Planning is an explicit action**, never a
+  watch — the alert filters and live feeds change every few seconds and a search
+  must not rerun under the user. `planRequestFor` is pure and pinned by tests.
+- `lib/ui/trip/trip_format.dart`: `hhmm`, `durationLabel`, `metresLabel`,
+  `leavesInLabel`, `legLines`, `tightConnection` (< 120 s), `transfersLabel`.
+- `lib/ui/trip/trip_sheet.dart`: one `DraggableScrollableSheet` (0.15/0.5/0.92)
+  holding both the results list and the trip detail — detail is the same sheet
+  with a back arrow, so there is one navigation model. Cards lead with
+  `hh:mm → hh:mm`, duration and a coloured walk chip, then the full badge chain
+  (every serving line), then countdown, transfers, delay and "cambio stretto".
+  Alert banner above the tabs (Più veloce / Bilanciato). A 20 s timer ticks the
+  countdowns. Detail: Ricalcola + Avvia (Avvia is phase 7), walk/transfer steps,
+  ride steps with expandable "N fermate" and the other lines for the same hop.
+- `lib/ui/home/home_page.dart`: `_PlannerCard` (from, to, swap, when chips,
+  Cerca). Empty origin means "La mia posizione". The trip sheet replaces the
+  nearby sheet while a result is up; closing it leaves **Mostra i percorsi** and
+  **Cancella** chips. Pills: Cerca, Veicoli, Avvisi, Filtri, Impostazioni wired;
+  Linee waits for phase 6.
+- `lib/ui/settings/settings_page.dart`: `openSettings` (page) and `showFilters`
+  (the Filtri pill) share one `PlanningControls` widget; in the Filtri sheet a
+  change replans immediately. Data status lists the index version and each live
+  feed's last fetch, HTTP status, bytes and a refresh button.
+- `openSearch(context, pick: true)` turns the search page into a place chooser:
+  it answers a `Place` (a stop becomes one at its coordinates) and hides the
+  line and vehicle sections.
+- The journey is **not drawn on the map yet** — journey geometry belongs to the
+  line work in phase 6.

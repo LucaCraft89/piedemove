@@ -135,3 +135,12 @@ ride-and-walk journey, and some ride leg carries more than one line.
 and is run by `test/trips_test.dart`. The §15 "pin the top five discovered
 hops" step is still open: the wins shift with the daily feed, so they need
 picking by hand from `dart tool/discover_hops.dart`.
+
+## Built in phase 5 (wiring)
+
+`PlanRequest.excludedRouteTypes` skips whole patterns in the round scan and in
+the every-line post-pass, so a mode switched off in Settings never appears.
+`lib/routing/providers.dart` holds `footpathsProvider` (built on the UI isolate
+the first time something plans), `plannerProvider`, `suspendedStopsProvider`
+(alert effect 1) and `detouredRoutesProvider` (effect 4), plus
+`activeAlertsProvider` for the results banner.

@@ -1,8 +1,9 @@
 /// Home (§11.2): full-screen map, search bar, pill row, my-position button in
 /// the corner, and the nearby-arrivals sheet.
 ///
-/// The pills are wired in later phases; they are here so the shell is the one
-/// the rest of the app grows into.
+/// Phase 5 wires the planner in: the card takes a from and a to, the trip sheet
+/// replaces the nearby list while a result is up, and closing it leaves a
+/// reopen chip. Linee stays for phase 6.
 library;
 
 import 'package:flutter/material.dart';
@@ -12,14 +13,17 @@ import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:piedemove/data/index_source.dart';
 import 'package:piedemove/data/providers.dart';
 import 'package:piedemove/location/device_location.dart';
-import 'package:piedemove/places/saved.dart';
+import 'package:piedemove/places/photon.dart';
 import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/ui/map/map_view.dart';
 import 'package:piedemove/ui/nav/entity.dart';
 import 'package:piedemove/ui/sheets/alert_sheet.dart';
 import 'package:piedemove/ui/search/search_page.dart';
+import 'package:piedemove/ui/settings/settings_page.dart';
 import 'package:piedemove/ui/sheets/nearby_sheet.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
+import 'package:piedemove/ui/trip/trip_plan.dart';
+import 'package:piedemove/ui/trip/trip_sheet.dart';
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -54,6 +58,9 @@ class _HomePageState extends ConsumerState<HomePage> {
     final indexState = ref.watch(transitIndexProvider);
     final stage = ref.watch(indexStageProvider);
     final stale = ref.watch(realtimeProvider).staleFeeds();
+    final trip = ref.watch(tripPlanProvider);
+    final showTrip =
+        !trip.sheetHidden && (trip.planning || trip.result != null);
 
     return Scaffold(
       body: Stack(
@@ -68,7 +75,7 @@ class _HomePageState extends ConsumerState<HomePage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const _SearchBar(),
+                  const _PlannerCard(),
                   const SizedBox(height: Gap.element),
                   const _PillRow(),
                   if (indexState.isLoading)
@@ -76,6 +83,11 @@ class _HomePageState extends ConsumerState<HomePage> {
                   if (indexState.hasError)
                     const _Chip('Orari non disponibili'),
                   if (status != null) _Chip(status),
+                  if (trip.sheetHidden && trip.result != null)
+                    _ReopenChip(
+                      onReopen: ref.read(tripPlanProvider.notifier).reopenSheet,
+                      onClear: ref.read(tripPlanProvider.notifier).clear,
+                    ),
                   if (stale.length == RtFeedKind.values.length)
                     const _Chip('Dati in tempo reale non disponibili')
                   else if (stale.isNotEmpty)
@@ -94,9 +106,12 @@ class _HomePageState extends ConsumerState<HomePage> {
               child: const Icon(Icons.my_location),
             ),
           ),
-          NearbySheet(
-            onStopTap: (stop) => openEntity(context, ref, StopRef(stop)),
-          ),
+          if (showTrip)
+            const TripSheet()
+          else
+            NearbySheet(
+              onStopTap: (stop) => openEntity(context, ref, StopRef(stop)),
+            ),
         ],
       ),
     );
@@ -109,61 +124,245 @@ String _stageLabel(IndexStage stage) => switch (stage) {
       _ => 'Carico gli orari…',
     };
 
-class _SearchBar extends ConsumerWidget {
-  const _SearchBar();
+/// From, to, swap and when (§11.4). The planner runs on Cerca, not on every
+/// keystroke: a search is a decision, and it costs a full RAPTOR pass.
+class _PlannerCard extends ConsumerWidget {
+  const _PlannerCard();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
-    final pinned = ref.watch(selectedPlaceProvider);
+    final plan = ref.read(tripPlanProvider.notifier);
+    final query = ref.watch(tripPlanProvider).query;
+    final me = ref.watch(myPositionProvider);
+
+    Place? myPlace() => me == null
+        ? null
+        : Place(
+            name: 'La mia posizione',
+            address: '',
+            lat: me.latitude,
+            lon: me.longitude,
+          );
+
+    Future<void> pick(bool origin) async {
+      final place = await openSearch(context, pick: true);
+      if (place == null) return;
+      origin ? plan.setFrom(place) : plan.setTo(place);
+    }
+
+    void search() {
+      if (query.from == null) plan.setFrom(myPlace());
+      plan.plan();
+    }
+
+    final canSearch = query.to != null && (query.from != null || me != null);
+
     return Material(
       elevation: 3,
       color: scheme.surface,
-      borderRadius: BorderRadius.circular(28),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(28),
-        onTap: () => openSearch(context),
-        child: SizedBox(
-          height: Gap.row,
-          child: Row(
-            children: [
-              const SizedBox(width: Gap.element),
-              Icon(Icons.search, color: scheme.onSurfaceVariant),
-              const SizedBox(width: Gap.element),
-              Expanded(
-                child: Text(
-                  pinned?.name ?? 'Dove vai?',
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: pinned == null
-                        ? scheme.onSurfaceVariant
-                        : scheme.onSurface,
+      borderRadius: BorderRadius.circular(20),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+            horizontal: Gap.element, vertical: 8),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    children: [
+                      _EndpointRow(
+                        icon: Icons.trip_origin,
+                        hint: me == null
+                            ? 'Da dove parti?'
+                            : 'La mia posizione',
+                        place: query.from,
+                        onTap: () => pick(true),
+                        onClear: query.from == null
+                            ? null
+                            : () => plan.setFrom(null),
+                      ),
+                      Divider(height: 1, color: scheme.outlineVariant),
+                      _EndpointRow(
+                        icon: Icons.place,
+                        hint: 'Dove vai?',
+                        place: query.to,
+                        onTap: () => pick(false),
+                        onClear:
+                            query.to == null ? null : () => plan.setTo(null),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-              if (pinned != null)
                 IconButton(
-                  tooltip: 'Togli il segnaposto',
-                  onPressed: () =>
-                      ref.read(selectedPlaceProvider.notifier).state = null,
-                  icon: const Icon(Icons.close),
-                )
-              else
-                // Swap needs an origin and a destination: phase 5.
-                const IconButton(
                   tooltip: 'Inverti partenza e arrivo',
-                  onPressed: null,
-                  icon: Icon(Icons.swap_vert),
+                  onPressed: query.from == null && query.to == null
+                      ? null
+                      : plan.swap,
+                  icon: const Icon(Icons.swap_vert),
                 ),
-            ],
-          ),
+              ],
+            ),
+            Row(
+              children: [
+                Expanded(child: _WhenRow(query: query)),
+                const SizedBox(width: 8),
+                FilledButton.icon(
+                  onPressed: canSearch ? search : null,
+                  icon: const Icon(Icons.directions, size: 18),
+                  label: const Text('Cerca'),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-/// Veicoli and Avvisi work from phase 3; the rest arrive with their phases.
+class _EndpointRow extends StatelessWidget {
+  const _EndpointRow({
+    required this.icon,
+    required this.hint,
+    required this.place,
+    required this.onTap,
+    required this.onClear,
+  });
+
+  final IconData icon;
+  final String hint;
+  final Place? place;
+  final VoidCallback onTap;
+  final VoidCallback? onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onTap,
+      child: SizedBox(
+        height: Gap.row,
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: scheme.onSurfaceVariant),
+            const SizedBox(width: Gap.element),
+            Expanded(
+              child: Text(
+                place?.name ?? hint,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color:
+                      place == null ? scheme.onSurfaceVariant : scheme.onSurface,
+                ),
+              ),
+            ),
+            if (onClear != null)
+              IconButton(
+                tooltip: 'Cancella',
+                visualDensity: VisualDensity.compact,
+                onPressed: onClear,
+                icon: const Icon(Icons.close, size: 18),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Ora · Parti alle · Arriva entro. Picking a time switches the mode with it.
+class _WhenRow extends ConsumerWidget {
+  const _WhenRow({required this.query});
+
+  final TripQuery query;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final plan = ref.read(tripPlanProvider.notifier);
+
+    Future<void> pickTime(WhenMode mode) async {
+      final base = query.when ?? DateTime.now();
+      final time = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay.fromDateTime(base),
+      );
+      if (time == null) return;
+      final now = DateTime.now();
+      plan.setWhen(
+        mode,
+        DateTime(now.year, now.month, now.day, time.hour, time.minute),
+      );
+    }
+
+    final label = query.whenMode == WhenMode.now || query.when == null
+        ? null
+        : '${query.when!.hour.toString().padLeft(2, '0')}:'
+            '${query.when!.minute.toString().padLeft(2, '0')}';
+
+    return SizedBox(
+      height: 36,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: [
+          ChoiceChip(
+            label: const Text('Ora'),
+            selected: query.whenMode == WhenMode.now,
+            onSelected: (_) => plan.setWhen(WhenMode.now),
+          ),
+          const SizedBox(width: 8),
+          ChoiceChip(
+            label: Text(query.whenMode == WhenMode.departAt && label != null
+                ? 'Parti alle $label'
+                : 'Parti alle'),
+            selected: query.whenMode == WhenMode.departAt,
+            onSelected: (_) => pickTime(WhenMode.departAt),
+          ),
+          const SizedBox(width: 8),
+          ChoiceChip(
+            label: Text(query.whenMode == WhenMode.arriveBy && label != null
+                ? 'Arriva entro $label'
+                : 'Arriva entro'),
+            selected: query.whenMode == WhenMode.arriveBy,
+            onSelected: (_) => pickTime(WhenMode.arriveBy),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The trip sheet was closed: reopen it, or clear the trip (§11.2).
+class _ReopenChip extends StatelessWidget {
+  const _ReopenChip({required this.onReopen, required this.onClear});
+
+  final VoidCallback onReopen;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(top: Gap.element),
+        child: Row(
+          children: [
+            ActionChip(
+              avatar: const Icon(Icons.directions, size: 16),
+              label: const Text('Mostra i percorsi'),
+              onPressed: onReopen,
+            ),
+            const SizedBox(width: 8),
+            ActionChip(
+              avatar: const Icon(Icons.close, size: 16),
+              label: const Text('Cancella'),
+              onPressed: onClear,
+            ),
+          ],
+        ),
+      );
+}
+
+/// Veicoli, Avvisi, Filtri and Impostazioni are live; Linee waits for phase 6.
 class _PillRow extends ConsumerWidget {
   const _PillRow();
 
@@ -176,6 +375,12 @@ class _PillRow extends ConsumerWidget {
       child: ListView(
         scrollDirection: Axis.horizontal,
         children: [
+          ActionChip(
+            avatar: const Icon(Icons.search, size: 16),
+            label: const Text('Cerca'),
+            onPressed: () => openSearch(context),
+          ),
+          const SizedBox(width: 8),
           FilterChip(
             avatar: const Icon(Icons.directions_bus, size: 16),
             label: const Text('Veicoli'),
@@ -189,18 +394,25 @@ class _PillRow extends ConsumerWidget {
             label: Text(alerts == 0 ? 'Avvisi' : 'Avvisi ($alerts)'),
             onPressed: () => showAlertList(context, ref),
           ),
-          for (final (label, icon) in const [
-            ('Filtri', Icons.tune),
-            ('Linee', Icons.timeline),
-            ('Impostazioni', Icons.settings),
-          ]) ...[
-            const SizedBox(width: 8),
-            ActionChip(
-              avatar: Icon(icon, size: 16),
-              label: Text(label),
-              onPressed: null,
-            ),
-          ],
+          const SizedBox(width: 8),
+          ActionChip(
+            avatar: const Icon(Icons.tune, size: 16),
+            label: const Text('Filtri'),
+            onPressed: () => showFilters(context),
+          ),
+          const SizedBox(width: 8),
+          // Linee arrives with the line network in phase 6.
+          const ActionChip(
+            avatar: Icon(Icons.timeline, size: 16),
+            label: Text('Linee'),
+            onPressed: null,
+          ),
+          const SizedBox(width: 8),
+          ActionChip(
+            avatar: const Icon(Icons.settings, size: 16),
+            label: const Text('Impostazioni'),
+            onPressed: () => openSettings(context),
+          ),
         ],
       ),
     );

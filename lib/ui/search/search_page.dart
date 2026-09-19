@@ -27,12 +27,18 @@ import 'package:piedemove/ui/widgets/line_badge.dart';
 const searchDebounce = Duration(milliseconds: 300);
 const minPlaceQuery = 3;
 
-Future<void> openSearch(BuildContext context) => Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const SearchPage()),
+/// Opens the search page. With [pick] the page is a place chooser for the
+/// planner: it answers the chosen place instead of pinning it, and hides the
+/// line and vehicle sections, which are not somewhere you can travel to.
+Future<Place?> openSearch(BuildContext context, {bool pick = false}) =>
+    Navigator.of(context).push<Place>(
+      MaterialPageRoute<Place>(builder: (_) => SearchPage(pick: pick)),
     );
 
 class SearchPage extends ConsumerStatefulWidget {
-  const SearchPage({super.key});
+  const SearchPage({super.key, this.pick = false});
+
+  final bool pick;
 
   @override
   ConsumerState<SearchPage> createState() => _SearchPageState();
@@ -95,6 +101,10 @@ class _SearchPageState extends ConsumerState<SearchPage> {
 
   void _pick(Place place) {
     ref.read(recentPlacesProvider.notifier).add(place);
+    if (widget.pick) {
+      Navigator.of(context).pop(place);
+      return;
+    }
     ref.read(selectedPlaceProvider.notifier).state = place;
     ref.read(mapControllerProvider)?.animateCamera(
           CameraUpdate.newLatLngZoom(LatLng(place.lat, place.lon), 16),
@@ -124,8 +134,10 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           controller: _text,
           autofocus: true,
           textInputAction: TextInputAction.search,
-          decoration: const InputDecoration(
-            hintText: 'Cerca luogo, fermata, linea o veicolo',
+          decoration: InputDecoration(
+            hintText: widget.pick
+                ? 'Cerca luogo o fermata'
+                : 'Cerca luogo, fermata, linea o veicolo',
             border: InputBorder.none,
           ),
           onChanged: _onChanged,
@@ -172,8 +184,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             for (final p in _places) _placeTile(p),
             if (stops.isNotEmpty) const _Section('Fermate'),
             for (final s in stops) _stopTile(ix!, s, me),
-            if (routes.isNotEmpty) const _Section('Linee'),
-            for (final r in routes)
+            if (routes.isNotEmpty && !widget.pick) const _Section('Linee'),
+            if (!widget.pick)
+              for (final r in routes)
               ListTile(
                 leading: LineBadge(
                   shortName: ix!.routeShortNames[r],
@@ -187,8 +200,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                   openEntity(context, ref, LineRef(r));
                 },
               ),
-            if (vehicles.isNotEmpty) const _Section('Veicoli'),
-            for (final v in vehicles)
+            if (vehicles.isNotEmpty && !widget.pick) const _Section('Veicoli'),
+            if (!widget.pick)
+              for (final v in vehicles)
               ListTile(
                 leading: const Icon(Icons.directions_bus),
                 title: Text(v.label ?? v.id),
@@ -258,6 +272,15 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       ),
       isThreeLine: routes.length > 3,
       onTap: () {
+        if (widget.pick) {
+          _pick(Place(
+            name: cleanStopName(ix.stopNames[stop]),
+            address: 'Fermata ${ix.stopCodes[stop]}',
+            lat: ix.stopLat[stop],
+            lon: ix.stopLon[stop],
+          ));
+          return;
+        }
         Navigator.of(context).pop();
         openEntity(context, ref, StopRef(stop));
       },

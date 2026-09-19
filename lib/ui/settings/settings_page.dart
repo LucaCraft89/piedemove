@@ -1,0 +1,289 @@
+/// Settings (§11.7) and the Filtri sheet: the same planning controls in both.
+///
+/// Advanced/raw-data mode and About land in phase 8; language needs l10n first,
+/// so the app stays Italian here.
+library;
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import 'package:piedemove/data/providers.dart';
+import 'package:piedemove/data/transit_index.dart';
+import 'package:piedemove/realtime/store.dart';
+import 'package:piedemove/settings/settings.dart';
+import 'package:piedemove/ui/theme/tokens.dart';
+import 'package:piedemove/ui/trip/trip_plan.dart';
+import 'package:piedemove/ui/widgets/line_badge.dart';
+
+Future<void> openSettings(BuildContext context) => Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const SettingsPage()),
+    );
+
+/// The Filtri pill: the planning limits alone, without leaving the map.
+Future<void> showFilters(BuildContext context) => showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => const SafeArea(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(Gap.screen, 0, Gap.screen, Gap.screen),
+          child: SingleChildScrollView(child: PlanningControls(replan: true)),
+        ),
+      ),
+    );
+
+class SettingsPage extends ConsumerWidget {
+  const SettingsPage({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(settingsProvider);
+    final controller = ref.read(settingsProvider.notifier);
+    return Scaffold(
+      appBar: AppBar(title: const Text('Impostazioni')),
+      body: ListView(
+        padding: const EdgeInsets.all(Gap.screen),
+        children: [
+          const PlanningControls(),
+          const _Header('Aspetto'),
+          SegmentedButton<ThemeMode>(
+            segments: const [
+              ButtonSegment(
+                  value: ThemeMode.system, label: Text('Telefono')),
+              ButtonSegment(value: ThemeMode.dark, label: Text('Scuro')),
+              ButtonSegment(value: ThemeMode.light, label: Text('Chiaro')),
+            ],
+            selected: {settings.themeMode},
+            onSelectionChanged: (m) =>
+                controller.edit((s) => s.copyWith(themeMode: m.first)),
+          ),
+          const _Header('Lingua'),
+          const ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text('Italiano'),
+            subtitle: Text('L\'inglese arriva con le traduzioni.'),
+            enabled: false,
+          ),
+          const _Header('Stato dei dati'),
+          const _DataStatus(),
+        ],
+      ),
+    );
+  }
+}
+
+/// Max extra time, walk cap, walk speed, transfer time and modes — one widget,
+/// used by both Settings and the Filtri sheet.
+class PlanningControls extends ConsumerWidget {
+  const PlanningControls({super.key, this.replan = false});
+
+  /// True in the Filtri sheet: changing a limit re-runs the current search.
+  final bool replan;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(settingsProvider);
+    final controller = ref.read(settingsProvider.notifier);
+
+    void changed(PmSettings Function(PmSettings) change) {
+      controller.edit(change);
+      if (replan && ref.read(tripPlanProvider).result != null) {
+        ref.read(tripPlanProvider.notifier).plan();
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _Header('Limiti del percorso'),
+        _SliderRow(
+          label: 'Minuti in più accettati',
+          value: '+${settings.maxExtraMinutes} min',
+          slider: Slider(
+            value: settings.maxExtraMinutes.toDouble(),
+            min: 5,
+            max: 60,
+            divisions: 11,
+            onChanged: (v) =>
+                changed((s) => s.copyWith(maxExtraMinutes: v.round())),
+          ),
+        ),
+        _SliderRow(
+          label: 'Cammino massimo',
+          value: '${settings.walkCapMetres.round()} m',
+          slider: Slider(
+            value: settings.walkCapMetres,
+            min: 200,
+            max: 2000,
+            divisions: 18,
+            onChanged: (v) => changed(
+                (s) => s.copyWith(walkCapMetres: (v / 100).round() * 100),),
+          ),
+        ),
+        _SliderRow(
+          label: 'Tempo minimo di cambio',
+          value: '${settings.minTransferSeconds ~/ 60} min',
+          slider: Slider(
+            value: settings.minTransferSeconds.toDouble(),
+            min: 0,
+            max: 300,
+            divisions: 5,
+            onChanged: (v) => changed(
+                (s) => s.copyWith(minTransferSeconds: v.round()),),
+          ),
+        ),
+        const _Header('Velocità a piedi'),
+        Wrap(
+          spacing: 8,
+          children: [
+            for (final (speed, label) in const [
+              (walkSpeedSlow, 'Lenta'),
+              (walkSpeedNormal, 'Normale'),
+              (walkSpeedFast, 'Veloce'),
+            ])
+              ChoiceChip(
+                label: Text('$label (${speed.toStringAsFixed(1)} m/s)'),
+                selected: (settings.walkSpeed - speed).abs() < 0.01,
+                onSelected: (_) => changed((s) => s.copyWith(walkSpeed: speed)),
+              ),
+          ],
+        ),
+        const _Header('Mezzi'),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final (type, label) in const [
+              (RouteType.bus, 'Bus'),
+              (RouteType.tram, 'Tram'),
+              (RouteType.metro, 'Metro'),
+              (RouteType.funicular, 'Funicolare'),
+            ])
+              FilterChip(
+                avatar: Icon(modeIcon(type), size: 16),
+                label: Text(label),
+                selected: settings.modes.contains(type),
+                onSelected: (on) {
+                  controller.toggleMode(type, on);
+                  if (replan && ref.read(tripPlanProvider).result != null) {
+                    ref.read(tripPlanProvider.notifier).plan();
+                  }
+                },
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _SliderRow extends StatelessWidget {
+  const _SliderRow({
+    required this.label,
+    required this.value,
+    required this.slider,
+  });
+
+  final String label;
+  final String value;
+  final Widget slider;
+
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(child: Text(label)),
+              Text(value,
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+            ],
+          ),
+          slider,
+        ],
+      );
+}
+
+/// Per-feed last fetch, status, bytes, plus a refresh button (§11.7).
+class _DataStatus extends ConsumerWidget {
+  const _DataStatus();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final rt = ref.watch(realtimeProvider);
+    final ix = ref.watch(transitIndexProvider).valueOrNull;
+    final now = DateTime.now();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.schedule),
+          title: const Text('Orari GTT'),
+          subtitle: Text(ix == null
+              ? 'non caricati'
+              : 'versione ${ix.feedVersion} · ${ix.stopCount} fermate'),
+        ),
+        for (final kind in RtFeedKind.values)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(_feedIcon(kind)),
+            title: Text(_feedLabel(kind)),
+            subtitle: Text(_healthLine(rt.health[kind], now)),
+            trailing: IconButton(
+              tooltip: 'Aggiorna',
+              icon: const Icon(Icons.refresh),
+              onPressed: () => ref.read(realtimeProvider.notifier).pollOnce(kind),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+String _feedLabel(RtFeedKind kind) => switch (kind) {
+      RtFeedKind.vehicles => 'Posizioni dei veicoli',
+      RtFeedKind.tripUpdates => 'Ritardi delle corse',
+      RtFeedKind.alerts => 'Avvisi di servizio',
+    };
+
+IconData _feedIcon(RtFeedKind kind) => switch (kind) {
+      RtFeedKind.vehicles => Icons.directions_bus,
+      RtFeedKind.tripUpdates => Icons.timer,
+      RtFeedKind.alerts => Icons.warning_amber,
+    };
+
+String _healthLine(FeedHealth? health, DateTime now) {
+  if (health == null) return 'mai aggiornato';
+  final parts = <String>[];
+  if (health.lastSuccess != null) {
+    final ago = now.difference(health.lastSuccess!);
+    parts.add(ago.inMinutes < 1
+        ? 'aggiornato ora'
+        : 'aggiornato ${ago.inMinutes} min fa');
+  } else {
+    parts.add('mai aggiornato');
+  }
+  if (health.status != null) parts.add('HTTP ${health.status}');
+  if (health.bytes != null) parts.add('${health.bytes} byte');
+  if (health.lastError != null) parts.add(health.lastError!);
+  return parts.join(' · ');
+}
+
+class _Header extends StatelessWidget {
+  const _Header(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(top: Gap.screen, bottom: 4),
+        child: Text(
+          text,
+          style: Theme.of(context)
+              .textTheme
+              .labelLarge
+              ?.copyWith(color: Theme.of(context).colorScheme.primary),
+        ),
+      );
+}

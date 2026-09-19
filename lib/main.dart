@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'settings/settings.dart';
 import 'ui/home/home_page.dart';
 import 'ui/theme/app_theme.dart';
 
@@ -9,15 +10,15 @@ void main() {
   runApp(const ProviderScope(child: PiedeMoveApp()));
 }
 
-class PiedeMoveApp extends StatelessWidget {
+class PiedeMoveApp extends ConsumerWidget {
   const PiedeMoveApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return MaterialApp(
       title: 'PiedeMove',
       debugShowCheckedModeBanner: false,
-      // Italian by default; the English switch lands with settings (§11.7).
+      // Italian only for now: the English switch needs l10n (§11.7).
       locale: const Locale('it'),
       supportedLocales: const [Locale('it'), Locale('en')],
       localizationsDelegates: const [
@@ -27,7 +28,7 @@ class PiedeMoveApp extends StatelessWidget {
       ],
       theme: lightTheme(),
       darkTheme: darkTheme(),
-      themeMode: ThemeMode.system,
+      themeMode: ref.watch(settingsProvider).themeMode,
       home: const HomePage(),
     );
   }
