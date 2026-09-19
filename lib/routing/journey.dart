@@ -11,6 +11,7 @@ class RideOption {
     required this.departure,
     required this.arrival,
     this.detoured = false,
+    this.scheduledOnly = false,
   });
 
   final String routeShortName;
@@ -22,6 +23,9 @@ class RideOption {
   final int departure;
   final int arrival;
   final bool detoured;
+
+  /// Regione Piemonte bus: timetable only, no live data (phase 9).
+  final bool scheduledOnly;
 }
 
 enum LegKind { walk, ride }
@@ -55,6 +59,10 @@ class Leg {
   final int readyTime;
 
   bool get detoured => options.any((o) => o.detoured);
+
+  /// True when every line that can make this hop is scheduled only.
+  bool get scheduledOnly =>
+      options.isNotEmpty && options.every((o) => o.scheduledOnly);
 }
 
 class Journey {
@@ -73,6 +81,7 @@ class Journey {
   int get rides => legs.where((l) => l.kind == LegKind.ride).length;
   int get transfers => (rides - 1).clamp(0, 99);
   bool get detoured => legs.any((l) => l.detoured);
+  bool get scheduledOnly => legs.any((l) => l.scheduledOnly);
 
   DateTime timeOf(int secondsFromMidnight) =>
       DateTime(date.year, date.month, date.day)

@@ -105,6 +105,7 @@ Set<int> corridorCells(TransitIndex ix) {
   for (var p = 0; p < ix.patternCount; p++) {
     final type = ix.routeTypeOfPattern(p);
     if (type != RouteType.bus && type != RouteType.tram) continue;
+    if (ix.patternScheduledOnly(p)) continue; // regional: never snapped
     for (var i = 0; i + 1 < ix.patternLength(p); i++) {
       final a = ix.patternStopAt(p, i), b = ix.patternStopAt(p, i + 1);
       final steps = 1 +
@@ -159,6 +160,7 @@ List<OsmTile> tilesForIndex(TransitIndex ix) {
   for (var p = 0; p < ix.patternCount; p++) {
     final type = ix.routeTypeOfPattern(p);
     if (type != RouteType.bus && type != RouteType.tram) continue;
+    if (ix.patternScheduledOnly(p)) continue;
     for (var i = 0; i < ix.patternLength(p); i++) {
       final s = ix.patternStopAt(p, i);
       final y = (ix.stopLat[s] / osmTileDegrees).floor();
@@ -233,7 +235,8 @@ double haversineSquaredish(double aLat, double aLon, double bLat, double bLon) {
   return dy * dy + dx * dx;
 }
 
-/// Snaps every bus and tram pattern; metro and funicular keep their shape.
+/// Snaps every GTT bus and tram pattern; metro and funicular keep their shape,
+/// regional (scheduled-only) patterns are left out of the network entirely.
 LineNetwork buildLineNetwork({
   required TransitIndex ix,
   required Map<GraphMode, RoadGraph> graphs,
@@ -250,6 +253,9 @@ LineNetwork buildLineNetwork({
     final type = ix.routeTypeOfPattern(p);
     final len = ix.patternLength(p);
     if (len < 2) continue;
+    // Regional buses have no shapes and no snapped geometry: inside a trip
+    // they draw as approximate chords, and they stay out of the ambient map.
+    if (ix.patternScheduledOnly(p)) continue;
     final stopLat = Float64List(len), stopLon = Float64List(len);
     for (var i = 0; i < len; i++) {
       final s = ix.patternStopAt(p, i);

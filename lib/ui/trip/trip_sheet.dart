@@ -21,6 +21,7 @@ import 'package:piedemove/ui/sheets/alert_sheet.dart';
 import 'package:piedemove/ui/sheets/sheet_parts.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
 import 'package:piedemove/ui/widgets/line_badge.dart';
+import 'package:piedemove/ui/widgets/scheduled_only.dart';
 
 import 'trip_format.dart';
 import 'trip_plan.dart';
@@ -637,6 +638,7 @@ class _RideStepState extends ConsumerState<_RideStep> {
               ),
           ],
         ),
+        if (leg.scheduledOnly) const ScheduledOnlyNote(),
         if (leg.fromStop >= 0)
           _StopLine(
             stop: leg.fromStop,

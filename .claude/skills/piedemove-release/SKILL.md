@@ -5,17 +5,17 @@ description: Licensing, data attribution, fair use, the regional-feed phase, and
 
 # Release
 
-## Phase 9 — regional buses
+## Phase 9 — regional buses — **done**
 
-Ingest the Regione Piemonte GTFS (see `piedemove-data` for the URL).
+Ingest rules and merged-feed numbers live in `piedemove-data`
+("Regional feed"). What the UI does with them:
 
-- Mark a regional stop `gttCovered` if a GTT stop is within 150 m.
-- **Drop any regional route whose stops are all covered.**
-- Snap covered stops onto their GTT stop — this is what creates the cross-feed
-  transfers.
-- **Skip `shapes.txt` entirely**: 183 MB of the 216 MB.
-- Regional legs draw as chords with the approximate marker and show a
-  "no live data" marker. Label the mode "scheduled only".
+- `RideOption.scheduledOnly` / `Leg.scheduledOnly` carry the flag out of the
+  planner; `ScheduledOnlyNote` (`lib/ui/widgets/scheduled_only.dart`) is the
+  marker, shown on each scheduled-only trip leg and at the top of the line
+  sheet ("Bus extraurbano · solo orario").
+- Regional legs have no snapped geometry, so they draw as approximate chords.
+- About lists Regione Piemonte, CC-BY 4.0, "senza tempo reale".
 
 ## Phase 10 — release
 

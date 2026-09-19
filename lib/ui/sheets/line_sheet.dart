@@ -14,6 +14,7 @@ import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/ui/nav/entity.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
 import 'package:piedemove/ui/widgets/line_badge.dart';
+import 'package:piedemove/ui/widgets/scheduled_only.dart';
 
 import 'sheet_parts.dart';
 
@@ -117,6 +118,10 @@ class LineBody extends ConsumerWidget {
           ),
         ),
         AlertTiles(alerts: alerts),
+        if (ix.isScheduledOnly(route))
+          const ScheduledOnlyNote(
+            text: 'Bus extraurbano · solo orario, nessun dato in tempo reale',
+          ),
         const SizedBox(height: Gap.element),
         SegmentedButton<int>(
           segments: const [

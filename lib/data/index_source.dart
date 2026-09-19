@@ -14,6 +14,7 @@ import 'package:http/http.dart' as http;
 import 'feeds.dart';
 import 'gtfs_zip.dart';
 import 'index_build.dart';
+import 'index_merge.dart';
 import 'index_io.dart';
 import 'transit_index.dart';
 
@@ -31,6 +32,7 @@ class IndexStore {
 
   String get indexPath => '${dir.path}/index.bin';
   String get zipPath => '${dir.path}/gtt_gtfs.zip';
+  String get regionalZipPath => '${dir.path}/piemonte_bus.zip';
 
   Future<TransitIndex> load({StageSink? onStage}) async {
     final cached = File(indexPath);
@@ -57,12 +59,30 @@ class IndexStore {
       dir.createSync(recursive: true);
       await File(zipPath).writeAsBytes(response.bodyBytes, flush: true);
 
+      // Scheduled-only regional buses (phase 9). Best effort: the planner has
+      // to work when this feed is down, so a failure just means GTT only.
+      String? regional;
+      try {
+        final r = await http
+            .get(Uri.parse(Feeds.piemonteBusGtfs))
+            .timeout(const Duration(minutes: 10));
+        if (r.statusCode == 200) {
+          await File(regionalZipPath).writeAsBytes(r.bodyBytes, flush: true);
+          regional = regionalZipPath;
+        }
+      } catch (_) {
+        regional = null;
+      }
+
       onStage?.call(IndexStage.building);
       final zip = zipPath;
       final out = indexPath;
       final work = dir.path;
-      await Isolate.run(() => _buildToFile(zip, work, out));
+      await Isolate.run(() => _buildToFile(zip, work, out, regional));
       File(zipPath).deleteSync();
+      if (File(regionalZipPath).existsSync()) {
+        File(regionalZipPath).deleteSync();
+      }
     } catch (_) {
       // Feed unreachable or corrupt: any cached index still beats nothing.
       final ix = cached.existsSync() ? await readIndexFile(indexPath) : null;
@@ -84,11 +104,22 @@ class IndexUnavailable implements Exception {
   String toString() => 'IndexUnavailable: no usable index on the device';
 }
 
-/// Runs in a background isolate: parse the zip, write `index.bin`.
-Future<void> _buildToFile(String zipPath, String workDir, String outPath) async {
+/// Runs in a background isolate: parse the zip(s), write `index.bin`.
+Future<void> _buildToFile(String zipPath, String workDir, String outPath,
+    [String? regionalZipPath]) async {
   final source = GtfsZip(zipPath, Directory(workDir));
   try {
-    final index = await buildIndex(source);
+    var index = await buildIndex(source);
+    if (regionalZipPath != null) {
+      final regional = GtfsZip(regionalZipPath, Directory(workDir));
+      try {
+        index = mergeRegional(index, await buildIndex(regional));
+      } catch (_) {
+        // A broken regional feed never costs the user the GTT index.
+      } finally {
+        regional.close();
+      }
+    }
     await writeIndexFile(index, outPath);
   } finally {
     source.close();

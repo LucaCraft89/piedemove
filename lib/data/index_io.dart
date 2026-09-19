@@ -11,7 +11,7 @@ import 'dart:typed_data';
 
 import 'transit_index.dart';
 
-const indexFormatVersion = 1;
+const indexFormatVersion = 2;
 const _magic = 0x504D5631; // "PMV1"
 
 class IndexFormatException implements Exception {
@@ -148,6 +148,7 @@ Uint8List encodeIndex(TransitIndex ix) {
   w.strings(ix.routeShortNames);
   w.strings(ix.routeLongNames);
   w.i8(ix.routeTypes);
+  w.i8(ix.routeFeed);
   w.i32(ix.patternRoute);
   w.i8(ix.patternDir);
   w.i32(ix.patternStopOffset);
@@ -188,6 +189,7 @@ TransitIndex decodeIndex(Uint8List data) {
     routeShortNames: r.strings(),
     routeLongNames: r.strings(),
     routeTypes: r.i8(),
+    routeFeed: r.i8(),
     patternRoute: r.i32(),
     patternDir: r.i8(),
     patternStopOffset: r.i32(),

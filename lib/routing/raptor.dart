@@ -433,6 +433,7 @@ class Planner {
         departure: departure,
         arrival: ix.arrOf(trip, alightPos) + offset,
         detoured: req.detouredRoutes.contains(route),
+        scheduledOnly: ix.isScheduledOnly(route),
       );
       final existing = byRoute[name];
       if (existing == null || option.departure < existing.departure) {

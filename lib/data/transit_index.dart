@@ -19,6 +19,10 @@ class RouteType {
   static const funicular = 7;
 }
 
+/// `routeFeed` values.
+const feedGtt = 0;
+const feedRegional = 1;
+
 class TransitIndex {
   TransitIndex({
     required this.feedVersion,
@@ -33,6 +37,7 @@ class TransitIndex {
     required this.routeShortNames,
     required this.routeLongNames,
     required this.routeTypes,
+    Int8List? routeFeed,
     required this.patternRoute,
     required this.patternDir,
     required this.patternStopOffset,
@@ -49,7 +54,7 @@ class TransitIndex {
     required this.stopPatternOffset,
     required this.stopPattern,
     required this.stopPatternPos,
-  });
+  }) : routeFeed = routeFeed ?? Int8List(routeIds.length);
 
   final String feedVersion;
 
@@ -67,6 +72,10 @@ class TransitIndex {
   final List<String> routeShortNames;
   final List<String> routeLongNames;
   final Int8List routeTypes;
+
+  /// Which feed a route came from: [feedGtt] or [feedRegional]. Regional
+  /// routes are scheduled only - no realtime, no snapped geometry.
+  final Int8List routeFeed;
 
   final Int32List patternRoute;
   final Int8List patternDir;
@@ -122,6 +131,11 @@ class TransitIndex {
     }
     return out;
   }
+
+  /// Regione Piemonte route: timetable only, never live.
+  bool isScheduledOnly(int route) => routeFeed[route] != feedGtt;
+
+  bool patternScheduledOnly(int p) => isScheduledOnly(patternRoute[p]);
 
   int patternLength(int p) => patternStopOffset[p + 1] - patternStopOffset[p];
 

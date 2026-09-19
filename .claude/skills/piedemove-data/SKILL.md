@@ -56,6 +56,30 @@ TRAPANI 872 -> PESCHIERA 120 is 126 m. BARDONECCHIA 119 -> Via Cristalliera is
 - Refresh weekly on Wi-Fi and on `feed_version` change. The app stays usable on
   the cached index while refreshing.
 
+## Regional feed (phase 9, scheduled only)
+
+`lib/data/index_merge.dart` — `mergeRegional(gtt, regional)`. Both feeds are
+parsed by the same `buildIndex`; the regional one is then folded in:
+
+- a regional stop within **150 m** of a GTT stop *is* that GTT stop (this is
+  what creates the cross-feed transfers); the rest are appended;
+- a route whose stops are **all** covered is dropped - GTT already plans it;
+- ids coming from the regional feed are prefixed `R:`, so no collisions;
+- both calendars are rebased onto one service window;
+- `routeFeed[route]` is `feedGtt` or `feedRegional`; `ix.isScheduledOnly(route)`
+  and `ix.patternScheduledOnly(p)` are the checks everything else uses.
+  `shapes.txt` is never read (183 MB of the 216 MB).
+
+Regional routes are excluded from OSM tiles, the snap corridor and the line
+network (`lib/geo/line_build.dart`), so inside a trip they draw as approximate
+chords and never appear in the ambient map. Realtime never matches them.
+
+Merged build 2026-09-19: regional feed 653 routes / 70,380 stops (10,506 of
+them on a pattern) -> **614 routes kept, 8,768 new stops**; merged index
+15,822 stops, 831 routes, 6,880 patterns, 62,610 trips, **18.3 MB**, ~8 s on a
+laptop. `dart tool/build_index.dart [--no-regional]`. `indexFormatVersion` is
+**2** (adds `routeFeed`); a v1 `index.bin` is rejected and rebuilt.
+
 ## Stop clusters — display only
 
 Same cleaned name **and** within 150 m form one cluster. Never group by name
@@ -117,7 +141,7 @@ progress only (`IndexStage`): the isolate reports no intermediate stages.
 
 `lib/data`: `feeds.dart` (URLs), `csv.dart`, `gtfs_zip.dart` (member -> temp
 file -> line stream), `index_build.dart`, `transit_index.dart`,
-`index_io.dart` (`indexFormatVersion = 1`), `clustering.dart`.
+`index_io.dart` (`indexFormatVersion = 2`), `clustering.dart`.
 `dart tool/build_index.dart` downloads to `build/gtt_gtfs.zip`, writes
 `build/index.bin`. Both are gitignored; tests skip when the index is missing.
 

@@ -53,8 +53,8 @@ class AboutPage extends StatelessWidget {
             const _Source(
               title: 'Regione Piemonte',
               subtitle:
-                  'Bus extraurbani, solo orari programmati (CC-BY 4.0). '
-                  'In arrivo.',
+                  'Bus extraurbani, solo orari programmati, senza tempo '
+                  'reale. Licenza CC-BY 4.0.',
             ),
             const _Section('Niente Google'),
             Text(
