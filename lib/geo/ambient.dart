@@ -11,6 +11,7 @@ import 'dart:math' as math;
 
 import '../data/transit_index.dart';
 import 'line_merge.dart';
+import 'line_smooth.dart';
 import 'lines_io.dart';
 import 'pattern_snap.dart';
 
@@ -76,9 +77,11 @@ String ambientGeoJson(TransitIndex ix, LineNetwork net) {
     final name = ix.routeShortNameOfPattern(p.pattern);
     routeTier[name] = tiers[ix.patternRoute[p.pattern]];
     final snapped = type == RouteType.bus || type == RouteType.tram;
-    for (var i = 1; i < p.vertexCount; i++) {
+    final kept = spurFreeIndices(p.vertexLat, p.vertexLon);
+    for (var k = 1; k < kept.length; k++) {
+      final i = kept[k], prev = kept[k - 1];
       if (snapped && p.vertexWay[i] < 0) {
-        final aLat = p.vertexLat[i - 1] / 1e6, aLon = p.vertexLon[i - 1] / 1e6;
+        final aLat = p.vertexLat[prev] / 1e6, aLon = p.vertexLon[prev] / 1e6;
         final bLat = p.vertexLat[i] / 1e6, bLon = p.vertexLon[i] / 1e6;
         final fwd = aLat < bLat || (aLat == bLat && aLon <= bLon);
         final c = chords.putIfAbsent(
@@ -93,8 +96,8 @@ String ambientGeoJson(TransitIndex ix, LineNetwork net) {
         mode: type,
         route: name,
         way: p.vertexWay[i],
-        aLat: p.vertexLat[i - 1] / 1e6,
-        aLon: p.vertexLon[i - 1] / 1e6,
+        aLat: p.vertexLat[prev] / 1e6,
+        aLon: p.vertexLon[prev] / 1e6,
         bLat: p.vertexLat[i] / 1e6,
         bLon: p.vertexLon[i] / 1e6,
       );
@@ -141,12 +144,62 @@ String ambientGeoJson(TransitIndex ix, LineNetwork net) {
       },
     });
   }
-  for (final chain in chainSegments(merger.segments)) {
+  // Every chain end and chord end is a joint: those vertices stay exact.
+  // Turnaround stubs collapse first: their tip becomes a chain end.
+  var raw = [
+    for (final c in chainSegments(merger.segments))
+      MergedChain(c.mode, c.routes, c.oneDirection, collapseRetrace(c.pts)),
+  ];
+  // Dangling micro stubs go (see [microStubMetres]); chord ends count as touching.
+  final ends = <int, int>{
+    for (final c in chords.values) ...{
+      jointKey(c.aLat, c.aLon): 2,
+      jointKey(c.bLat, c.bLon): 2,
+    },
+  };
+  for (final c in raw) {
+    for (final k in [
+      jointKey(c.pts[0], c.pts[1]),
+      jointKey(c.pts[c.pts.length - 2], c.pts[c.pts.length - 1]),
+    ]) {
+      ends.update(k, (v) => v + 1, ifAbsent: () => 1);
+    }
+  }
+  // Only stubs hanging off the middle of another chain: that is the spike.
+  final interior = <int>{
+    for (final c in raw)
+      for (var i = 2; i + 3 < c.pts.length; i += 2) jointKey(c.pts[i], c.pts[i + 1]),
+  };
+  bool hangsOffMiddle(MergedChain c) {
+    final a = jointKey(c.pts[0], c.pts[1]);
+    final b = jointKey(c.pts[c.pts.length - 2], c.pts[c.pts.length - 1]);
+    return (ends[a] == 1 && interior.contains(a)) ||
+        (ends[b] == 1 && interior.contains(b));
+  }
+
+  raw = [
+    for (final c in raw)
+      if (polylineMetres(c.pts) >= microStubMetres || !hangsOffMiddle(c)) c,
+  ];
+  final pinned = <int>{
+    for (final c in raw) ...[
+      jointKey(c.pts[0], c.pts[1]),
+      jointKey(c.pts[c.pts.length - 2], c.pts[c.pts.length - 1]),
+    ],
+    for (final c in chords.values) ...[
+      jointKey(c.aLat, c.aLon),
+      jointKey(c.bLat, c.bLon),
+    ],
+  };
+  for (final chain in raw) {
+    final smooth = smoothPolyline(
+        dropKinkLoops(dropSpikes(chain.pts, pinned: pinned), pinned: pinned),
+        pinned: pinned);
     final coords = [
-      for (var i = 0; i + 1 < chain.pts.length; i += 2)
+      for (var i = 0; i + 1 < smooth.length; i += 2)
         [
-          double.parse(chain.pts[i + 1].toStringAsFixed(6)),
-          double.parse(chain.pts[i].toStringAsFixed(6)),
+          double.parse(smooth[i + 1].toStringAsFixed(6)),
+          double.parse(smooth[i].toStringAsFixed(6)),
         ],
     ];
     if (coords.length < 2) continue;

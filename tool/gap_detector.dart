@@ -2,15 +2,18 @@
 ///
 ///     dart tool/gap_detector.dart [-v]
 ///
-/// Walks every snapped pattern in `assets/lines.bin.gz` and checks that the
-/// geometry the map really draws (`assets/ambient.json.gz`, the exact string
-/// handed to MapLibre) contains each pattern segment, end to end:
-///   * missing   - no emitted edge within [joinMetres] of both ends of a hop
-///                 segment (this also catches features that fail to share an
-///                 endpoint, since both ends must land on emitted vertices)
-///   * joint     - two consecutive hop segments whose drawn ends do not meet
-/// Chords are flagged approximate in the data and must be emitted as
-/// `approx = 1` features; a missing chord is a `missing` gap like any other.
+/// Walks every snapped pattern in `assets/lines.bin.gz` (after the same spur
+/// clean-up the ambient build applies) and checks that the geometry the map
+/// really draws (`assets/ambient.json.gz`, the exact string handed to MapLibre)
+/// contains each hop, end to end:
+///   * missing   - no single drawn feature passes within [matchMetres] of both
+///                 ends of a hop (chords must ship as `approx = 1` features)
+///   * joint     - two consecutive hops whose drawn features are different and
+///                 whose end points do not meet within [joinMetres]
+///
+/// Smoothing moves interior vertices by at most [smoothTotalDeviationMetres]
+/// and the bus/tram shift by 3 m, so vertices are matched to the drawn
+/// polyline, not to drawn vertices; chain ends are exact, so joints are not.
 library;
 
 import 'dart:convert';
@@ -18,12 +21,14 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:piedemove/geo/line_smooth.dart';
 import 'package:piedemove/geo/lines_io.dart';
+import 'package:piedemove/geo/pattern_snap.dart';
 
-/// [joinMetres]: two drawn edges meeting at a vertex must share it this
-/// closely. [matchMetres]: how far a drawn edge may sit from the stored
-/// vertex (the shared bus/tram street is pushed 3 m aside at build time).
-const joinMetres = 1.0, matchMetres = 4.0;
+/// Two drawn features meeting closer than this are joined (sub-2 m connector
+/// features bridge the rest).
+const joinMetres = 2.0;
+const matchMetres = smoothTotalDeviationMetres + 3.0;
 
 class Gap {
   Gap(this.pattern, this.hop, this.cause, this.detail);
@@ -33,83 +38,150 @@ class Gap {
   String toString() => 'pattern $pattern vertex $hop: $cause $detail';
 }
 
-double _m(double aLat, double aLon, double bLat, double bLon) {
-  final dy = (aLat - bLat) * 111320;
-  final dx = (aLon - bLon) * 111320 * 0.707;
-  return math.sqrt(dy * dy + dx * dx);
-}
+const _mLat = 111320.0, _mLon = 111320.0 * 0.707;
 
-/// Emitted edges of a FeatureCollection, indexed by endpoint cell.
+/// Drawn features indexed by ~25 m cell for point-to-polyline queries.
 class EmittedGeometry {
   EmittedGeometry(Map<String, dynamic> collection) {
     for (final f in collection['features'] as List) {
       final coords = (f['geometry']['coordinates'] as List);
+      final id = _lines.length;
+      final xs = Float64List(coords.length), ys = Float64List(coords.length);
+      for (var i = 0; i < coords.length; i++) {
+        xs[i] = (coords[i][0] as num) * _mLon;
+        ys[i] = (coords[i][1] as num) * _mLat;
+      }
+      _lines.add((xs, ys));
       for (var i = 1; i < coords.length; i++) {
-        final a = coords[i - 1] as List, b = coords[i] as List;
-        final e = [
-          (a[1] as num).toDouble(), (a[0] as num).toDouble(),
-          (b[1] as num).toDouble(), (b[0] as num).toDouble(),
-        ];
-        _cells.putIfAbsent(_cell(e[0], e[1]), () => []).add(e);
-        _cells.putIfAbsent(_cell(e[2], e[3]), () => []).add(e);
+        final n = math.max(1,
+            (math.sqrt(math.pow(xs[i] - xs[i - 1], 2) + math.pow(ys[i] - ys[i - 1], 2)) / (_cell / 4)).ceil());
+        int? last;
+        for (var k = 0; k <= n; k++) {
+          final t = k / n;
+          final c = _cellOf(ys[i - 1] + (ys[i] - ys[i - 1]) * t,
+              xs[i - 1] + (xs[i] - xs[i - 1]) * t);
+          if (c == last) continue;
+          last = c;
+          (_cells[c] ??= <int, List<int>>{}).putIfAbsent(id, () => []).add(i);
+        }
       }
     }
   }
 
-  static const _size = 3e-5; // ~3 m, so a 1 m match is in the 3x3 block
-  final _cells = <int, List<List<double>>>{};
+  static const _cell = 25.0;
+  final _lines = <(Float64List, Float64List)>[];
+  final _cells = <int, Map<int, List<int>>>{};
 
-  static int _cellOf(int y, int x) => (y << 24) ^ (x & 0xFFFFFF);
-  int _cell(double lat, double lon) =>
-      _cellOf((lat / _size).floor(), (lon / _size).floor());
+  static int _cellOf(double y, double x) =>
+      ((y / _cell).floor() << 24) ^ ((x / _cell).floor() & 0xFFFFFF);
 
-  /// Emitted edges running from within [tol] m of a to within [tol] m of b,
-  /// each oriented a -> b as `[aLat, aLon, bLat, bLon]`.
-  List<List<double>> match(double aLat, double aLon, double bLat, double bLon,
-      {double tol = matchMetres}) {
-    final out = <List<double>>[];
-    final y = (aLat / _size).floor(), x = (aLon / _size).floor();
-    for (var dy = -2; dy <= 2; dy++) {
-      for (var dx = -2; dx <= 2; dx++) {
-        for (final e in _cells[_cellOf(y + dy, x + dx)] ?? const <List<double>>[]) {
-          // Short hops fit both ways round inside the tolerance: keep the
-          // orientation with the smaller total distance.
-          final fa = _m(e[0], e[1], aLat, aLon), fb = _m(e[2], e[3], bLat, bLon);
-          final ra = _m(e[2], e[3], aLat, aLon), rb = _m(e[0], e[1], bLat, bLon);
-          final fwdOk = fa <= tol && fb <= tol, revOk = ra <= tol && rb <= tol;
-          if (fwdOk && (!revOk || fa + fb <= ra + rb)) {
-            out.add(e);
-          } else if (revOk) {
-            out.add([e[2], e[3], e[0], e[1]]);
+  /// Ids of drawn features within [tol] metres of the point.
+  Set<int> near(double lat, double lon, {double tol = matchMetres}) {
+    final y = lat * _mLat, x = lon * _mLon;
+    final out = <int>{};
+    for (var dy = -1; dy <= 1; dy++) {
+      for (var dx = -1; dx <= 1; dx++) {
+        final m = _cells[_cellOf(y + dy * _cell, x + dx * _cell)];
+        if (m == null) continue;
+        m.forEach((id, segs) {
+          if (out.contains(id)) return;
+          final (xs, ys) = _lines[id];
+          for (final i in segs) {
+            if (_distToSeg(x, y, xs[i - 1], ys[i - 1], xs[i], ys[i]) <= tol) {
+              out.add(id);
+              return;
+            }
           }
-        }
+        });
       }
     }
     return out;
   }
+
+  /// Whether two features touch within [joinMetres]: an end of one on the
+  /// other, or the two crossing (a route may change chain at a node both pass
+  /// through).
+  bool joined(int a, int b) {
+    final (ax, ay) = _lines[a];
+    final (bx, by) = _lines[b];
+    for (var i = 1; i < ax.length; i++) {
+      for (var j = 1; j < bx.length; j++) {
+        if (_segSeg(ax[i - 1], ay[i - 1], ax[i], ay[i], bx[j - 1], by[j - 1],
+                bx[j], by[j]) <=
+            joinMetres) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
 }
+
+double _cross(double ax, double ay, double bx, double by, double cx, double cy) =>
+    (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+
+/// Distance between two segments: 0 when they cross.
+double _segSeg(double ax, double ay, double bx, double by, double cx, double cy,
+    double dx, double dy) {
+  final d1 = _cross(ax, ay, bx, by, cx, cy), d2 = _cross(ax, ay, bx, by, dx, dy);
+  final d3 = _cross(cx, cy, dx, dy, ax, ay), d4 = _cross(cx, cy, dx, dy, bx, by);
+  if (d1 * d2 < 0 && d3 * d4 < 0) return 0;
+  return [
+    _distToSeg(ax, ay, cx, cy, dx, dy),
+    _distToSeg(bx, by, cx, cy, dx, dy),
+    _distToSeg(cx, cy, ax, ay, bx, by),
+    _distToSeg(dx, dy, ax, ay, bx, by),
+  ].reduce(math.min);
+}
+
+double _distToSeg(double px, double py, double ax, double ay, double bx, double by) {
+  final dx = bx - ax, dy = by - ay;
+  final l2 = dx * dx + dy * dy;
+  final t = l2 == 0 ? 0.0 : (((px - ax) * dx + (py - ay) * dy) / l2).clamp(0.0, 1.0);
+  return math.sqrt(math.pow(px - ax - t * dx, 2) + math.pow(py - ay - t * dy, 2));
+}
+
+double _hopMetres(SnappedPattern p, int a, int b) => math.sqrt(
+    math.pow((p.vertexLat[a] - p.vertexLat[b]) / 1e6 * _mLat, 2) +
+        math.pow((p.vertexLon[a] - p.vertexLon[b]) / 1e6 * _mLon, 2));
 
 List<Gap> findGaps(LineNetwork net, EmittedGeometry emitted) {
   final gaps = <Gap>[];
-  final cache = <String, List<List<double>>>{};
   for (final p in net.patterns) {
-    List<List<double>>? prev;
-    for (var i = 1; i < p.vertexCount; i++) {
-      final aLat = p.vertexLat[i - 1] / 1e6, aLon = p.vertexLon[i - 1] / 1e6;
-      final bLat = p.vertexLat[i] / 1e6, bLon = p.vertexLon[i] / 1e6;
-      final len = _m(aLat, aLon, bLat, bLon);
-      final cur = cache.putIfAbsent(
-          '${p.vertexLat[i - 1]},${p.vertexLon[i - 1]},${p.vertexLat[i]},${p.vertexLon[i]}',
-          () => emitted.match(aLat, aLon, bLat, bLon));
+    final kept = spurFreeIndices(p.vertexLat, p.vertexLon);
+    final near = <int, Set<int>>{};
+    Set<int> at(int i) => near.putIfAbsent(
+        i, () => emitted.near(p.vertexLat[i] / 1e6, p.vertexLon[i] / 1e6));
+    Set<int>? prev;
+    for (var k = 1; k < kept.length; k++) {
+      final i = kept[k], a = kept[k - 1];
+      var cur = at(a).intersection(at(i));
+      if (cur.isEmpty) {
+        // A stub tip is dropped from drawn chains (spike removal), so a hop to
+        // or from one ends up to [spurMaxLegMetres] short of the drawn line.
+        final wideA = emitted.near(p.vertexLat[a] / 1e6, p.vertexLon[a] / 1e6,
+            tol: matchMetres + spurMaxLegMetres);
+        final wideI = emitted.near(p.vertexLat[i] / 1e6, p.vertexLon[i] / 1e6,
+            tol: matchMetres + spurMaxLegMetres);
+        final wide = wideA.isNotEmpty && wideI.isNotEmpty ? wideA : <int>{};
+        if (wide.isNotEmpty && _hopMetres(p, a, i) <= 2 * spurMaxLegMetres) {
+          prev = null;
+          continue;
+        }
+      }
       if (cur.isEmpty) {
         gaps.add(Gap(p.pattern, i, p.vertexWay[i] < 0 ? 'missing-chord' : 'missing-hop',
-            '${len.round()} m at $aLat,$aLon'));
-      } else if (prev != null &&
-          !prev.any((e1) => cur.any((e2) =>
-              _m(e1[2], e1[3], e2[0], e2[1]) <= joinMetres))) {
-        gaps.add(Gap(p.pattern, i - 1, 'joint', 'ends differ at $aLat,$aLon'));
+            'at ${p.vertexLat[a] / 1e6},${p.vertexLon[a] / 1e6}'));
+        prev = null;
+        continue;
       }
-      prev = cur.isEmpty ? null : cur;
+      if (prev != null &&
+          prev.intersection(cur).isEmpty &&
+          !prev.any((f1) => cur.any((f2) => emitted.joined(f1, f2)))) {
+        gaps.add(Gap(p.pattern, a, 'joint',
+            'ends differ at ${p.vertexLat[a] / 1e6},${p.vertexLon[a] / 1e6}'));
+      }
+      prev = cur;
     }
   }
   return gaps;

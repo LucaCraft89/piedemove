@@ -237,3 +237,18 @@ off-road segments, doubled lines, missing lines, wrong colours, wrong lane.
    shift displaces **nodes** (mean of incident shifts), chords included.
    `dart tool/gap_detector.dart` (and `test/gap_detector_test.dart`) checks the
    shipped `ambient.json.gz` against every pattern hop: must print 0 gaps.
+
+13. Phase 1b (knots after phase 1). (a) The phase-1 `assets/lines.bin.gz` had
+   not been built from the current OSM cache: its ambient held 57k features,
+   32k of them zero-length, with jogs at every stop. Always ship assets from a
+   full `dart tool/build_lines.dart` (about 1 min on cached tiles), not only
+   `--assets-only` on an old `build/lines.bin`. (b) Smoothing lives in
+   `lib/geo/line_smooth.dart`: pattern spur removal (`spurFreeIndices`),
+   retrace collapse of turnaround stubs, chain spike/kink-loop removal, then
+   bounded corner cutting (<= 2.5 m per pass, 2 passes). **Every chain end,
+   chord end and stub tip that another chain touches is pinned (exact,
+   never cut)**; cutting a vertex another chain ends at reopens a gap. Never
+   cut a fold (>150 deg): it eats the stub. (c) `dart tool/knot_detector.dart`
+   and `test/knot_detector_test.dart` must print 0 knots; the gap detector now
+   matches vertices to drawn polylines (smoothing moves vertices), joints
+   within 2 m. Approx chords remain only for hops the router cannot snap.
