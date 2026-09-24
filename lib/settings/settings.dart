@@ -30,6 +30,9 @@ bool isCustomWalkSpeed(double speed) => ![
       walkSpeedFast,
     ].any((preset) => (speed - preset).abs() < 0.01);
 
+/// Basemap look, independent of the app theme. `auto` follows the theme.
+enum MapStyleKind { auto, light, dark, colour, highContrast }
+
 @immutable
 class PmSettings {
   const PmSettings({
@@ -39,6 +42,7 @@ class PmSettings {
     this.minTransferSeconds = 60,
     this.modes = allModes,
     this.themeMode = ThemeMode.system,
+    this.mapStyle = MapStyleKind.auto,
     this.advanced = false,
   });
 
@@ -59,6 +63,7 @@ class PmSettings {
   /// least one on.
   final Set<int> modes;
   final ThemeMode themeMode;
+  final MapStyleKind mapStyle;
 
   /// Raw-data mode (§11.7): record expanders and the feed screen.
   final bool advanced;
@@ -72,6 +77,7 @@ class PmSettings {
     int? minTransferSeconds,
     Set<int>? modes,
     ThemeMode? themeMode,
+    MapStyleKind? mapStyle,
     bool? advanced,
   }) =>
       PmSettings(
@@ -81,6 +87,7 @@ class PmSettings {
         minTransferSeconds: minTransferSeconds ?? this.minTransferSeconds,
         modes: modes == null || modes.isEmpty ? this.modes : modes,
         themeMode: themeMode ?? this.themeMode,
+        mapStyle: mapStyle ?? this.mapStyle,
         advanced: advanced ?? this.advanced,
       );
 
@@ -91,6 +98,7 @@ class PmSettings {
         'transfer': minTransferSeconds,
         'modes': modes.toList()..sort(),
         'theme': themeMode.name,
+        'mapStyle': mapStyle.name,
         'advanced': advanced,
       };
 
@@ -107,6 +115,10 @@ class PmSettings {
       themeMode: ThemeMode.values.firstWhere(
         (m) => m.name == j['theme'],
         orElse: () => ThemeMode.system,
+      ),
+      mapStyle: MapStyleKind.values.firstWhere(
+        (m) => m.name == j['mapStyle'],
+        orElse: () => MapStyleKind.auto,
       ),
       advanced: j['advanced'] as bool? ?? false,
     );

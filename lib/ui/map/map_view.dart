@@ -4,7 +4,7 @@
 /// chip, it never blanks the map (see CLAUDE.md, "Isolate failures").
 library;
 
-import 'dart:async' show unawaited;
+import 'dart:async' show Timer, unawaited;
 import 'dart:math' show Point;
 
 import 'package:flutter/material.dart';
@@ -28,6 +28,8 @@ import 'package:piedemove/ui/nav/entity.dart';
 import 'package:piedemove/ui/sheets/line_picker.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
 
+import 'package:piedemove/settings/settings.dart';
+import 'basemap_style.dart';
 import 'line_features.dart';
 import 'me_layer.dart';
 import 'map_style.dart';
@@ -91,6 +93,32 @@ class _MapViewState extends ConsumerState<MapView> {
   MapLibreMapController? _controller;
   bool _styleReady = false;
 
+  late MapPalette _pal;
+  String? _palName;
+  String _styleJson = '';
+  Timer? _styleTimer;
+  bool get _mapDark => _pal.dark;
+  Color get _haloColor => Color(int.parse('ff${_pal.halo.substring(1)}', radix: 16));
+  Color get _textColor => Color(int.parse('ff${_pal.text.substring(1)}', radix: 16));
+
+  /// A style that has not loaded after 10 s (tiles unreachable, no network)
+  /// shows a chip; routing and the overlays keep working.
+  void _watchStyle() {
+    _styleJson = buildBasemapStyle(_pal);
+    _styleTimer?.cancel();
+    _styleTimer = Timer(const Duration(seconds: 10), () {
+      if (!_styleReady && mounted) {
+        ref.read(mapStatusProvider.notifier).state = 'Mappa di base non disponibile';
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _styleTimer?.cancel();
+    super.dispose();
+  }
+
   /// A style reload drops every source, and `setGeoJsonSource` does not fail
   /// loudly on Android when the source is gone — so track it here.
   bool _stopsAdded = false;
@@ -124,7 +152,16 @@ class _MapViewState extends ConsumerState<MapView> {
 
   @override
   Widget build(BuildContext context) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
+    final kind = ref.watch(settingsProvider.select((s) => s.mapStyle));
+    _pal = mapPalette(kind,
+        appDark: Theme.of(context).brightness == Brightness.dark);
+    if (_palName != _pal.name) {
+      // New basemap: the plugin reloads the style; every layer is re-added
+      // from onStyleLoadedCallback (the phase 4 pattern).
+      if (_palName != null) _styleReady = false;
+      _palName = _pal.name;
+      _watchStyle();
+    }
     // The index and the style race each other: whichever lands second runs
     // this. Watching, not listening — a value already there fires no event.
     if (ref.watch(transitIndexProvider).valueOrNull != null && !_stopsAdded) {
@@ -187,9 +224,7 @@ class _MapViewState extends ConsumerState<MapView> {
 
     return MapLibreMap(
       initialCameraPosition: const CameraPosition(target: turin, zoom: 13),
-      styleString: dark
-          ? 'https://tiles.openfreemap.org/styles/dark'
-          : 'https://tiles.openfreemap.org/styles/positron',
+      styleString: _styleJson,
       trackCameraPosition: true,
       compassEnabled: false,
       attributionButtonPosition: AttributionButtonPosition.topRight,
@@ -203,6 +238,10 @@ class _MapViewState extends ConsumerState<MapView> {
       onMapClick: (point, _) => _onMapClick(point),
       onStyleLoadedCallback: () {
         _styleReady = true;
+        _styleTimer?.cancel();
+        if (ref.read(mapStatusProvider) == 'Mappa di base non disponibile') {
+          ref.read(mapStatusProvider.notifier).state = null;
+        }
         _stopsAdded = false;
         _vehiclesAdded = false;
         _linesAdded = false;
@@ -250,11 +289,11 @@ class _MapViewState extends ConsumerState<MapView> {
     final controller = _controller;
     if (controller == null || ambient == null || !_styleReady) return;
     // Read the theme before any await: the context may be gone afterwards.
-    final tokens = Theme.of(context).brightness == Brightness.dark
+    final tokens = _mapDark
         ? PmTokens.darkTokens
         : PmTokens.lightTokens;
-    final surface = Theme.of(context).colorScheme.surface;
-    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final surface = _haloColor;
+    final onSurface = _textColor;
     final below = _stopsAdded ? 'pm-stop-clusters' : null;
     final empty = <String, dynamic>{'type': 'FeatureCollection', 'features': []};
 
@@ -592,10 +631,10 @@ class _MapViewState extends ConsumerState<MapView> {
   Future<void> _addEntrances(Map<String, dynamic> entrances) async {
     final controller = _controller;
     if (controller == null || !_styleReady || _entrancesAdded) return;
-    final tokens = Theme.of(context).brightness == Brightness.dark
+    final tokens = _mapDark
         ? PmTokens.darkTokens
         : PmTokens.lightTokens;
-    final surface = Theme.of(context).colorScheme.surface;
+    final surface = _haloColor;
     _entrancesAdded = true;
     try {
       await controller.addSource(
@@ -865,11 +904,11 @@ class _MapViewState extends ConsumerState<MapView> {
 
     final data = stopFeatureCollection(ix, ref.read(stopModesProvider));
     final tokens =
-        Theme.of(context).brightness == Brightness.dark
+        _mapDark
             ? PmTokens.darkTokens
             : PmTokens.lightTokens;
-    final onSurface = Theme.of(context).colorScheme.onSurface;
-    final surface = Theme.of(context).colorScheme.surface;
+    final onSurface = _textColor;
+    final surface = _haloColor;
 
     // Already on this style: replacing the data is enough.
     if (_stopsAdded) {
@@ -1104,10 +1143,10 @@ class _MapViewState extends ConsumerState<MapView> {
     final ix = ref.read(transitIndexProvider).valueOrNull;
     final data = vehicleFeatureCollection(ix, vehicles, _vehicleIds);
     // Read the theme before any await: the context may be gone afterwards.
-    final tokens = Theme.of(context).brightness == Brightness.dark
+    final tokens = _mapDark
         ? PmTokens.darkTokens
         : PmTokens.lightTokens;
-    final surface = Theme.of(context).colorScheme.surface;
+    final surface = _haloColor;
 
     if (_vehiclesAdded) {
       try {

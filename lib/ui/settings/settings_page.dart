@@ -61,6 +61,21 @@ class SettingsPage extends ConsumerWidget {
             onSelectionChanged: (m) =>
                 controller.edit((s) => s.copyWith(themeMode: m.first)),
           ),
+          const _Header('Stile mappa'),
+          SegmentedButton<MapStyleKind>(
+            showSelectedIcon: false,
+            segments: const [
+              ButtonSegment(value: MapStyleKind.auto, label: Text('Auto')),
+              ButtonSegment(value: MapStyleKind.light, label: Text('Chiaro')),
+              ButtonSegment(value: MapStyleKind.dark, label: Text('Scuro')),
+              ButtonSegment(value: MapStyleKind.colour, label: Text('Colori')),
+              ButtonSegment(
+                  value: MapStyleKind.highContrast, label: Text('Contrasto')),
+            ],
+            selected: {settings.mapStyle},
+            onSelectionChanged: (m) =>
+                controller.edit((s) => s.copyWith(mapStyle: m.first)),
+          ),
           const _Header('Lingua'),
           const ListTile(
             contentPadding: EdgeInsets.zero,
