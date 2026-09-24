@@ -49,3 +49,9 @@ const ambientBaseWidths = <(double, double)>[(11, 1.4), (14, 2.6), (17, 4.5)];
 const endDot = 14.0, midDot = 8.0;
 const midDotFullZoom = 15.0, midDotMinZoom = 11.0, midDotMinFactor = 0.5;
 const dotRingWidth = 2.0;
+
+/// Own position dot (FIX_MASTER phase 4). Diameters in dp; the accuracy circle
+/// is in metres and scales with zoom. Heading wedge sprite is [meWedgeSize] dp.
+const meDotDiameter = 16.0, meRingWidth = 3.0, meWedgeSize = 44.0;
+const meAccuracyOpacity = 0.15, meAccuracyStrokeOpacity = 0.35;
+const meColor = '#1A73E8';

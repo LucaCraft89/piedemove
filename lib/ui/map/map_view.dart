@@ -8,6 +8,7 @@ import 'dart:async' show unawaited;
 import 'dart:math' show Point;
 
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart' show Position;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 
@@ -21,6 +22,7 @@ import 'package:piedemove/geo/lines_io.dart';
 import 'package:piedemove/geo/walk_path.dart';
 import 'package:piedemove/realtime/gtfs_rt.dart';
 import 'package:piedemove/realtime/store.dart';
+import 'package:piedemove/location/device_location.dart';
 import 'package:piedemove/location/live_trip.dart';
 import 'package:piedemove/routing/journey.dart';
 import 'package:piedemove/ui/nav/entity.dart';
@@ -28,6 +30,7 @@ import 'package:piedemove/ui/sheets/line_picker.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
 
 import 'line_features.dart';
+import 'me_layer.dart';
 import 'map_style.dart';
 import 'map_focus.dart';
 import 'stop_features.dart';
@@ -99,6 +102,10 @@ class _MapViewState extends ConsumerState<MapView> {
 
   bool _linesAdded = false;
   bool _entrancesAdded = false;
+  bool _meAdded = false;
+  Position? _meDrawn;
+  /// Dot operations run one at a time: add, move and raise must not interleave.
+  Future<void> _meChain = Future.value();
 
   /// The place currently pinned by search, as last drawn.
   Place? _pinned;
@@ -170,6 +177,11 @@ class _MapViewState extends ConsumerState<MapView> {
       WidgetsBinding.instance.addPostFrameCallback((_) => _highlight(picked));
     }
 
+    final me = ref.watch(myPositionProvider);
+    if (_styleReady) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _updateMe(me));
+    }
+
     final place = ref.watch(selectedPlaceProvider);
     if (_styleReady && !identical(place, _pinned)) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _updatePin(place));
@@ -180,8 +192,6 @@ class _MapViewState extends ConsumerState<MapView> {
       styleString: dark
           ? 'https://tiles.openfreemap.org/styles/dark'
           : 'https://tiles.openfreemap.org/styles/positron',
-      myLocationEnabled: true,
-      myLocationRenderMode: MyLocationRenderMode.normal,
       trackCameraPosition: true,
       compassEnabled: false,
       attributionButtonPosition: AttributionButtonPosition.topRight,
@@ -199,6 +209,7 @@ class _MapViewState extends ConsumerState<MapView> {
         _vehiclesAdded = false;
         _linesAdded = false;
         _entrancesAdded = false;
+        _meAdded = false;
         _focusDrawn = false;
         _pinned = null;
         _addLines(ref.read(ambientLinesProvider).valueOrNull);
@@ -562,6 +573,7 @@ class _MapViewState extends ConsumerState<MapView> {
     }
     // A style reload dropped the focus with the sources: draw it again.
     if (mounted && !_focusDrawn) setState(() {});
+    unawaited(_raiseMe());
   }
 
   /// Metro entrances (§10.5): small dots with labels, metro colour, from z15.
@@ -611,6 +623,7 @@ class _MapViewState extends ConsumerState<MapView> {
       debugPrint('pm: layer ingressi metro failed: $e');
       _entrancesAdded = false;
     }
+    unawaited(_raiseMe());
   }
 
   /// Focus rebuilds the sources so unrelated lines and stops are **absent**,
@@ -1022,9 +1035,52 @@ class _MapViewState extends ConsumerState<MapView> {
         enableInteraction: false,
       );
     });
+    unawaited(_raiseMe());
   }
 
   /// The search pin (§11.3): one circle annotation, cleared and redrawn.
+  /// Position dot: first call after a style load adds source + layers (top of
+  /// the stack); later calls only move the data. Own try/catch, own chip.
+  Future<void> _updateMe(Position? p) =>
+      _meChain = _meChain.then((_) => _updateMeNow(p));
+
+  Future<void> _updateMeNow(Position? p) async {
+    final c = _controller;
+    if (c == null || !_styleReady) return;
+    if (_meAdded && identical(p, _meDrawn)) return;
+    _meDrawn = p;
+    try {
+      if (!_meAdded) {
+        _meAdded = true;
+        await addMeLayers(c, p);
+      } else {
+        await c.setGeoJsonSource(meSource, meFeatures(p));
+      }
+    } catch (e) {
+      debugPrint('pm: position dot failed: $e');
+      _meAdded = false;
+      if (mounted) {
+        ref.read(mapStatusProvider.notifier).state =
+            'Posizione sulla mappa non disponibile';
+      }
+    }
+  }
+
+  /// Layers added after the dot would cover it: put it back on top.
+  Future<void> _raiseMe() =>
+      _meChain = _meChain.then((_) => _raiseMeNow());
+
+  Future<void> _raiseMeNow() async {
+    final c = _controller;
+    if (c == null || !_meAdded) return;
+    try {
+      await raiseMeLayers(c);
+    } catch (e) {
+      debugPrint('pm: raise dot failed: $e');
+      _meAdded = false; // next _updateMe re-adds it
+    }
+  }
+
   Future<void> _updatePin(Place? place) async {
     final controller = _controller;
     if (controller == null || !_styleReady) return;
@@ -1130,6 +1186,7 @@ class _MapViewState extends ConsumerState<MapView> {
             'Livello veicoli non disponibile';
       }
     }
+    unawaited(_raiseMe());
   }
 }
 

@@ -88,3 +88,7 @@ replaces the sheet, the ride leg reads "Scendi a TRAPANI tra 6 fermate" with
 "posizione stimata" on a poor indoor fix, and the manual button and close work.
 **Not yet on the road**: boarding detection, the two alight vibrations, the
 off-route banner, the metro/tunnel fallback, travelled-vs-ahead as it moves.
+
+## Position dot checks (fix phase 4)
+
+Grant/revoke: `adb shell pm grant|revoke <pkg> android.permission.ACCESS_FINE_LOCATION` (+ COARSE), then relaunch. Theme reload: `adb shell cmd uimode night no|yes`. Recentre: swipe the map, tap the FAB at (975,1935) on a 1080x2400 screen. Verified 2026-09-24: first-launch prompt, chip after "Don't allow", chip re-prompts, dot survives theme toggle, FAB recentres. Not verified: heading wedge (needs movement), services-off path, permanent-denial settings jump.

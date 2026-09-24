@@ -36,28 +36,43 @@ class HomePage extends ConsumerStatefulWidget {
 }
 
 class _HomePageState extends ConsumerState<HomePage> {
+  bool _centred = false;
+
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _locate(move: true));
+    WidgetsBinding.instance.addPostFrameCallback(
+        (_) => ref.read(locationProvider.notifier).start());
   }
 
-  Future<void> _locate({bool move = false}) async {
-    final position = await locateMe();
-    if (position == null || !mounted) return;
-    ref.read(myPositionProvider.notifier).state = position;
-    if (!move) return;
+  Future<void> _recentre() async {
+    final position = ref.read(myPositionProvider);
+    if (position == null) return;
     await ref.read(mapControllerProvider)?.animateCamera(
           CameraUpdate.newLatLngZoom(
-            LatLng(position.latitude, position.longitude),
-            15.5,
-          ),
+              LatLng(position.latitude, position.longitude), 15.5),
         );
+  }
+
+  /// Button: centre on the dot, or fix permission/services if that is why not.
+  Future<void> _onLocate() async {
+    if (ref.read(locationProvider).status != LocStatus.ok) {
+      await ref.read(locationProvider.notifier).activate();
+    }
+    await _recentre();
   }
 
   @override
   Widget build(BuildContext context) {
     final status = ref.watch(mapStatusProvider);
+    final loc = ref.watch(locationProvider.select((l) => l.status));
+    // Centre once on the first fix of the session; the button does it after.
+    ref.listen(myPositionProvider, (_, p) {
+      if (p != null && !_centred) {
+        _centred = true;
+        _recentre();
+      }
+    });
     final indexState = ref.watch(transitIndexProvider);
     final stage = ref.watch(indexStageProvider);
     final stale = ref.watch(realtimeProvider).staleFeeds();
@@ -87,6 +102,11 @@ class _HomePageState extends ConsumerState<HomePage> {
                   if (indexState.hasError)
                     const _Chip('Orari non disponibili'),
                   if (status != null) _Chip(status),
+                  if (loc == LocStatus.denied ||
+                      loc == LocStatus.deniedForever ||
+                      loc == LocStatus.servicesOff)
+                    _Chip('Attiva posizione',
+                        onTap: ref.read(locationProvider.notifier).activate),
                   if (ref.watch(focusProvider) != null) const _CancellaPill(),
                   if (trip.sheetHidden && trip.result != null)
                     _ReopenChip(
@@ -109,7 +129,7 @@ class _HomePageState extends ConsumerState<HomePage> {
             child: FloatingActionButton.small(
               heroTag: 'pm-locate',
               tooltip: 'La mia posizione',
-              onPressed: () => _locate(move: true),
+              onPressed: _onLocate,
               child: const Icon(Icons.my_location),
             ),
           ),
@@ -473,9 +493,10 @@ class _PillRow extends ConsumerWidget {
 }
 
 class _Chip extends StatelessWidget {
-  const _Chip(this.text, {this.progress = false});
+  const _Chip(this.text, {this.progress = false, this.onTap});
 
   final String text;
+  final VoidCallback? onTap;
   final bool progress;
 
   @override
@@ -486,7 +507,10 @@ class _Chip extends StatelessWidget {
       child: Material(
         color: scheme.secondaryContainer,
         borderRadius: BorderRadius.circular(16),
-        child: Padding(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          child: Padding(
           padding:
               const EdgeInsets.symmetric(horizontal: Gap.element, vertical: 6),
           child: Row(
@@ -504,6 +528,7 @@ class _Chip extends StatelessWidget {
                   style: TextStyle(color: scheme.onSecondaryContainer)),
             ],
           ),
+        ),
         ),
       ),
     );
