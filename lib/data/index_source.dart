@@ -9,8 +9,7 @@ library;
 import 'dart:io';
 import 'dart:isolate';
 
-import 'package:http/http.dart' as http;
-
+import 'download.dart';
 import 'feeds.dart';
 import 'gtfs_zip.dart';
 import 'index_build.dart';
@@ -19,6 +18,9 @@ import 'index_io.dart';
 import 'transit_index.dart';
 
 const maxIndexAge = Duration(days: 7);
+
+/// A static-feed download that sends nothing for this long is abandoned.
+const feedStallTimeout = Duration(seconds: 60);
 
 enum IndexStage { cached, downloading, building, ready }
 
@@ -49,27 +51,17 @@ class IndexStore {
 
     try {
       onStage?.call(IndexStage.downloading);
-      final response = await http
-          .get(Uri.parse(Feeds.gttStaticGtfs))
-          .timeout(const Duration(minutes: 5));
-      if (response.statusCode != 200) {
-        throw HttpException('HTTP ${response.statusCode}', 
-            uri: Uri.parse(Feeds.gttStaticGtfs));
-      }
       dir.createSync(recursive: true);
-      await File(zipPath).writeAsBytes(response.bodyBytes, flush: true);
+      await downloadToFile(Feeds.gttStaticGtfs, zipPath,
+          timeout: feedStallTimeout);
 
       // Scheduled-only regional buses (phase 9). Best effort: the planner has
       // to work when this feed is down, so a failure just means GTT only.
       String? regional;
       try {
-        final r = await http
-            .get(Uri.parse(Feeds.piemonteBusGtfs))
-            .timeout(const Duration(minutes: 10));
-        if (r.statusCode == 200) {
-          await File(regionalZipPath).writeAsBytes(r.bodyBytes, flush: true);
-          regional = regionalZipPath;
-        }
+        await downloadToFile(Feeds.piemonteBusGtfs, regionalZipPath,
+            timeout: feedStallTimeout);
+        regional = regionalZipPath;
       } catch (_) {
         regional = null;
       }

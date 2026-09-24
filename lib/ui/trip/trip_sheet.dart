@@ -56,7 +56,16 @@ class _TripSheetState extends ConsumerState<TripSheet> {
   @override
   Widget build(BuildContext context) {
     final trip = ref.watch(tripPlanProvider);
-    return DraggableScrollableSheet(
+    // Back steps out of a journey's detail to the list, then tucks the list
+    // away (the reopen chip brings it back) instead of closing the app.
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        final plan = ref.read(tripPlanProvider.notifier);
+        trip.selected != null ? plan.back() : plan.hideSheet();
+      },
+      child: DraggableScrollableSheet(
       initialChildSize: 0.5,
       minChildSize: 0.15,
       maxChildSize: 0.92,
@@ -78,6 +87,7 @@ class _TripSheetState extends ConsumerState<TripSheet> {
                 now: DateTime.now(),
               ),
         ),
+      ),
       ),
     );
   }

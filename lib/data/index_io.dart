@@ -209,18 +209,29 @@ TransitIndex decodeIndex(Uint8List data) {
   );
 }
 
+/// Writes next to [path] and renames over it: a crash mid-write leaves the old
+/// index (or none), never a truncated one with a fresh timestamp.
 Future<void> writeIndexFile(TransitIndex ix, String path) async {
-  await File(path).writeAsBytes(encodeIndex(ix), flush: true);
+  final tmp = File('$path.tmp');
+  await tmp.writeAsBytes(encodeIndex(ix), flush: true);
+  await tmp.rename(path);
 }
 
-/// Returns null when the file is missing or written by another format version,
-/// so the caller can rebuild instead of crashing.
+/// Returns null when the file is missing, from another format version, or
+/// unreadable (truncated, corrupt), so the caller rebuilds instead of
+/// crashing. An unreadable file is deleted so it cannot pass as fresh again.
 Future<TransitIndex?> readIndexFile(String path) async {
   final f = File(path);
   if (!f.existsSync()) return null;
   try {
     return decodeIndex(await f.readAsBytes());
   } on IndexFormatException {
+    return null;
+  } catch (_) {
+    // RangeError / FormatException / ArgumentError from a torn file.
+    try {
+      f.deleteSync();
+    } catch (_) {}
     return null;
   }
 }

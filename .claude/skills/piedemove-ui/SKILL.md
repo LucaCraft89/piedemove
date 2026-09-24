@@ -352,3 +352,20 @@ for approval of look, palette and line style before phase 6.
 - Root cause: `_onMapClick` mapped the ambient feature's short name to a route with a `name -> index` map, so a repeated short name resolved to the LAST route with it. The index holds regional/other-feed routes (6875 patterns, 830 routes) but lines.bin only GTT urban (1428 patterns): ~614 routes have no geometry, so e.g. "36" (regional dup) drew nothing. Bus/tram sharing a number had the same problem. It looked intermittent because only duplicated names failed. LatestRunner (7a1) was a real but minor race.
 - Fix: `routeForTap(ix, name, mode)` in `line_features.dart` (prefer GTT feed, then the feature's `mode`; test `test/route_for_tap_test.dart`). Any other name -> route lookup must use it, never a name-keyed map.
 - Diagnostic that found it: log `routeFocusLines` feature count and per-route "has any net[pattern]"; lineFeatures=0 with patterns>0 means wrong route or missing geometry.
+
+## Audit fixes (2026-09)
+
+- `mapStatusProvider` is a keyed `MapStatus` notifier: each layer sets its own
+  key (`basemap`, `lines`, `focus`, `walk`, `stops-*`, `me`, `pin`,
+  `vehicles`) and clears it on success; home shows the first entry and a tap
+  dismisses all. Never assign a bare string.
+- Map layers: `_styleGen` is bumped per style load; an add still awaiting from
+  the old style leaves the new style's flags alone. `_stopsAdded`/`_linesAdded`
+  are set only after success. Lines anchor below `pm-stop-clusters` only when
+  `_stopAnchor` (that layer really exists).
+- Back button: TripSheet (detail -> list -> hidden sheet with reopen chip) and
+  LiveStrip (`confirmEndTrip`, shared with the Cancella pill) own `PopScope`s.
+- Planner: `TripPlanController` publishes only the latest `plan()` (`_planSeq`);
+  Filtri sliders update while dragging and replan on release via `replanSoon()`
+  (300 ms); settings saves are coalesced (`settingsSaveDelay`).
+- Home watches only the stale-feed count of `realtimeProvider`.

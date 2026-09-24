@@ -64,7 +64,7 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final status = ref.watch(mapStatusProvider);
+    final status = ref.watch(mapStatusProvider).values.firstOrNull;
     final loc = ref.watch(locationProvider.select((l) => l.status));
     // Centre once on the first fix of the session; the button does it after.
     ref.listen(myPositionProvider, (_, p) {
@@ -75,7 +75,9 @@ class _HomePageState extends ConsumerState<HomePage> {
     });
     final indexState = ref.watch(transitIndexProvider);
     final stage = ref.watch(indexStageProvider);
-    final stale = ref.watch(realtimeProvider).staleFeeds();
+    // Only the count matters here: watching the whole store rebuilt the home
+    // page (and the map under it) on every realtime poll.
+    final stale = ref.watch(realtimeProvider.select((r) => r.staleFeeds().length));
     final trip = ref.watch(tripPlanProvider);
     final live = ref.watch(liveTripProvider);
     final showTrip =
@@ -101,7 +103,9 @@ class _HomePageState extends ConsumerState<HomePage> {
                     _Chip(_stageLabel(stage), progress: true),
                   if (indexState.hasError)
                     const _Chip('Orari non disponibili'),
-                  if (status != null) _Chip(status),
+                  if (status != null)
+                    _Chip(status,
+                        onTap: ref.read(mapStatusProvider.notifier).dismissAll),
                   if (loc == LocStatus.denied ||
                       loc == LocStatus.deniedForever ||
                       loc == LocStatus.servicesOff)
@@ -115,9 +119,9 @@ class _HomePageState extends ConsumerState<HomePage> {
                           ? null
                           : ref.read(tripPlanProvider.notifier).clear,
                     ),
-                  if (stale.length == RtFeedKind.values.length)
+                  if (stale == RtFeedKind.values.length)
                     const _Chip('Dati in tempo reale non disponibili')
-                  else if (stale.isNotEmpty)
+                  else if (stale > 0)
                     const _Chip('Alcuni dati in tempo reale sono fermi'),
                 ],
               ),
@@ -380,25 +384,7 @@ class _CancellaPill extends ConsumerWidget {
           label: const Text('Cancella'),
           onPressed: () async {
             final focus = ref.read(focusProvider.notifier);
-            if (focus.needsConfirm) {
-              final ok = await showDialog<bool>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  title: const Text('Terminare il viaggio?'),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(ctx, false),
-                      child: const Text('Annulla'),
-                    ),
-                    FilledButton(
-                      onPressed: () => Navigator.pop(ctx, true),
-                      child: const Text('Termina'),
-                    ),
-                  ],
-                ),
-              );
-              if (ok != true) return;
-            }
+            if (focus.needsConfirm && !await confirmEndTrip(context)) return;
             focus.cancella();
           },
         ),

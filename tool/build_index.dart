@@ -9,7 +9,7 @@ library;
 
 import 'dart:io';
 
-import 'package:http/http.dart' as http;
+import 'package:piedemove/data/download.dart';
 import 'package:piedemove/data/feeds.dart';
 import 'package:piedemove/data/gtfs_zip.dart';
 import 'package:piedemove/data/index_build.dart';
@@ -25,12 +25,12 @@ Future<File> _download(String url, String path, {bool force = false}) async {
   final file = File(path);
   if (force || !file.existsSync()) {
     stdout.writeln('downloading $url ...');
-    final response = await http.get(Uri.parse(url));
-    if (response.statusCode != 200) {
-      stderr.writeln('download failed: HTTP ${response.statusCode}');
+    try {
+      await downloadToFile(url, path, timeout: const Duration(seconds: 60));
+    } catch (e) {
+      stderr.writeln('download failed: $e');
       exit(1);
     }
-    await file.writeAsBytes(response.bodyBytes, flush: true);
   }
   return file;
 }
@@ -38,7 +38,7 @@ Future<File> _download(String url, String path, {bool force = false}) async {
 Future<void> main(List<String> args) async {
   final force = args.contains('--force');
   final zipArg = args.indexOf('--zip');
-  final zip = zipArg >= 0 ? args[zipArg + 1] : zipPath;
+  final zip = zipArg >= 0 && zipArg + 1 < args.length ? args[zipArg + 1] : zipPath;
 
   Directory('build').createSync(recursive: true);
   final zipFile = await _download(Feeds.gttStaticGtfs, zip, force: force);

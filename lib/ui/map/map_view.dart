@@ -65,8 +65,25 @@ const vehicleMinZoom = 12.0;
 /// Individual poles from z15; clusters below it.
 const poleMinZoom = 15.0;
 
-/// Non-null when a map layer failed to load; shown as a chip, never a blank map.
-final mapStatusProvider = StateProvider<String?>((_) => null);
+/// Map layer problems by layer key; the first is shown as a chip, never a
+/// blank map. A layer clears its own entry when it recovers, and a tap on the
+/// chip dismisses them all.
+class MapStatus extends StateNotifier<Map<String, String>> {
+  MapStatus() : super(const {});
+
+  void set(String key, String message) {
+    if (state[key] != message) state = {...state, key: message};
+  }
+
+  void clear(String key) {
+    if (state.containsKey(key)) state = {...state}..remove(key);
+  }
+
+  void dismissAll() => state = const {};
+}
+
+final mapStatusProvider =
+    StateNotifierProvider<MapStatus, Map<String, String>>((_) => MapStatus());
 
 /// The "Veicoli" pill; off hides the layer without stopping the feed.
 final vehiclesVisibleProvider = StateProvider<bool>((_) => true);
@@ -109,7 +126,9 @@ class _MapViewState extends ConsumerState<MapView> {
     _styleTimer?.cancel();
     _styleTimer = Timer(const Duration(seconds: 10), () {
       if (!_styleReady && mounted) {
-        ref.read(mapStatusProvider.notifier).state = 'Mappa di base non disponibile';
+        ref
+            .read(mapStatusProvider.notifier)
+            .set('basemap', 'Mappa di base non disponibile');
       }
     });
   }
@@ -117,8 +136,17 @@ class _MapViewState extends ConsumerState<MapView> {
   @override
   void dispose() {
     _styleTimer?.cancel();
+    _controller?.onFeatureTapped.remove(_onFeatureTapped);
     super.dispose();
   }
+
+  /// Bumped per style load. An add still awaiting from the previous style
+  /// checks it and leaves the new style's flags alone.
+  int _styleGen = 0;
+
+  /// True once `pm-stop-clusters` exists on this style: line layers go below
+  /// it, and fall back to the top of the stack when it is missing.
+  bool _stopAnchor = false;
 
   /// A style reload drops every source, and `setGeoJsonSource` does not fail
   /// loudly on Android when the source is gone — so track it here.
@@ -245,10 +273,10 @@ class _MapViewState extends ConsumerState<MapView> {
         // ("already exists" -> a stuck status chip): once per style.
         if (_styleReady) return;
         _styleReady = true;
+        _styleGen++;
         _styleTimer?.cancel();
-        if (ref.read(mapStatusProvider) == 'Mappa di base non disponibile') {
-          ref.read(mapStatusProvider.notifier).state = null;
-        }
+        ref.read(mapStatusProvider.notifier).clear('basemap');
+        _stopAnchor = false;
         _stopsAdded = false;
         _stopsBusy = false;
         _vehiclesAdded = false;
@@ -304,8 +332,10 @@ class _MapViewState extends ConsumerState<MapView> {
         : PmTokens.lightTokens;
     final surface = _haloColor;
     final onSurface = _textColor;
-    final below = _stopsAdded ? 'pm-stop-clusters' : null;
+    final below = _stopAnchor ? 'pm-stop-clusters' : null;
     final empty = <String, dynamic>{'type': 'FeatureCollection', 'features': []};
+    final gen = _styleGen;
+    final status = ref.read(mapStatusProvider.notifier);
 
     if (_linesBusy) return; // an add is in flight
     if (_linesAdded) {
@@ -317,7 +347,6 @@ class _MapViewState extends ConsumerState<MapView> {
       }
     }
 
-    _linesAdded = true;
     _linesBusy = true;
     try {
       await controller.addSource(
@@ -411,17 +440,18 @@ class _MapViewState extends ConsumerState<MapView> {
       );
     } catch (e) {
       debugPrint('pm: layer linee failed: $e');
+      if (gen != _styleGen) return; // the style changed under us
       _linesBusy = false;
       // Duplicate add across a style reload: the layers are there, carry on.
       if (!'$e'.contains('already exists')) {
-        _linesAdded = false;
-        if (mounted) {
-          ref.read(mapStatusProvider.notifier).state = 'Linee non disponibili';
-        }
+        if (mounted) status.set('lines', 'Linee non disponibili');
         return;
       }
     }
+    if (gen != _styleGen) return;
     _linesBusy = false;
+    _linesAdded = true;
+    status.clear('lines');
 
     // Focus lines: own source and layers, added once per style and only ever
     // updated by _applyFocus. Ambient tiering never applies to them.
@@ -512,11 +542,12 @@ class _MapViewState extends ConsumerState<MapView> {
         filter: ['==', ['get', 'arrow'], 1],
         enableInteraction: false,
       );
+      status.clear('focus');
     } catch (e) {
       debugPrint('pm: layer linee selezionate failed: $e');
-      if (mounted) {
-        ref.read(mapStatusProvider.notifier).state =
-            'Linea selezionata non disponibile';
+      // Already there from an overlapping add: the layers work.
+      if (mounted && !'$e'.contains('already exists')) {
+        status.set('focus', 'Linea selezionata non disponibile');
       }
     }
 
@@ -731,6 +762,7 @@ class _MapViewState extends ConsumerState<MapView> {
       for (final layer in _ambientLayers) {
         await controller.setLayerVisibility(layer, !focused);
       }
+      if (focus is! JourneyFocus) _noteApproximateWalks(null);
       switch (focus) {
         case null:
           await controller.setGeoJsonSource(_focusLinesSource, empty);
@@ -793,9 +825,12 @@ class _MapViewState extends ConsumerState<MapView> {
   }
 
   /// Legs the walking graph did not cover stay straight dotted; say so once.
-  void _noteApproximateWalks(Journey journey) {
-    if (journey.walkApproximate) {
-      ref.read(mapStatusProvider.notifier).state = 'Percorsi a piedi approssimati';
+  void _noteApproximateWalks(Journey? journey) {
+    final status = ref.read(mapStatusProvider.notifier);
+    if (journey != null && journey.walkApproximate) {
+      status.set('walk', 'Percorsi a piedi approssimati');
+    } else {
+      status.clear('walk');
     }
   }
 
@@ -863,12 +898,13 @@ class _MapViewState extends ConsumerState<MapView> {
     final controller = _controller;
     if (controller == null || !_linesAdded) return;
     if (featureIds.join(',') == _highlighted.join(',')) return;
-    _highlighted = featureIds;
     try {
       await controller.setFilter(
         'pm-line-picked',
         ['in', r'$id', ...featureIds.isEmpty ? [-1] : featureIds],
       );
+      // Recorded only once applied, so a failed filter is retried.
+      _highlighted = featureIds;
     } catch (e) {
       debugPrint('pm: picker highlight failed: $e');
     }
@@ -943,6 +979,8 @@ class _MapViewState extends ConsumerState<MapView> {
     final surface = _haloColor;
 
     if (_stopsBusy) return; // an add is in flight
+    final gen = _styleGen;
+    final status = ref.read(mapStatusProvider.notifier);
     // Already on this style: replacing the data is enough.
     if (_stopsAdded) {
       try {
@@ -953,20 +991,26 @@ class _MapViewState extends ConsumerState<MapView> {
       if (_stopsAdded) return;
     }
 
-    Future<void> layer(String what, Future<void> Function() add) async {
+    /// True when the layer is there (added now, or already present).
+    Future<bool> layer(String what, Future<void> Function() add) async {
       try {
         await add();
       } catch (e) {
         debugPrint('pm: layer $what failed: $e');
-        if (mounted && !'$e'.contains('already exists')) {
-          ref.read(mapStatusProvider.notifier).state = 'Livello $what non disponibile';
+        if (!'$e'.contains('already exists')) {
+          if (mounted && gen == _styleGen) {
+            status.set('stops-$what', 'Livello $what non disponibile');
+          }
+          return false;
         }
       }
+      status.clear('stops-$what');
+      return true;
     }
 
     _stopsAdded = true;
     _stopsBusy = true;
-    await layer('fermate', () async {
+    final sourceOk = await layer('fermate', () async {
       await controller.addSource(
         _stopsSource,
         GeojsonSourceProperties(
@@ -984,6 +1028,13 @@ class _MapViewState extends ConsumerState<MapView> {
         ),
       );
     });
+    if (gen != _styleGen) return;
+    if (!sourceOk) {
+      // No source, no stop layers: retried on the next index or style event.
+      _stopsAdded = false;
+      _stopsBusy = false;
+      return;
+    }
 
     final modeColor = [
       'match',
@@ -1009,7 +1060,7 @@ class _MapViewState extends ConsumerState<MapView> {
       _hex(tokens.modes.bus),
     ];
 
-    await layer('gruppi', () async {
+    final anchored = await layer('gruppi', () async {
       await controller.addCircleLayer(
         _stopsSource,
         'pm-stop-clusters',
@@ -1044,6 +1095,7 @@ class _MapViewState extends ConsumerState<MapView> {
         enableInteraction: false,
       );
     });
+    if (gen == _styleGen) _stopAnchor = anchored;
 
     await layer('pali', () async {
       // Invisible, larger circle first: a >= 44 px tap target (§14).
@@ -1097,7 +1149,7 @@ class _MapViewState extends ConsumerState<MapView> {
         enableInteraction: false,
       );
     });
-    _stopsBusy = false;
+    if (gen == _styleGen) _stopsBusy = false;
     unawaited(_raiseMe());
   }
 
@@ -1119,12 +1171,14 @@ class _MapViewState extends ConsumerState<MapView> {
       } else {
         await c.setGeoJsonSource(meSource, meFeatures(p));
       }
+      if (mounted) ref.read(mapStatusProvider.notifier).clear('me');
     } catch (e) {
       debugPrint('pm: position dot failed: $e');
       _meAdded = false;
       if (mounted) {
-        ref.read(mapStatusProvider.notifier).state =
-            'Posizione sulla mappa non disponibile';
+        ref
+            .read(mapStatusProvider.notifier)
+            .set('me', 'Posizione sulla mappa non disponibile');
       }
     }
   }
@@ -1146,9 +1200,10 @@ class _MapViewState extends ConsumerState<MapView> {
 
   Future<void> _updatePin(Place? place) async {
     final controller = _controller;
-    if (controller == null || !_styleReady) return;
+    if (controller == null || !_styleReady || !mounted) return;
     _pinned = place;
     final scheme = Theme.of(context).colorScheme;
+    final status = ref.read(mapStatusProvider.notifier);
     try {
       await controller.clearCircles();
       if (place == null) return;
@@ -1161,12 +1216,10 @@ class _MapViewState extends ConsumerState<MapView> {
           circleStrokeWidth: 3,
         ),
       );
+      status.clear('pin');
     } catch (e) {
       debugPrint('pm: layer segnaposto failed: $e');
-      if (mounted) {
-        ref.read(mapStatusProvider.notifier).state =
-            'Segnaposto non disponibile';
-      }
+      if (mounted) status.set('pin', 'Segnaposto non disponibile');
     }
   }
 
@@ -1184,6 +1237,7 @@ class _MapViewState extends ConsumerState<MapView> {
     final surface = _haloColor;
 
     if (_vehiclesBusy) return; // an add is in flight; the next tick updates
+    final gen = _styleGen;
     if (_vehiclesAdded) {
       try {
         await controller.setGeoJsonSource(_vehiclesSource, data);
@@ -1248,11 +1302,17 @@ class _MapViewState extends ConsumerState<MapView> {
       // A duplicate add (two adds racing across a style reload) leaves the
       // layers in place: that is success, not a failure.
       final dup = '$e'.contains('already exists');
+      if (gen != _styleGen) return;
       _vehiclesAdded = dup;
       if (mounted && !dup) {
-        ref.read(mapStatusProvider.notifier).state =
-            'Livello veicoli non disponibile';
+        ref
+            .read(mapStatusProvider.notifier)
+            .set('vehicles', 'Livello veicoli non disponibile');
       }
+    }
+    if (gen != _styleGen) return;
+    if (_vehiclesAdded && mounted) {
+      ref.read(mapStatusProvider.notifier).clear('vehicles');
     }
     _vehiclesBusy = false;
     unawaited(_raiseMe());

@@ -4,6 +4,8 @@
 /// feeds change every few seconds and the search must not rerun under the user.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -148,10 +150,33 @@ PlanRequest planRequestFor({
   );
 }
 
+/// Pause after the last filter change before [TripPlanController.replanSoon]
+/// searches again.
+const replanDelay = Duration(milliseconds: 300);
+
 class TripPlanController extends StateNotifier<TripState> {
   TripPlanController(this._ref) : super(const TripState());
 
   final Ref _ref;
+
+  /// Bumped per [plan] call; a run only publishes if it is still the latest,
+  /// so a slow earlier search never overwrites a newer one.
+  var _planSeq = 0;
+  Timer? _replanTimer;
+
+  /// Re-runs the current search after a short pause, if one is showing: a
+  /// burst of filter changes costs one search.
+  void replanSoon() {
+    if (state.result == null && !state.planning) return;
+    _replanTimer?.cancel();
+    _replanTimer = Timer(replanDelay, plan);
+  }
+
+  @override
+  void dispose() {
+    _replanTimer?.cancel();
+    super.dispose();
+  }
 
   void setFrom(Place? place) => state = state.copyWith(
         query: state.query.copyWith(from: place, clearFrom: place == null),
@@ -185,12 +210,17 @@ class TripPlanController extends StateNotifier<TripState> {
 
   void reopenSheet() => state = state.copyWith(sheetHidden: false);
 
-  void clear() => state = TripState(query: state.query);
+  void clear() {
+    _planSeq++; // a search still running must not bring its result back
+    _replanTimer?.cancel();
+    state = TripState(query: state.query);
+  }
 
   /// Plans, then keeps the result until the user clears or replans.
   Future<void> plan() async {
     final planner = _ref.read(plannerProvider);
     if (!state.query.ready || planner == null) return;
+    final seq = ++_planSeq;
     final query = state.query;
     state = state.copyWith(
       planning: true,
@@ -200,6 +230,7 @@ class TripPlanController extends StateNotifier<TripState> {
     );
     // One frame so the spinner paints before the synchronous search.
     await Future<void>.delayed(Duration.zero);
+    if (!mounted || seq != _planSeq) return;
     final request = planRequestFor(
       query: query,
       settings: _ref.read(settingsProvider),
@@ -252,7 +283,7 @@ class TripPlanController extends StateNotifier<TripState> {
         failed: true,
       );
     }
-    if (!mounted) return;
+    if (!mounted || seq != _planSeq) return;
     state = state.copyWith(planning: false, result: result);
   }
 }

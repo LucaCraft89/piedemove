@@ -166,3 +166,13 @@ Feed facts as built on 2026-09-19 (`feed_version` 20260919):
 - Format v1 (header: magic, format, OSM time, bbox, payload sha256) and manifest schema: `docs/walk_routing.md`.
 - Loader `loadWalkLayers` (walk_graph_update.dart): valid downloaded -> shipped asset -> null.
   Updater: `walkManifestUrl` constant, ETag, 1/day, sha256+format check, atomic rename, silent.
+
+## Audit fixes (2026-09)
+
+- `writeIndexFile` writes `index.bin.tmp` then renames; `readIndexFile` treats
+  any decode error (RangeError, FormatException) as "no index" and deletes the
+  torn file, so a crash mid-write can never pin a bad index for 7 days.
+- Static feeds download through `lib/data/download.dart` (`downloadToFile`):
+  streamed to `<path>.part`, renamed on success, 60 s stall timeout between
+  chunks (not a total cap - the regional zip is 200+ MB). `tool/build_index`
+  uses it too.

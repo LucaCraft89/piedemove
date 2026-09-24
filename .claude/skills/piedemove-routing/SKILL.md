@@ -193,3 +193,9 @@ Full detail in `docs/walk_routing.md`. Short version:
   fields, not midnight + Duration) - DST days were an hour off.
 - `nextDepartures` filters on expected time (late runs stay listed; looks back
   `lateLookbackSeconds`) and reaches tomorrow when the horizon crosses midnight.
+- Walk router: `minWalkFactor = 0.95 * coveredFactor` (arcades), test-checked
+  against every factor table; `snapAll` projects each edge once; a zero-length
+  route is a route, not a crash. `crossing=no` is not a crossing (node), and a
+  crossing way tagged so costs as unmarked. Updater stores no ETag for an
+  incompatible manifest and drops it when the downloaded graph is gone; the
+  format check runs in an isolate.

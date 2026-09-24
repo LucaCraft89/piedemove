@@ -124,11 +124,15 @@ class PlanningControls extends ConsumerWidget {
     final settings = ref.watch(settingsProvider);
     final controller = ref.read(settingsProvider.notifier);
 
+    void replanNow() {
+      if (replan) ref.read(tripPlanProvider.notifier).replanSoon();
+    }
+
+    // Taps replan at once; sliders only update while dragging and replan when
+    // released (a drag is dozens of onChanged calls).
     void changed(PmSettings Function(PmSettings) change) {
       controller.edit(change);
-      if (replan && ref.read(tripPlanProvider).result != null) {
-        ref.read(tripPlanProvider.notifier).plan();
-      }
+      replanNow();
     }
 
     return Column(
@@ -143,8 +147,9 @@ class PlanningControls extends ConsumerWidget {
             min: 5,
             max: 60,
             divisions: 11,
+            onChangeEnd: (_) => replanNow(),
             onChanged: (v) =>
-                changed((s) => s.copyWith(maxExtraMinutes: v.round())),
+                controller.edit((s) => s.copyWith(maxExtraMinutes: v.round())),
           ),
         ),
         _SliderRow(
@@ -155,7 +160,8 @@ class PlanningControls extends ConsumerWidget {
             min: 200,
             max: 2000,
             divisions: 18,
-            onChanged: (v) => changed(
+            onChangeEnd: (_) => replanNow(),
+            onChanged: (v) => controller.edit(
                 (s) => s.copyWith(walkCapMetres: (v / 100).round() * 100),),
           ),
         ),
@@ -167,7 +173,8 @@ class PlanningControls extends ConsumerWidget {
             min: 0,
             max: 300,
             divisions: 5,
-            onChanged: (v) => changed(
+            onChangeEnd: (_) => replanNow(),
+            onChanged: (v) => controller.edit(
                 (s) => s.copyWith(minTransferSeconds: v.round()),),
           ),
         ),
@@ -202,7 +209,8 @@ class PlanningControls extends ConsumerWidget {
               min: walkSpeedMin,
               max: walkSpeedMax,
               divisions: 17,
-              onChanged: (v) => changed(
+              onChangeEnd: (_) => replanNow(),
+            onChanged: (v) => controller.edit(
                 (s) => s.copyWith(walkSpeed: (v * 10).round() / 10),
               ),
             ),

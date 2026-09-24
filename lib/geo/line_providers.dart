@@ -22,8 +22,11 @@ Map<String, dynamic> _gunzipJson(Uint8List gz) =>
 
 Future<Map<String, dynamic>?> _loadJson(String asset) async {
   try {
-    final gz = (await rootBundle.load(asset)).buffer.asUint8List();
-    return compute(_gunzipJson, gz);
+    final data = await rootBundle.load(asset);
+    // The ByteData can be a view into a larger buffer: honour its window.
+    final gz = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+    // Awaited inside the try, so a gzip or JSON error lands in the catch.
+    return await compute(_gunzipJson, gz);
   } catch (e) {
     debugPrint('pm: $asset unavailable: $e');
     return null;
@@ -53,9 +56,8 @@ LineNetwork? _decode(Uint8List gz) =>
 final lineNetworkProvider = FutureProvider<LineNetwork?>((ref) async {
   final ix = await ref.watch(transitIndexProvider.future);
   try {
-    final gz = (await rootBundle.load('assets/lines.bin.gz'))
-        .buffer
-        .asUint8List();
+    final data = await rootBundle.load('assets/lines.bin.gz');
+    final gz = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
     final net = await compute(_decode, gz);
     if (net == null || net.feedVersion != ix.feedVersion) {
       debugPrint('pm: lines.bin.gz is for another feed (${net?.feedVersion})');
