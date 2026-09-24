@@ -1,0 +1,104 @@
+# FIX MASTER PLAN (supersedes FIXPLAN*, FIX_PLAN*, FIX_PHASES, FIX_AGENT_COMMANDS)
+
+Old fix files stay until user OKs deletion (Phase 7 lists them).
+Run one agent per phase: "do phase N of FIX_MASTER.md, phone is plugged in".
+Each agent loads skill `piedemove-fixes` first, then only the skill its phase names.
+
+## Ground rules (every phase)
+
+1. **No arbitrary code.** No hardcoded line ids, stop ids, coordinates, per-line
+   patches, magic offsets. Every fix is a general rule over feed/OSM data.
+   A fix that only works for line 33 is a failed fix.
+2. **Data-driven, refreshable.** Geometry comes from GTFS (GTT) + OSM (Turin roads)
+   through `tool/build_index.dart` and `tool/build_lines.dart`. Re-running them on
+   new data must reproduce a valid result; the gap test (Phase 1) re-validates it.
+   Never hand-edit generated assets.
+3. **Clean base logic.** One owner per concern (focus controller, location
+   controller, journey-geometry builder). UI reads state, never mutates others' state.
+   Named constants in one place: `lib/ui/map/map_style.dart` (widths, opacities,
+   dot sizes, cutoffs). No literals in layer code.
+4. **On device.** Routing, snapping, progress projection, gap check all run offline.
+   Online allowed only for: map tiles, Photon, GTFS-RT, Overpass (walk snapping,
+   cached, with straight-dotted "≈" fallback). Every online piece degrades, never blanks.
+5. **Isolation.** Each map layer in its own try/catch; failure = status chip.
+6. Per phase: plan -> small diffs -> `flutter analyze` clean -> `flutter test`
+   green -> build, `adb devices`, install -> ONE downscaled (~720px) screenshot
+   per check, looked at -> `graphify update .` -> commit with tag. Report
+   verified-live vs replay/code-only, plainly.
+7. Never `git add -A`. Stage only files the phase touched. No `.orig/.rej/.png/.patch` in commits.
+
+## Phase 0: repair the tree (BLOCKER, do first)
+
+Found: 17 tracked files are **empty in the working tree** (git shows only deletions):
+PLAN.md, piedemove-data/SKILL.md, piedemove-release/SKILL.md, index_io, index_merge,
+index_source, transit_index, ambient, line_build, journey, raptor, about_page,
+line_sheet, trip_sheet, scheduled_only, test/index_merge_test, tool/build_index,
+tool/build_lines. App cannot build. Earlier fix agents did this (likely failed
+patch/`.rej` runs).
+- `git diff --numstat` shows 0 added lines for them -> nothing to lose: `git checkout HEAD -- <those files>`.
+- `assets/ambient.json.gz`, `assets/lines.bin.gz` are modified binaries: compare with HEAD, rebuild via tools if in doubt.
+- Delete stray `*.orig`, `*.rej`, `*.patch`, `*.png` in repo root/lib (move pngs to `docs/shots/` or ignore).
+- Gate: analyze clean, tests green, golden case (Politecnico -> Cristalliera) passes, app installs.
+- Commit `chore: restore truncated files, clean strays`.
+
+## Phase 1: interrupted lines (Fix 1)  skill: piedemove-lines
+- `tool/gap_detector.dart` + `test/gap_detector_test.dart`: walk emitted map geometry per pattern
+  (same code path as map source, not raw paths). Flag: features not sharing endpoint >1 m,
+  vertex gap >150 m, missing hop. Print pattern, hop, cause. Test runs on the real asset.
+- Fix by cause found, in order: unsnapped hops drawn as thin dotted segment (approximate,
+  marked); chain joints share exact vertex; round cap/join on all line layers;
+  GeoJSON `tolerance` ~0, `buffer` up; filters never split one route; numeric top-level
+  `id`, primitive-only properties.
+- Gate: zero gaps; visual scan city centre z12/14/16.
+
+## Phase 2: focus survives everything (Fix 3)  skill: piedemove-ui, piedemove-lines
+- `FocusController` (Riverpod): line | vehicle | trip. Only `close()` (X) and `cancella()` clear it.
+- Cancella pill near top of map whenever anything focused; live trip -> confirm "Terminare il viaggio?".
+- Sheet: peek/half/expanded snaps, peek is resting, sheet takes only its own height.
+- Own source+layers for focus. Realtime updates vehicles only. Camera-idle/zoom/lifecycle never
+  rebuild it; ambient tiering skipped while focused. Fit camera once on select.
+- Gate: verify steps 1-3 of the checklist.
+
+## Phase 3: ridden segment + stop dots (Fix 2 + dot sizes)  skill: piedemove-ui
+- `map_style.dart`: `ridden` width >= 2x `context`, zoom-interpolated, with casing; ridden above context above ambient.
+- `kind` property drives style. Slice ridden by stored stop positions along path, never nearest-point.
+- **Dot sizes:** origin/destination and first/last stop of a ride: ~14 dp; intermediate stops ~8 dp
+  (constants `endDot`, `midDot`, white ring). Ends always above mids.
+- Gate: z13/15/17 on bus, tram, metro legs.
+
+## Phase 4: position dot (Fix 4)  skill: piedemove-phone-test
+- `LocationController`: permission + service check at first launch, chip "Attiva posizione"
+  -> system settings on denial. Last-known first, then ~1 Hz stream, foreground only,
+  pause/resume on lifecycle. Optional heading wedge if compass exists.
+- Own GeoJSON source: blue dot, white ring, accuracy circle. Re-added on every style load, top of stack, own try/catch.
+- My-position button recentres. Works with and without trip.
+- Gate: steps 5 (launch, theme toggle reload, recentre).
+
+## Phase 5: walk paths (Fix 5)  skill: piedemove-routing, piedemove-lines
+- Find why missing first (access/egress not emitted? kind filter? focus filter? z-order?). Fix the cause.
+- One walk feature per walk leg (access, transfer, egress). Snap via cached on-demand Overpass
+  (leg bbox +150 m, foot-walkable ways, reuse `walk_path.dart`/`road_graph.dart`); on failure
+  straight dotted + "≈" distance.
+- Dotted, round caps, white casing ~5 px, 3-tier distance colours. Above ride context, below stops
+  and position dot. Fully visible in focus. Destination pin, origin = position dot or start marker
+  (uses Phase 3 end-dot size).
+- Gate: step 6.
+
+## Phase 6: live progress on every leg (Fix 6)  skill: piedemove-phone-test, piedemove-routing
+- Single progress engine over the Phase 4 stream, same for walk and ride: forward-only projection on
+  current leg geometry, 60 m cutoff (beyond: keep progress, "posizione incerta").
+- Split active leg into `travelled` / `ahead`; earlier legs fully travelled; later untouched.
+  Travelled opacity = one constant (~0.15). Dot sits on the boundary.
+- Advance at 25 m of walk end / 60 m of alight stop. Manual buttons stay.
+- Strip text: "Cammina ancora N m fino a <stop>" / "fino alla destinazione". Start trip works when leg 1 is walk.
+- Unit tests: projection monotonic, cutoff, advance, split. Replay test with recorded track.
+- Gate: step 7 (real walk if possible, else mock-location replay; say which).
+
+## Phase 7: final verify + cleanup
+- Run all 8 checklist items from the original request, one screenshot each.
+- Gap test zero, analyze, tests. Update skills touched. Tag.
+- List old fix files for user to approve deletion; do not delete unasked.
+
+## Order/deps
+0 -> 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7. Phase 2 owns focus layers that 3 and 5 draw into.
+Phase 4 feeds 6. Phase 3 dot constants used by 5.
