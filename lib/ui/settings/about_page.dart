@@ -39,7 +39,8 @@ class AboutPage extends StatelessWidget {
             const _Source(
               title: 'OpenStreetMap',
               subtitle:
-                  'Strade, binari e ingressi della metro.\n'
+                  'Strade, binari, ingressi della metro e il grafo pedonale '
+                  '(marciapiedi, attraversamenti, scale) dei percorsi a piedi.\n'
                   '© contributori OpenStreetMap, licenza ODbL.',
             ),
             const _Source(

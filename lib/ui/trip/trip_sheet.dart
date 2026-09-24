@@ -247,7 +247,7 @@ class _JourneyCard extends ConsumerWidget {
                           ?.copyWith(fontWeight: FontWeight.w700),
                     ),
                     const Spacer(),
-                    _WalkChip(metres: walk),
+                    _WalkChip(metres: walk, approximate: journey.walkApproximate),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -291,9 +291,10 @@ class _JourneyCard extends ConsumerWidget {
 
 /// Walking metres are the cost: bold, coloured by tier, never grey.
 class _WalkChip extends StatelessWidget {
-  const _WalkChip({required this.metres});
+  const _WalkChip({required this.metres, required this.approximate});
 
   final double metres;
+  final bool approximate;
 
   @override
   Widget build(BuildContext context) {
@@ -313,7 +314,7 @@ class _WalkChip extends StatelessWidget {
             Icon(Icons.directions_walk, size: 14, color: color),
             const SizedBox(width: 4),
             Text(
-              metresLabel(metres, approximate: true),
+              metresLabel(metres, approximate: approximate),
               style: TextStyle(color: color, fontWeight: FontWeight.w700),
             ),
           ],
@@ -380,7 +381,7 @@ class _LegChain extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.directions_walk, size: 16, color: color),
-            Text(metresLabel(leg.walkMetres, approximate: true),
+            Text(metresLabel(leg.walkMetres, approximate: leg.route == null),
                 style: TextStyle(color: color, fontWeight: FontWeight.w700)),
           ],
         ));
@@ -456,7 +457,7 @@ class _Detail extends ConsumerWidget {
                 ],
               ),
             ),
-            _WalkChip(metres: journey.walkMetres),
+            _WalkChip(metres: journey.walkMetres, approximate: journey.walkApproximate),
           ],
         ),
         const SizedBox(height: Gap.element),
@@ -517,7 +518,7 @@ class _WalkStep extends ConsumerWidget {
       leading: Icon(Icons.directions_walk, color: color),
       title: Text(
         '${transfer ? 'Cambio' : 'A piedi'} '
-        '${metresLabel(leg.walkMetres, approximate: true)} · '
+        '${metresLabel(leg.walkMetres, approximate: leg.route == null)} · '
         '${durationLabel(leg.arrival - leg.departure)}',
         style: TextStyle(color: color, fontWeight: FontWeight.w700),
       ),

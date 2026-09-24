@@ -17,9 +17,9 @@ String durationLabel(int seconds) {
   return '${minutes ~/ 60} h ${(minutes % 60).toString().padLeft(2, '0')}';
 }
 
-/// Walking distances are the footpath generator's estimate, not a measured
-/// path, so they carry the "approximate" marker until §9.10 has walked the
-/// real streets for that leg.
+/// A walking distance from the routed pedestrian path is exact; one that
+/// fell back to the straight-line estimate (outside the walking graph) carries
+/// the "approximate" marker.
 String metresLabel(double metres, {bool approximate = false}) {
   final value = metres < 950
       ? '${metres.round()} m'

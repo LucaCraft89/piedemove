@@ -252,6 +252,17 @@ LiveRoute buildLiveRoute(
       }
     }
 
+    final walked = leg.kind == LegKind.walk ? leg.route : null;
+    if (walked != null && walked.polyline.length > 1) {
+      // Routed walk: the real pedestrian path, not a chord.
+      for (final p in walked.polyline) {
+        lon.add(p[0]);
+        lat.add(p[1]);
+      }
+      stopVertex.add(lat.length - 1);
+      stopNames.add(leg.toStop >= 0 ? cleanStopName(ix.stopNames[leg.toStop]) : '');
+    }
+
     if (lat.length < 2) {
       // Walk legs, and any ride leg whose geometry could not be resolved.
       approximate = true;

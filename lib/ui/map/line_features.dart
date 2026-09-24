@@ -13,8 +13,11 @@ import 'package:piedemove/geo/lines_io.dart';
 import 'package:piedemove/geo/pattern_snap.dart';
 import 'package:piedemove/location/live_trip.dart';
 import 'package:piedemove/routing/journey.dart';
+import 'package:piedemove/routing/walk_legs.dart';
 import 'package:piedemove/ui/map/map_style.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
+
+export 'package:piedemove/routing/walk_legs.dart' show walkLegEnds;
 
 /// Tier zoom floors (§9.4): trams and rail always, frequent buses from z12,
 /// the rest from z14.
@@ -340,24 +343,6 @@ Map<String, dynamic> journeyFocusStops(
   return out;
 }
 
-/// Both ends `(lat, lon)` of a walk leg: a stop's coordinate, or the query's
-/// origin/destination for the off-stop end. Null when one is unknown. The one
-/// place that decides this, shared by drawing and by the path fetch.
-((double, double), (double, double))? walkLegEnds(
-  TransitIndex ix,
-  Leg leg, {
-  (double, double)? origin,
-  (double, double)? destination,
-}) {
-  final a = leg.fromStop >= 0
-      ? (ix.stopLat[leg.fromStop], ix.stopLon[leg.fromStop])
-      : origin;
-  final b = leg.toStop >= 0
-      ? (ix.stopLat[leg.toStop], ix.stopLon[leg.toStop])
-      : destination;
-  return a == null || b == null ? null : (a, b);
-}
-
 /// Walking legs (§9.10). [path] gives the walked geometry when it is known;
 /// without one the leg is a straight line and stays marked approximate.
 ///
@@ -382,7 +367,7 @@ Map<String, dynamic> walkFeatures(
         destination: destLat == null || destLon == null ? null : (destLat, destLon));
     if (ends == null) continue;
     final a = [ends.$1.$2, ends.$1.$1], b = [ends.$2.$2, ends.$2.$1];
-    final walked = path(i);
+    final walked = path(i) ?? leg.route?.polyline;
     final points = walked ?? [a, b];
     final props = {
       'metres': leg.walkMetres.round(),

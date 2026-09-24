@@ -19,7 +19,6 @@ import 'package:piedemove/places/saved.dart';
 import 'package:piedemove/ui/trip/trip_plan.dart';
 import 'package:piedemove/data/transit_index.dart';
 import 'package:piedemove/geo/lines_io.dart';
-import 'package:piedemove/geo/walk_path.dart';
 import 'package:piedemove/realtime/gtfs_rt.dart';
 import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/location/device_location.dart';
@@ -122,7 +121,6 @@ class _MapViewState extends ConsumerState<MapView> {
   int _progress = -1;
 
   /// Walked geometry per leg index, once §9.10 has fetched it.
-  final _walkPaths = <int, List<List<double>>>{};
 
   @override
   Widget build(BuildContext context) {
@@ -651,7 +649,6 @@ class _MapViewState extends ConsumerState<MapView> {
     if (controller == null || !_styleReady || !_linesAdded || ix == null) return;
     // A focus whose geometry has not landed yet redraws when it does.
     if (focus != null && net == null) return;
-    if (focus != _focus) _walkPaths.clear(); // leg indices are per journey
     final wasFitted = _fitted;
     _fitted = focus;
     _focus = focus;
@@ -696,7 +693,7 @@ class _MapViewState extends ConsumerState<MapView> {
             walkFeatures(
               ix,
               journey,
-              path: (leg) => _walkPaths[leg],
+              path: (_) => null,
               originLat: o?.$1,
               originLon: o?.$2,
               destLat: d?.$1,
@@ -705,7 +702,7 @@ class _MapViewState extends ConsumerState<MapView> {
             ),
           );
           await _hideAmbientStops(controller);
-          unawaited(_fetchWalkPaths(journey, ix));
+          _noteApproximateWalks(journey);
       }
     } catch (e) {
       debugPrint('pm: focus failed: $e');
@@ -726,45 +723,10 @@ class _MapViewState extends ConsumerState<MapView> {
     return journeyFocusStops(ix, journey, origin: o, destination: d);
   }
 
-  /// Walks the real streets for each walk leg (§9.10), then redraws. Failure
-  /// is normal — the leg simply stays a straight dotted line marked "≈".
-  Future<void> _fetchWalkPaths(Journey journey, TransitIndex ix) async {
-    final (o, d) = _queryEnds();
-    var found = false, failed = false;
-    for (var i = 0; i < journey.legs.length; i++) {
-      final leg = journey.legs[i];
-      if (leg.kind != LegKind.walk || _walkPaths.containsKey(i)) continue;
-      final e = walkLegEnds(ix, leg, origin: o, destination: d);
-      if (e == null) continue;
-      final path = await walkPath(e.$1.$1, e.$1.$2, e.$2.$1, e.$2.$2);
-      if (!mounted || _focus is! JourneyFocus) return; // focus moved on
-      if (path == null) {
-        failed = true;
-        continue;
-      }
-      _walkPaths[i] = path;
-      found = true;
-    }
-    if (failed) {
-      ref.read(mapStatusProvider.notifier).state =
-          'Percorsi a piedi approssimati';
-    }
-    if (!found) return;
-    final controller = _controller;
-    if (controller == null) return;
-    try {
-      await controller.setGeoJsonSource(
-        _walkSource,
-        walkFeatures(ix, journey,
-            path: (leg) => _walkPaths[leg],
-            originLat: o?.$1,
-            originLon: o?.$2,
-            destLat: d?.$1,
-            destLon: d?.$2,
-            live: ref.read(liveTripProvider)),
-      );
-    } catch (e) {
-      debugPrint('pm: walk path redraw failed: $e');
+  /// Legs the walking graph did not cover stay straight dotted; say so once.
+  void _noteApproximateWalks(Journey journey) {
+    if (journey.walkApproximate) {
+      ref.read(mapStatusProvider.notifier).state = 'Percorsi a piedi approssimati';
     }
   }
 

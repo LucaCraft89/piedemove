@@ -1,9 +1,13 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:piedemove/data/index_io.dart';
 import 'package:piedemove/data/transit_index.dart';
+import 'package:piedemove/geo/walk_router.dart';
+import 'package:piedemove/geo/walk_graph.dart';
 import 'package:piedemove/routing/footpaths.dart';
+import 'package:piedemove/routing/walk_legs.dart';
 import 'package:piedemove/routing/journey.dart';
 import 'package:piedemove/routing/raptor.dart';
 
@@ -24,6 +28,7 @@ void main() {
   late TransitIndex ix;
   late Footpaths footpaths;
   late Planner planner;
+  late WalkRoutes routes;
   late List<Journey> journeys;
 
   setUpAll(() async {
@@ -37,13 +42,32 @@ void main() {
     while (day.weekday > DateTime.friday) {
       day = day.add(const Duration(days: 1));
     }
-    journeys = planner.plan(PlanRequest(
+    final request = PlanRequest(
       originLat: ix.stopLat[politecnico],
       originLon: ix.stopLon[politecnico],
       destLat: 45.0738,
       destLon: 7.6400,
       when: DateTime(day.year, day.month, day.day, 18),
-    ));
+    );
+    // The app's pipeline: the planner proposes, the shipped walking graph
+    // prices every walk leg (routed metres are what is shown and scored).
+    final asset = File('assets/walk_graph.pmwg.gz');
+    routes = WalkRoutes(WalkRouter(
+        WalkGraph.decode(Uint8List.fromList(gzip.decode(asset.readAsBytesSync())))));
+    journeys = routeWalks(
+      planner.plan(request.withWalkCap(request.walkCapMetres * walkDetourFactor)),
+      ix,
+      routes,
+      origin: (request.originLat, request.originLon),
+      destination: (request.destLat, request.destLon),
+      capMetres: request.walkCapMetres,
+      retime: (leg, ready, date) => planner.retimeRide(leg, ready, request, date),
+      maxExtraSeconds: request.maxExtraMinutes * 60,
+    );
+    for (final j in sortBalanced(journeys).take(3)) {
+      // ignore: avoid_print
+      print('journey walk ${j.walkMetres.round()} m: ${j.legs.map((l) => l.kind == LegKind.walk ? "walk ${l.walkMetres.round()}${l.route == null ? "~" : ""}" : l.options.map((o) => o.routeShortName).join("/")).join(" > ")}');
+    }
   });
 
   test('the 126 m TRAPANI -> PESCHIERA footpath exists', () {
@@ -59,13 +83,31 @@ void main() {
     expect(edge.single, closeTo(126, 15));
   }, skip: skip);
 
-  test('the balanced best rides line 2 into BARDONECCHIA', () {
+  test('the pinned hop, routed on real pedestrian edges, stays a short one', () {
+    final trapani = ix.stopIndexById['3694']!;
+    final peschiera = ix.stopIndexById['230']!;
+    final r = routes.route(ix.stopLat[trapani], ix.stopLon[trapani],
+        ix.stopLat[peschiera], ix.stopLon[peschiera])!;
+    // ignore: avoid_print
+    print('TRAPANI 872 -> PESCHIERA 120 routed: ${r.metres.round()} m');
+    expect(r.metres, inInclusiveRange(110, 260));
+  }, skip: skip);
+
+  test('the balanced best rides line 2 to within ~300 m of Via Cristalliera', () {
     expect(journeys, isNotEmpty, reason: 'no journey at all');
     final best = sortBalanced(journeys).first;
-    final bardonecchia = {ix.stopIndexById['208']!, ix.stopIndexById['219']!};
     final lastRide = best.legs.lastWhere((l) => l.kind == LegKind.ride);
-    expect(bardonecchia, contains(lastRide.toStop));
     expect(lastRide.options.map((o) => o.routeShortName), contains('2'));
+    // With routed distances BARDONECCHIA (300 m, the user's 320 m by hand) and
+    // RIVOLI SUD (298 m) tie; the straight line used to favour BARDONECCHIA.
+    expect(best.legs.last.walkMetres, lessThanOrEqualTo(330));
+    expect(best.legs.last.route, isNotNull, reason: 'egress must be a routed path');
+    // BARDONECCHIA itself is still on offer.
+    final bardonecchia = {ix.stopIndexById['208']!, ix.stopIndexById['219']!};
+    expect(
+        journeys.any((j) => j.legs
+            .any((l) => l.kind == LegKind.ride && bardonecchia.contains(l.toStop))),
+        isTrue);
   }, skip: skip);
 
   test('it gets there on footpath transfers, not on a long walk', () {

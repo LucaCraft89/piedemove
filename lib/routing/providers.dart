@@ -8,8 +8,11 @@ import 'package:piedemove/data/providers.dart';
 import 'package:piedemove/realtime/gtfs_rt.dart';
 import 'package:piedemove/realtime/store.dart';
 
+import 'package:piedemove/geo/walk_providers.dart';
+
 import 'footpaths.dart';
 import 'raptor.dart';
+import 'walk_legs.dart';
 
 /// `Alert.Effect.NO_SERVICE` / `DETOUR`.
 const effectNoService = 1;
@@ -22,6 +25,12 @@ final footpathsProvider = Provider<Footpaths?>((ref) {
   final ix = ref.watch(transitIndexProvider).valueOrNull;
   if (ix == null) return null;
   return Footpaths.build(ix, clusters: ref.watch(stopClustersProvider));
+});
+
+/// Memoised walking routes over whichever graph is loaded; null when none is.
+final walkRoutesProvider = FutureProvider<WalkRoutes?>((ref) async {
+  final source = await ref.watch(walkRouterProvider.future);
+  return source == null ? null : WalkRoutes(source.router);
 });
 
 final plannerProvider = Provider<Planner?>((ref) {

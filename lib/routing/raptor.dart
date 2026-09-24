@@ -35,6 +35,24 @@ class PlanRequest {
     this.detouredRoutes = const <int>{},
   });
 
+  PlanRequest withWalkCap(double cap) => PlanRequest(
+        originLat: originLat,
+        originLon: originLon,
+        destLat: destLat,
+        destLon: destLon,
+        when: when,
+        arriveBy: arriveBy,
+        walkCapMetres: cap,
+        walkSpeed: walkSpeed,
+        maxTransfers: maxTransfers,
+        minTransferSeconds: minTransferSeconds,
+        maxExtraMinutes: maxExtraMinutes,
+        windowMinutes: windowMinutes,
+        suspendedStops: suspendedStops,
+        excludedRouteTypes: excludedRouteTypes,
+        detouredRoutes: detouredRoutes,
+      );
+
   final double originLat;
   final double originLon;
   final double destLat;
@@ -294,6 +312,25 @@ class Planner {
       }
     }
     return out;
+  }
+
+  /// Re-boards a ride leg for a traveller who can only be at its board stop at
+  /// [readyTime] (the real walk took longer than the planner assumed): the
+  /// earliest arrival among the lines that make the hop from then on, or null
+  /// when none does inside the window.
+  Leg? retimeRide(Leg leg, int readyTime, PlanRequest req, DateTime date) {
+    final options = _lineOptions(leg.fromStop, leg.toStop, readyTime, date, req);
+    if (options.isEmpty) return null;
+    final best = options.reduce((a, b) => a.arrival <= b.arrival ? a : b);
+    return Leg(
+      kind: LegKind.ride,
+      fromStop: leg.fromStop,
+      toStop: leg.toStop,
+      departure: best.departure,
+      arrival: best.arrival,
+      readyTime: readyTime,
+      options: options,
+    );
   }
 
   // A label reached by walking is not a base for another walk: no chained

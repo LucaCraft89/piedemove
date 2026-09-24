@@ -2,6 +2,8 @@
 /// whole point of the product — each with its own next departure.
 library;
 
+import 'package:piedemove/geo/walk_router.dart';
+
 class RideOption {
   const RideOption({
     required this.routeShortName,
@@ -40,6 +42,7 @@ class Leg {
     this.walkMetres = 0,
     this.options = const [],
     this.readyTime = 0,
+    this.route,
   });
 
   final LegKind kind;
@@ -57,6 +60,28 @@ class Leg {
   /// Earliest second the traveller can be at [fromStop] — the window start the
   /// every-line post-pass searches from.
   final int readyTime;
+
+  /// Walk legs: the path on real pedestrian edges, when the walking graph
+  /// covered both ends. Null = [walkMetres] is an estimate, shown with "≈".
+  final WalkRoute? route;
+
+  Leg withWalk({
+    required double walkMetres,
+    required int arrival,
+    int? departure,
+    WalkRoute? route,
+  }) =>
+      Leg(
+        kind: kind,
+        fromStop: fromStop,
+        toStop: toStop,
+        departure: departure ?? this.departure,
+        arrival: arrival,
+        walkMetres: walkMetres,
+        options: options,
+        readyTime: readyTime,
+        route: route,
+      );
 
   bool get detoured => options.any((o) => o.detoured);
 
@@ -78,6 +103,10 @@ class Journey {
   int get durationSeconds => arrival - departure;
   double get walkMetres =>
       legs.fold(0.0, (sum, l) => sum + l.walkMetres);
+
+  /// True when some walk leg's distance is an estimate, not a routed path.
+  bool get walkApproximate => legs
+      .any((l) => l.kind == LegKind.walk && l.walkMetres > 0 && l.route == null);
   int get rides => legs.where((l) => l.kind == LegKind.ride).length;
   int get transfers => (rides - 1).clamp(0, 99);
   bool get detoured => legs.any((l) => l.detoured);

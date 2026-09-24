@@ -10,7 +10,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:piedemove/places/photon.dart';
 import 'package:piedemove/routing/journey.dart';
 import 'package:piedemove/routing/providers.dart';
+import 'package:piedemove/routing/footpaths.dart';
 import 'package:piedemove/routing/raptor.dart';
+import 'package:piedemove/routing/walk_legs.dart';
 import 'package:piedemove/settings/settings.dart';
 
 enum WhenMode { now, departAt, arriveBy }
@@ -206,7 +208,29 @@ class TripPlanController extends StateNotifier<TripState> {
     );
     TripResult result;
     try {
-      final journeys = planner.plan(request);
+      // The planner proposes candidates with straight-line walking; a wider
+      // cap lets journeys whose real walk is longer than it looked through,
+      // then routeWalks prices them properly and applies the real cap.
+      final wide = request.withWalkCap(request.walkCapMetres * walkDetourFactor);
+      final walkRoutes = await _ref
+          .read(walkRoutesProvider.future)
+          .timeout(const Duration(seconds: 4), onTimeout: () => null);
+      final clock = Stopwatch()..start();
+      final candidates = planner.plan(wide);
+      final planned = clock.elapsedMilliseconds;
+      final journeys = routeWalks(
+        candidates,
+        planner.ix,
+        walkRoutes,
+        origin: (request.originLat, request.originLon),
+        destination: (request.destLat, request.destLon),
+        capMetres: request.walkCapMetres,
+        walkSpeed: request.walkSpeed,
+        retime: (leg, ready, date) => planner.retimeRide(leg, ready, request, date),
+        maxExtraSeconds: request.maxExtraMinutes * 60,
+      );
+      debugPrint('pm: plan $planned ms, routeWalks ${clock.elapsedMilliseconds - planned} ms '
+          'for ${candidates.length} candidates -> ${journeys.length}');
       result = TripResult(
         fastest: sortFastest(journeys),
         balanced: sortBalanced(journeys),

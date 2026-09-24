@@ -44,6 +44,7 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   wakelock_plus: ^1.8.0
+  crypto: ^3.0.7
 
 dev_dependencies:
   flutter_test:
@@ -73,6 +74,7 @@ flutter:
     - assets/connectors.json.gz
     - assets/lines.bin.gz
     - assets/entrances.json.gz
+    - assets/walk_graph.pmwg.gz
 
   fonts:
     - family: Google Sans Flex

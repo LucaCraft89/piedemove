@@ -159,3 +159,10 @@ Feed facts as built on 2026-09-19 (`feed_version` 20260919):
   patched.
 - Feed smoke test: `PIEDEMOVE_NETWORK=1 flutter test test/feeds_smoke_test.dart`.
   All four GTT URLs answered 200 on 2026-09-19.
+
+## Walking graph (phase 5b-A)
+- `dart tool/build_walk.dart [--offline] [--out --manifest --asset --bbox --input]` builds
+  `assets/walk_graph.pmwg.gz` from cached Overpass tiles (build/walk_osm); deterministic bytes.
+- Format v1 (header: magic, format, OSM time, bbox, payload sha256) and manifest schema: `docs/walk_routing.md`.
+- Loader `loadWalkLayers` (walk_graph_update.dart): valid downloaded -> shipped asset -> null.
+  Updater: `walkManifestUrl` constant, ETag, 1/day, sha256+format check, atomic rename, silent.
