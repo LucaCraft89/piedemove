@@ -197,3 +197,8 @@ hook, or a pinch sent with `sendevent` right after launch (it only works before
 any other touch). Look at: a corso with dual carriageways, a shared bus/tram
 street, the Peschiera/Castelfidardo corridor, a roundabout, the centre at
 z14/z16, a suburban stretch, a metro line.
+
+## Walk paths (fix phase 5)
+
+Root cause of missing walks: `walkFeatures` never received the origin (the access leg has `fromStop == -1`, so it was skipped) and the destination came from `selectedPlaceProvider` (the search pin, null when the destination was picked in the planner), so egress was skipped too. Both ends now come from the trip query via `walkLegEnds(ix, leg, origin:, destination:)` (`line_features.dart`), shared by drawing and by `_fetchWalkPaths`. Layers `pm-walk-casing` (white, dotted, same absolute spacing via `walkDash`) + `pm-walk-lines` (3-tier colour), constants `walk*` in `map_style.dart`, above focus lines, below focus stop dots and the position dot. `walkPath` caches solved paths on disk (`<support>/walk/`) and in memory; failures are never cached (retry when back online) and set the chip "Percorsi a piedi approssimati"; legs stay straight dotted with the "≈" figure. Tests: `test/walk_legs_test.dart`.
+Verified on phone 2026-09-24: transfer (snapped, bent path), egress, offline fallback (wifi+data off: straight dotted + chip). Access-from-position not seen separately (position was on the first stop).

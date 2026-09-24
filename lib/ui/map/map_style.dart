@@ -55,3 +55,9 @@ const dotRingWidth = 2.0;
 const meDotDiameter = 16.0, meRingWidth = 3.0, meWedgeSize = 44.0;
 const meAccuracyOpacity = 0.15, meAccuracyStrokeOpacity = 0.35;
 const meColor = '#1A73E8';
+
+/// Walk legs (phase 5): dotted, round caps, white casing. Dash lengths are in
+/// line widths, so [walkDash] keeps the same absolute spacing for the casing.
+const walkWidth = 5.0, walkCasingExtra = 3.0;
+const walkDotSpacingPx = 9.0;
+List<double> walkDash(double width) => [0.5 / width, (walkDotSpacingPx - 0.5) / width];

@@ -7,9 +7,11 @@
 library;
 
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 
 import 'distance.dart';
 import 'osm_fetch.dart';
@@ -23,7 +25,20 @@ const walkPathMaxMetres = 1500.0;
 const walkPathPadMetres = 150.0;
 
 /// Answers stay for the session: a journey is re-selected all the time.
-final _cache = <String, List<List<double>>?>{};
+final _cache = <String, List<List<double>>>{};
+
+/// Solved paths also live on disk (a walk between two fixed points never
+/// changes), so a repeat trip works offline. Failures are never cached: going
+/// back online must retry.
+Future<File?> _cacheFile(String key, Directory? dir) async {
+  try {
+    final d = dir ?? Directory('${(await getApplicationSupportDirectory()).path}/walk');
+    d.createSync(recursive: true);
+    return File('${d.path}/${key.replaceAll(RegExp(r'[^0-9.,-]'), '')}.json');
+  } catch (_) {
+    return null;
+  }
+}
 
 /// The walked path as `[lon, lat]` pairs, or null when it is unknown.
 Future<List<List<double>>?> walkPath(
@@ -32,11 +47,21 @@ Future<List<List<double>>?> walkPath(
   double bLat,
   double bLon, {
   http.Client? client,
+  Directory? cacheDir,
 }) async {
   final key = '${aLat.toStringAsFixed(5)},${aLon.toStringAsFixed(5)},'
       '${bLat.toStringAsFixed(5)},${bLon.toStringAsFixed(5)}';
   if (_cache.containsKey(key)) return _cache[key];
   if (haversineMetres(aLat, aLon, bLat, bLon) > walkPathMaxMetres) return null;
+  final file = await _cacheFile(key, cacheDir);
+  try {
+    if (file != null && file.existsSync()) {
+      final raw = jsonDecode(file.readAsStringSync()) as List;
+      return _cache[key] = [
+        for (final p in raw) [(p[0] as num).toDouble(), (p[1] as num).toDouble()]
+      ];
+    }
+  } catch (_) {/* corrupt cache file: refetch */}
 
   final c = client ?? http.Client();
   try {
@@ -58,13 +83,18 @@ Future<List<List<double>>?> walkPath(
           body: {'data': query},
         )
         .timeout(const Duration(seconds: 20));
-    if (r.statusCode != 200) return _cache[key] = null;
+    if (r.statusCode != 200) return null;
     final ways = parseOsmJson(utf8.decode(r.bodyBytes, allowMalformed: true));
-    if (ways.isEmpty) return _cache[key] = null;
+    if (ways.isEmpty) return null;
     final graph = RoadGraph.build(ways, GraphMode.foot);
-    return _cache[key] = _route(graph, aLat, aLon, bLat, bLon);
+    final path = _route(graph, aLat, aLon, bLat, bLon);
+    if (path == null) return null;
+    try {
+      file?.writeAsStringSync(jsonEncode(path));
+    } catch (_) {}
+    return _cache[key] = path;
   } catch (_) {
-    return _cache[key] = null;
+    return null;
   } finally {
     if (client == null) c.close();
   }

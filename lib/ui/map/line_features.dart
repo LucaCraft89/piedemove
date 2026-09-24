@@ -340,6 +340,24 @@ Map<String, dynamic> journeyFocusStops(
   return out;
 }
 
+/// Both ends `(lat, lon)` of a walk leg: a stop's coordinate, or the query's
+/// origin/destination for the off-stop end. Null when one is unknown. The one
+/// place that decides this, shared by drawing and by the path fetch.
+((double, double), (double, double))? walkLegEnds(
+  TransitIndex ix,
+  Leg leg, {
+  (double, double)? origin,
+  (double, double)? destination,
+}) {
+  final a = leg.fromStop >= 0
+      ? (ix.stopLat[leg.fromStop], ix.stopLon[leg.fromStop])
+      : origin;
+  final b = leg.toStop >= 0
+      ? (ix.stopLat[leg.toStop], ix.stopLon[leg.toStop])
+      : destination;
+  return a == null || b == null ? null : (a, b);
+}
+
 /// Walking legs (§9.10). [path] gives the walked geometry when it is known;
 /// without one the leg is a straight line and stays marked approximate.
 ///
@@ -359,13 +377,11 @@ Map<String, dynamic> walkFeatures(
   for (var i = 0; i < journey.legs.length; i++) {
     final leg = journey.legs[i];
     if (leg.kind != LegKind.walk || leg.walkMetres <= 0) continue;
-    final a = leg.fromStop >= 0
-        ? [ix.stopLon[leg.fromStop], ix.stopLat[leg.fromStop]]
-        : (originLon == null || originLat == null ? null : [originLon, originLat]);
-    final b = leg.toStop >= 0
-        ? [ix.stopLon[leg.toStop], ix.stopLat[leg.toStop]]
-        : (destLon == null || destLat == null ? null : [destLon, destLat]);
-    if (a == null || b == null) continue;
+    final ends = walkLegEnds(ix, leg,
+        origin: originLat == null || originLon == null ? null : (originLat, originLon),
+        destination: destLat == null || destLon == null ? null : (destLat, destLon));
+    if (ends == null) continue;
+    final a = [ends.$1.$2, ends.$1.$1], b = [ends.$2.$2, ends.$2.$1];
     final walked = path(i);
     final points = walked ?? [a, b];
     final props = {

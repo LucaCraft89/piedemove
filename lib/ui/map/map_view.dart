@@ -496,6 +496,19 @@ class _MapViewState extends ConsumerState<MapView> {
         _walkSource,
         GeojsonSourceProperties(data: empty),
       );
+      // White dotted casing under the dots, same absolute spacing.
+      await controller.addLineLayer(
+        _walkSource,
+        'pm-walk-casing',
+        LineLayerProperties(
+          lineColor: '#FFFFFF',
+          lineOpacity: 0.9,
+          lineWidth: walkWidth + walkCasingExtra,
+          lineCap: 'round',
+          lineDasharray: walkDash(walkWidth + walkCasingExtra),
+        ),
+        enableInteraction: false,
+      );
       await controller.addLineLayer(
         _walkSource,
         'pm-walk-lines',
@@ -506,9 +519,9 @@ class _MapViewState extends ConsumerState<MapView> {
             ['==', ['get', 'travelled'], 1], 0.4,
             1.0,
           ],
-          lineWidth: 5.0,
+          lineWidth: walkWidth,
           lineCap: 'round',
-          lineDasharray: const [0.1, 1.8],
+          lineDasharray: walkDash(walkWidth),
         ),
         enableInteraction: false,
       );
@@ -677,15 +690,17 @@ class _MapViewState extends ConsumerState<MapView> {
           await controller.setGeoJsonSource(_focusLinesSource, lines);
           await controller.setGeoJsonSource(
               _focusStopsSource, _journeyStops(ix, journey));
-          final place = ref.read(selectedPlaceProvider);
+          final (o, d) = _queryEnds();
           await controller.setGeoJsonSource(
             _walkSource,
             walkFeatures(
               ix,
               journey,
               path: (leg) => _walkPaths[leg],
-              destLat: place?.lat,
-              destLon: place?.lon,
+              originLat: o?.$1,
+              originLon: o?.$2,
+              destLat: d?.$1,
+              destLon: d?.$2,
               live: live,
             ),
           );
@@ -698,34 +713,43 @@ class _MapViewState extends ConsumerState<MapView> {
     }
   }
 
-  Map<String, dynamic> _journeyStops(TransitIndex ix, Journey journey) {
+  /// Origin and destination of the planned trip (its own query, never the
+  /// search pin: the pin is empty when the destination came from the planner).
+  ((double, double)?, (double, double)?) _queryEnds() {
     final q = ref.read(tripPlanProvider).query;
     (double, double)? at(Place? p) => p == null ? null : (p.lat, p.lon);
-    return journeyFocusStops(ix, journey,
-        origin: at(q.from), destination: at(ref.read(selectedPlaceProvider)));
+    return (at(q.from), at(q.to));
+  }
+
+  Map<String, dynamic> _journeyStops(TransitIndex ix, Journey journey) {
+    final (o, d) = _queryEnds();
+    return journeyFocusStops(ix, journey, origin: o, destination: d);
   }
 
   /// Walks the real streets for each walk leg (§9.10), then redraws. Failure
   /// is normal — the leg simply stays a straight dotted line marked "≈".
   Future<void> _fetchWalkPaths(Journey journey, TransitIndex ix) async {
-    final place = ref.read(selectedPlaceProvider);
-    var found = false;
+    final (o, d) = _queryEnds();
+    var found = false, failed = false;
     for (var i = 0; i < journey.legs.length; i++) {
       final leg = journey.legs[i];
       if (leg.kind != LegKind.walk || _walkPaths.containsKey(i)) continue;
-      final a = leg.fromStop >= 0
-          ? (ix.stopLat[leg.fromStop], ix.stopLon[leg.fromStop])
-          : null;
-      final b = leg.toStop >= 0
-          ? (ix.stopLat[leg.toStop], ix.stopLon[leg.toStop])
-          : (place == null ? null : (place.lat, place.lon));
-      if (a == null || b == null) continue;
-      final path = await walkPath(a.$1, a.$2, b.$1, b.$2);
-      if (path == null) continue;
+      final e = walkLegEnds(ix, leg, origin: o, destination: d);
+      if (e == null) continue;
+      final path = await walkPath(e.$1.$1, e.$1.$2, e.$2.$1, e.$2.$2);
+      if (!mounted || _focus is! JourneyFocus) return; // focus moved on
+      if (path == null) {
+        failed = true;
+        continue;
+      }
       _walkPaths[i] = path;
       found = true;
     }
-    if (!found || !mounted) return;
+    if (failed) {
+      ref.read(mapStatusProvider.notifier).state =
+          'Percorsi a piedi approssimati';
+    }
+    if (!found) return;
     final controller = _controller;
     if (controller == null) return;
     try {
@@ -733,8 +757,11 @@ class _MapViewState extends ConsumerState<MapView> {
         _walkSource,
         walkFeatures(ix, journey,
             path: (leg) => _walkPaths[leg],
-            destLat: place?.lat,
-            destLon: place?.lon),
+            originLat: o?.$1,
+            originLon: o?.$2,
+            destLat: d?.$1,
+            destLon: d?.$2,
+            live: ref.read(liveTripProvider)),
       );
     } catch (e) {
       debugPrint('pm: walk path redraw failed: $e');
