@@ -58,27 +58,23 @@ List<Object> get ambientWidth => [
       ['match', ['get', 'mode'], 'bus', 1.0, railWidthFactor],
     ];
 
-/// Focus stroke: ride context stays thin, the rest is full width. The zoom
-/// interpolation is the top-level expression (MapLibre only allows `zoom` there)
-/// and each stop value is a data expression; [extra] widens a casing.
-List<Object> focusWidth({double extra = 0}) => [
+/// Focus stroke for one `kind` (ridden|context). The zoom interpolation is the
+/// top-level expression (MapLibre only allows `zoom` there); [extra] widens a
+/// casing. Rail modes are [railWidthFactor] wider in both kinds.
+List<Object> focusWidth(String kind, {double extra = 0}) => [
       'interpolate',
       ['linear'],
       ['zoom'],
-      for (final (zoom, base) in ambientBaseWidths) ...[
+      for (final (zoom, base)
+          in kind == kindRidden ? ambientBaseWidths : contextBaseWidths) ...[
         zoom,
         [
           '+',
           extra,
           [
-            'case',
-            ['==', ['get', 'ridden'], 0], contextLineWidth,
-            [
-              '*',
-              base,
-              ['min', ['+', 1, ['*', 0.4, ['-', ['get', 'n'], 1]]], 3],
-              ['match', ['get', 'mode'], 'bus', 1.0, railWidthFactor],
-            ],
+            '*',
+            base,
+            ['match', ['get', 'mode'], 'bus', 1.0, railWidthFactor],
           ],
         ],
       ],
@@ -165,7 +161,7 @@ Map<String, dynamic> routeFocusLines(
         'tier': 0,
         'arrow': 1,
         'shade': shadeOf(ix.routeShortNames[route]),
-        'ridden': 1,
+        'kind': kindRidden,
       },
     ));
   }
@@ -244,7 +240,7 @@ Map<String, dynamic> journeyFocusLines(
     out['features'].add(_line(
       id++,
       _slice(geom, 0, geom.vertexCount - 1),
-      {...props, 'arrow': 0, 'ridden': 0, 'travelled': 0},
+      {...props, 'arrow': 0, 'kind': kindContext, 'travelled': 0},
     ));
 
     final from = patternPositionOf(ix, option.pattern, leg.fromStop);
@@ -265,14 +261,14 @@ Map<String, dynamic> journeyFocusLines(
       out['features'].add(_line(
         id++,
         _slice(geom, a, split),
-        {...props, 'arrow': 1, 'ridden': 1, 'travelled': 1},
+        {...props, 'arrow': 1, 'kind': kindRidden, 'travelled': 1},
       ));
     }
     if (split < b) {
       out['features'].add(_line(
         id++,
         _slice(geom, split, b),
-        {...props, 'arrow': 1, 'ridden': 1, 'travelled': 0},
+        {...props, 'arrow': 1, 'kind': kindRidden, 'travelled': 0},
       ));
     }
   }
@@ -280,8 +276,26 @@ Map<String, dynamic> journeyFocusLines(
 }
 
 /// Only the stops the journey touches; board and alight big (§9.9).
-Map<String, dynamic> journeyFocusStops(TransitIndex ix, Journey journey) {
+///
+/// [origin] / [destination] (lat, lon) add the trip's own end points when a walk
+/// leg starts or finishes off-stop; they get the same end size as a ride end.
+Map<String, dynamic> journeyFocusStops(
+  TransitIndex ix,
+  Journey journey, {
+  (double, double)? origin,
+  (double, double)? destination,
+}) {
   final out = _emptyCollection();
+  void point(int id, (double, double)? at, String name) {
+    if (at == null) return;
+    out['features'].add({
+      'type': 'Feature',
+      'id': id,
+      'geometry': {'type': 'Point', 'coordinates': [at.$2, at.$1]},
+      'properties': {'stop': -1, 'name': name, 'mode': 'walk', 'big': 1},
+    });
+  }
+
   final seen = <int>{};
   void add(int stop, String mode, bool big) {
     if (stop < 0) return;
@@ -315,6 +329,13 @@ Map<String, dynamic> journeyFocusStops(TransitIndex ix, Journey journey) {
     for (var i = from + 1; i > 0 && i < to; i++) {
       add(ix.patternStopAt(option.pattern, i), mode, false);
     }
+  }
+  final legs = journey.legs;
+  if (legs.isNotEmpty && legs.first.kind == LegKind.walk && legs.first.fromStop < 0) {
+    point(-1, origin, 'Partenza');
+  }
+  if (legs.isNotEmpty && legs.last.kind == LegKind.walk && legs.last.toStop < 0) {
+    point(-2, destination, 'Arrivo');
   }
   return out;
 }

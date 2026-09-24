@@ -15,6 +15,7 @@ import 'package:piedemove/data/providers.dart';
 import 'package:piedemove/geo/line_providers.dart';
 import 'package:piedemove/places/photon.dart';
 import 'package:piedemove/places/saved.dart';
+import 'package:piedemove/ui/trip/trip_plan.dart';
 import 'package:piedemove/data/transit_index.dart';
 import 'package:piedemove/geo/lines_io.dart';
 import 'package:piedemove/geo/walk_path.dart';
@@ -368,38 +369,49 @@ class _MapViewState extends ConsumerState<MapView> {
           buffer: lineSourceBuffer,
         ),
       );
-      await controller.addLineLayer(
-        _focusLinesSource,
-        'pm-focus-casing',
-        LineLayerProperties(
-          lineColor: _hex(surface),
-          lineWidth: focusWidth(extra: 2.0),
-          lineOpacity: 0.8,
-          lineCap: 'round',
-          lineJoin: 'round',
-        ),
-        belowLayerId: below,
-        filter: notApproxFilter,
-        enableInteraction: false,
-      );
-      await controller.addLineLayer(
-        _focusLinesSource,
-        'pm-focus-lines',
-        LineLayerProperties(
-          lineColor: ambientColor(tokens.modes),
-          lineWidth: focusWidth(),
-          lineOpacity: [
-            'case',
-            ['==', ['get', 'travelled'], 1], travelledOpacity,
-            1.0,
-          ],
-          lineCap: 'round',
-          lineJoin: 'round',
-        ),
-        belowLayerId: below,
-        filter: notApproxFilter,
-        enableInteraction: false,
-      );
+      // Bottom to top: context casing+line, then ridden casing+line, so a
+      // ridden stretch always sits above every context stretch (phase 3).
+      for (final kind in const [kindContext, kindRidden]) {
+        final ridden = kind == kindRidden;
+        final filter = [
+          'all',
+          notApproxFilter,
+          ['==', ['get', 'kind'], kind],
+        ];
+        await controller.addLineLayer(
+          _focusLinesSource,
+          'pm-focus-$kind-casing',
+          LineLayerProperties(
+            lineColor: _hex(surface),
+            lineWidth: focusWidth(kind,
+                extra: ridden ? riddenCasingExtra : contextCasingExtra),
+            lineOpacity: 0.8,
+            lineCap: 'round',
+            lineJoin: 'round',
+          ),
+          belowLayerId: below,
+          filter: filter,
+          enableInteraction: false,
+        );
+        await controller.addLineLayer(
+          _focusLinesSource,
+          'pm-focus-$kind-lines',
+          LineLayerProperties(
+            lineColor: ambientColor(tokens.modes),
+            lineWidth: focusWidth(kind),
+            lineOpacity: [
+              'case',
+              ['==', ['get', 'travelled'], 1], travelledOpacity,
+              1.0,
+            ],
+            lineCap: 'round',
+            lineJoin: 'round',
+          ),
+          belowLayerId: below,
+          filter: filter,
+          enableInteraction: false,
+        );
+      }
       await controller.addLineLayer(
         _focusLinesSource,
         'pm-focus-approx',
@@ -498,30 +510,30 @@ class _MapViewState extends ConsumerState<MapView> {
         _focusStopsSource,
         GeojsonSourceProperties(data: empty),
       );
-      await controller.addCircleLayer(
-        _focusStopsSource,
-        'pm-focus-stop-dots',
-        CircleLayerProperties(
-          circleColor: modeColor(tokens.modes),
-          // Small stops shrink when zoomed out, so a dense route stays a line.
-          circleRadius: [
-            'interpolate',
-            ['linear'],
-            ['zoom'],
-            for (final (zoom, small, _) in focusDotByZoom) ...[
-              zoom,
-              ['case', ['==', ['get', 'big'], 1], focusEndDotRadius, small],
+      // Mids first, ends in their own layer above: ends always win (phase 3).
+      for (final end in const [false, true]) {
+        await controller.addCircleLayer(
+          _focusStopsSource,
+          end ? 'pm-focus-stop-ends' : 'pm-focus-stop-dots',
+          CircleLayerProperties(
+            circleColor: [
+              'match', ['get', 'mode'],
+              'walk', _hex(onSurface),
+              modeColor(tokens.modes),
             ],
-          ],
-          circleStrokeColor: _hex(surface),
-          circleStrokeWidth: [
-            'interpolate',
-            ['linear'],
-            ['zoom'],
-            for (final (zoom, _, ring) in focusDotByZoom) ...[zoom, ring],
-          ],
-        ),
-      );
+            circleRadius: end
+                ? endDot / 2
+                : [
+                    'interpolate', ['linear'], ['zoom'],
+                    midDotMinZoom, midDot / 2 * midDotMinFactor,
+                    midDotFullZoom, midDot / 2,
+                  ],
+            circleStrokeColor: _hex(surface),
+            circleStrokeWidth: dotRingWidth,
+          ),
+          filter: ['==', ['get', 'big'], end ? 1 : 0],
+        );
+      }
       await controller.addSymbolLayer(
         _focusStopsSource,
         'pm-focus-stop-labels',
@@ -647,11 +659,11 @@ class _MapViewState extends ConsumerState<MapView> {
           final live = ref.read(liveTripProvider);
           final lines = journeyFocusLines(ix, net!, journey, live: live);
           if (focus != wasFitted) {
-            await _fitTo(controller, journeyFocusStops(ix, journey));
+            await _fitTo(controller, _journeyStops(ix, journey));
           }
           await controller.setGeoJsonSource(_focusLinesSource, lines);
           await controller.setGeoJsonSource(
-              _focusStopsSource, journeyFocusStops(ix, journey));
+              _focusStopsSource, _journeyStops(ix, journey));
           final place = ref.read(selectedPlaceProvider);
           await controller.setGeoJsonSource(
             _walkSource,
@@ -671,6 +683,13 @@ class _MapViewState extends ConsumerState<MapView> {
       debugPrint('pm: focus failed: $e');
       _focusDrawn = false;
     }
+  }
+
+  Map<String, dynamic> _journeyStops(TransitIndex ix, Journey journey) {
+    final q = ref.read(tripPlanProvider).query;
+    (double, double)? at(Place? p) => p == null ? null : (p.lat, p.lon);
+    return journeyFocusStops(ix, journey,
+        origin: at(q.from), destination: at(ref.read(selectedPlaceProvider)));
   }
 
   /// Walks the real streets for each walk leg (§9.10), then redraws. Failure

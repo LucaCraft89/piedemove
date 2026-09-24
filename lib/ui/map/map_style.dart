@@ -22,7 +22,14 @@ const lineSourceBuffer = 256.0;
 
 /// Focus layers (own source, FIX_MASTER phase 2). Unrelated ride context stays
 /// thin; ground already travelled fades (§9.11).
-const contextLineWidth = 1.6;
+///
+/// Context (rest of a ridden pattern) and ridden (the part actually ridden) are
+/// zoom-interpolated; ridden is >= [riddenToContextMin] x context at every stop.
+const contextBaseWidths = <(double, double)>[(11, 0.7), (14, 1.2), (17, 2.0)];
+const riddenToContextMin = 2.0;
+/// White casing added to a stroke, per side pair: ridden reads over the basemap.
+const riddenCasingExtra = 2.0, contextCasingExtra = 1.0;
+const kindRidden = 'ridden', kindContext = 'context';
 const travelledOpacity = 0.4;
 
 /// Sheet snap fractions: peek is the resting position, so the map stays usable.
@@ -35,7 +42,10 @@ const focusFitSide = 40.0, focusFitTop = 160.0, focusFitBottomExtra = 24.0;
 /// Ambient/focus base stroke width by zoom (before the n-route and rail factors).
 const ambientBaseWidths = <(double, double)>[(11, 1.4), (14, 2.6), (17, 4.5)];
 
-/// Focus stop dots: (zoom, small radius, ring width). Termini/boarding stops
-/// keep [focusEndDotRadius] at every zoom.
-const focusDotByZoom = <(double, double, double)>[(11, 1.5, 0.5), (15, 3.5, 2.0)];
-const focusEndDotRadius = 7.0;
+/// Focus stop dots, diameters in dp (circle radius = diameter / 2).
+/// Origin/destination and the first/last stop of a ride are [endDot]; the stops
+/// in between [midDot] from [midDotFullZoom], shrinking to [midDotMinFactor] of
+/// it at z11 so a dense route stays a line. Ends are their own layer above mids.
+const endDot = 14.0, midDot = 8.0;
+const midDotFullZoom = 15.0, midDotMinZoom = 11.0, midDotMinFactor = 0.5;
+const dotRingWidth = 2.0;

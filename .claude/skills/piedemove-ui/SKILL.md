@@ -319,3 +319,10 @@ for approval of look, palette and line style before phase 6.
 - Stop-name bug: `pm-focus-stop-labels` had `filter big == 1`, so only termini were labelled. Now every focus stop is labelled (ends first via `symbolSortKey`), halo 1.6, opacity 1.
 - Gotcha: MapLibre `text-ignore-placement: true` keeps a layer out of the collision index, so its own labels pile up. Keep it false with `text-allow-overlap` false: ends win, dense routes thin out legibly at low zoom, every name shows once there is room.
 - Phone: `flutter install` uninstalls (wipes the on-device index, first cold start fails, second launch after ~2 min works). Use `adb install -r` to keep data.
+
+## Built in fix phase 3 (ridden vs context, dot sizes)
+
+- Focus line features carry `kind` = `ridden|context` (`kindRidden`/`kindContext`), replacing `ridden 0/1`. Journey: the whole pattern is `context`; the slice between the leg's stored `stopVertex` indices is `ridden` (split at live progress into `travelled` 1/0). Route focus: whole pattern `ridden`. Test: `test/ridden_slice_test.dart` (loop path passing the boarding coordinate twice).
+- Layers, bottom to top: `pm-focus-context-casing/-lines`, `pm-focus-ridden-casing/-lines`, `-approx`, `-arrows`. `focusWidth(kind, extra:)` in `line_features.dart`; widths are `ambientBaseWidths` (ridden) vs `contextBaseWidths`, ratio >= `riddenToContextMin` (2) at every zoom stop, rail x `railWidthFactor` in both.
+- Dots (`map_style.dart`): `endDot` 14 dp / `midDot` 8 dp diameters, white ring `dotRingWidth`. Mids shrink to `midDotMinFactor` at z11 (full from z15) so a dense route stays a line. Ends are their own circle layer `pm-focus-stop-ends` above `pm-focus-stop-dots` (mids). Ends = ride board/alight, plus origin/destination (`mode: walk`) when the first/last leg is a walk off-stop (`journeyFocusStops(origin:, destination:)`; origin only when the query has a `from` place, "my location" origin comes with phase 4).
+- Phone testing tip: double-tap zoom is exactly +1; log `cameraPosition.zoom` from `onCameraIdle` temporarily to know the real zoom (fit zoom is not an integer).
