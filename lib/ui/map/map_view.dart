@@ -891,6 +891,7 @@ class _MapViewState extends ConsumerState<MapView> {
     }
 
     final routes = <String, int>{}; // short name -> feature id
+    final modes = <String, String?>{};
     for (final hit in hits) {
       final props = (hit as Map)['properties'] as Map?;
       final ids = (props?['routes'] as String?)?.split(',') ?? const [];
@@ -899,17 +900,18 @@ class _MapViewState extends ConsumerState<MapView> {
       final raw = hit['id'];
       final fid = raw is num ? raw.toInt() : int.tryParse('$raw');
       for (final r in ids) {
-        if (r.isNotEmpty) routes.putIfAbsent(r, () => fid ?? -1);
+        if (r.isNotEmpty) {
+          routes.putIfAbsent(r, () => fid ?? -1);
+          modes.putIfAbsent(r, () => props?['mode'] as String?);
+        }
       }
     }
     if (routes.isEmpty || !mounted) return;
 
-    final byName = <String, int>{
-      for (var r = 0; r < ix.routeCount; r++) ix.routeShortNames[r]: r,
-    };
     final picks = [
       for (final name in routes.keys)
-        if (byName[name] != null) (name, byName[name]!),
+        if (routeForTap(ix, name, modes[name]) != null)
+          (name, routeForTap(ix, name, modes[name])!),
     ]..sort((a, b) => compareRouteNames(a.$1, b.$1));
     if (picks.isEmpty) return;
     if (picks.length == 1) {

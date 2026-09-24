@@ -346,3 +346,9 @@ for approval of look, palette and line style before phase 6.
 - Root cause: `_applyFocus` awaited many native calls (visibility flips, `_fitTo` animation, several `setGeoJsonSource`) and could run twice at once (tap during a fit or a style reload). Interleaved runs let an older focus write its sources last, leaving the wrong or empty focus on the map.
 - Fix: `LatestRunner` (`lib/ui/map/latest_runner.dart`, test `test/latest_runner_test.dart`): one job at a time, only the newest queued request kept, so the last requested state always ends drawn. `_applyFocus` now records `_focus/_focusDrawn` at request time and queues `_applyFocusNow`. Use it for any other multi-await map redraw.
 - Phone: repeated quick taps and clearing restore the correct map, no "already exists" in logcat; the intermittent bug itself was not reproduced on demand (code-level fix).
+
+## Fix 7a2 (the real cause: tapped line resolved to the wrong route)
+
+- Root cause: `_onMapClick` mapped the ambient feature's short name to a route with a `name -> index` map, so a repeated short name resolved to the LAST route with it. The index holds regional/other-feed routes (6875 patterns, 830 routes) but lines.bin only GTT urban (1428 patterns): ~614 routes have no geometry, so e.g. "36" (regional dup) drew nothing. Bus/tram sharing a number had the same problem. It looked intermittent because only duplicated names failed. LatestRunner (7a1) was a real but minor race.
+- Fix: `routeForTap(ix, name, mode)` in `line_features.dart` (prefer GTT feed, then the feature's `mode`; test `test/route_for_tap_test.dart`). Any other name -> route lookup must use it, never a name-keyed map.
+- Diagnostic that found it: log `routeFocusLines` feature count and per-route "has any net[pattern]"; lineFeatures=0 with patterns>0 means wrong route or missing geometry.

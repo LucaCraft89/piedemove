@@ -142,6 +142,24 @@ String _modeKey(int routeType) => switch (routeType) {
       _ => 'bus',
     };
 
+/// The route a tapped ambient feature means. Short names repeat across feeds
+/// and modes (regional "36", tram and bus "4"), and only GTT routes have
+/// snapped geometry, so prefer GTT, then the feature's [mode].
+int? routeForTap(TransitIndex ix, String name, String? mode) {
+  int? best;
+  var bestScore = -1;
+  for (var r = 0; r < ix.routeCount; r++) {
+    if (ix.routeShortNames[r] != name) continue;
+    final score = (ix.isScheduledOnly(r) ? 0 : 2) +
+        (mode != null && _modeKey(ix.routeTypes[r]) == mode ? 1 : 0);
+    if (score > bestScore) {
+      best = r;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
 /// Focused route (§9.9): both directions at full width, nothing else.
 Map<String, dynamic> routeFocusLines(
   TransitIndex ix,
