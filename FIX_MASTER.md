@@ -94,6 +94,32 @@ patch/`.rej` runs).
 - Unit tests: projection monotonic, cutoff, advance, split. Replay test with recorded track.
 - Gate: step 7 (real walk if possible, else mock-location replay; say which).
 
+## Phase 5b: real pedestrian routing (user: walks must follow roads/crossings like Google Maps)  skill: piedemove-routing
+Design (final, user-decided): ONE versioned walking graph, layered sources, NO Overpass at runtime.
+- `tool/build_walk.dart` (reproducible, general OSM-tag rules, Overpass/PBF only at build time, cached in build/):
+  footway/path/pedestrian/steps/living_street/walkable roads, passages, crossings as explicit
+  nodes/edges (zebra/signals/uncontrolled), exclusions foot=no/private/motorway; penalised mid-block
+  fallback on minor streets only. Header: format version, OSM date, bbox, sha256. Compact payload.
+- Shipped copy in assets/. Loader order: downloaded on disk -> shipped -> straight dotted "≈".
+- Updater `lib/geo/walk_graph_update.dart`: manifest.json (version,date,sha256,size,format,bbox,url),
+  URL in one constant, ETag, <=1/day, foreground, verify hash+format, atomic swap, silent on failure.
+- Router (A*), edge-projection snapping, penalties as named constants, docs/walk_routing.md.
+  Output per leg: polyline, true metres, time, maneuver list (turns, crossings, steps). Reroute-from-position fn.
+- Displayed AND scored walking metres = routed distances; golden case must pass.
+- Publish/push nothing; no workflow (that is 5c).
+Split to save tokens, medium effort, one agent each, token ceiling per agent:
+- **5b-A (data+loader, no phone):** build tool, format+header, shipped asset, loader layering, updater + fake-HTTP tests, fixtures.
+- **5b-B (router+integration):** router, penalties, maneuvers, reroute, replace phase-5 walk drawing/distances/scoring, golden, then phone checks (one screenshot tour).
+
+### STATE (2026-09-24, before context clear)
+Done+tagged: 0, 1, 1b, 1c, 2, 2b, 3, 4, 5. Assets ambient/connectors/lines.bin.gz are regenerated but UNCOMMITTED (needed for on-device match; commit them in a small chore).
+5b: two agents were stopped by the user for token cost. Working tree holds UNREVIEWED, UNCOMMITTED partial work
+(lib/geo/walk_{build,costs,graph,graph_update,providers,router}.dart, lib/routing/walk_legs.dart, tool/build_walk.dart,
+assets/walk_graph.pmwg.gz, docs/walk_routing.md, test/walk_*.dart + fixtures, edits in journey/raptor/providers/line_features/
+map_view/about_page/trip_*/live_trip, walk_path.dart deleted, pubspec). The router was mid-rewrite (multi-candidate seeds/goals in route/_search).
+Next session: `git status`, run analyze+tests to see if it builds, then review vs this section and either finish (5b-A then 5b-B) or revert.
+Then: 5c, 6 (split: 6a pure progress engine + unit tests, 6b UI/strip/phone), 7 (split: 7a styles, 7b contrast+phone), 8.
+
 ## Phase 5c: keep walk graph fresh (after 5b, needs user OK to publish)
 - Scheduled GitHub Actions workflow: runs `tool/build_walk.dart`, hashes, replaces fixed release
   tag `walk-graph-latest` (graph + manifest.json) only if changed; sanity check fails the run on
