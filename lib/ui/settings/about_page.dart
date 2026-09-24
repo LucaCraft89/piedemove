@@ -3,7 +3,6 @@ library;
 
 import 'package:flutter/material.dart';
 
-import 'package:piedemove/data/feeds.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
 
 Future<void> openAbout(BuildContext context) => Navigator.of(
@@ -34,14 +33,19 @@ class AboutPage extends StatelessWidget {
             const _Section('Dati'),
             const _Source(
               title: 'GTT — orari e tempo reale',
-              subtitle: 'Open data GTT, licenza CC-BY.\n${Feeds.gttStaticGtfs}',
+              subtitle:
+                  'Data source: GTT S.p.A. – Gruppo Torinese Trasporti\n'
+                  'https://www.gtt.to.it\n'
+                  'Dati GTT per solo uso non commerciale (licenza GTT); '
+                  'PiedeMove è gratuita, senza pubblicità né guadagno.',
             ),
             const _Source(
               title: 'OpenStreetMap',
               subtitle:
                   'Strade, binari, ingressi della metro e il grafo pedonale '
                   '(marciapiedi, attraversamenti, scale) dei percorsi a piedi.\n'
-                  '© contributori OpenStreetMap, licenza ODbL.',
+                  '© contributori OpenStreetMap, licenza ODbL. I dati derivati inclusi '
+                  'nell\'app restano sotto ODbL.',
             ),
             const _Source(
               title: 'OpenFreeMap e OpenMapTiles',
@@ -66,8 +70,9 @@ class AboutPage extends StatelessWidget {
             ),
             const _Section('Licenza'),
             Text(
-              'PiedeMove è software libero. Codice sorgente e licenza: '
-              'github.com/piedemove.',
+              'PiedeMove è software libero (codice MIT; dati con le licenze sopra). '
+              'Codice sorgente e licenza: '
+              'github.com/LucaCraft89/piedemove.',
               style: text.bodyMedium,
             ),
             const SizedBox(height: Gap.screen),

@@ -26,7 +26,7 @@ Ingest rules and merged-feed numbers live in `piedemove-data`
 - **Verify each dataset's licence text at release time**, not from memory.
 - Confirm the OSM-derived cache stays on-device and is **not redistributed**.
 - In-app About complete (see `piedemove-ui` §11.8).
-- APK published on GitHub (`github.com/piedemove`). No monetisation.
+- APK published on GitHub (`github.com/LucaCraft89/piedemove`). No monetisation.
 - Then **GATE 3**: final acceptance on the phone by the user.
 
 ## Fair use, always
@@ -34,3 +34,10 @@ Ingest rules and merged-feed numbers live in `piedemove-data`
 Attribute all data. Cache Overpass, Photon and tile requests. Identify the app
 in the User-Agent. **Never use Google Maps data or APIs.** No credentials in
 prompts, notes, skills or commits.
+
+## Licences verified 2026-09-24
+
+GTT's own page (gtt.to.it/gtt_gtfs_license.html) is **non-commercial only** with fixed attribution
+("Data source: GTT S.p.A. – Gruppo Torinese Trasporti" + link), stricter than the CC-BY on
+dati.gov.it/aperTO. So: no ads, no monetisation, ever. Regione Piemonte: CC BY 4.0. OSM-derived
+assets: ODbL. Details in `NOTICE.md`.

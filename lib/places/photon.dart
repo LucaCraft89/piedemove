@@ -10,7 +10,7 @@ import 'package:http/http.dart' as http;
 
 /// Piemonte, generous bounds: lon 6.6..9.3, lat 44.0..46.6.
 /// Photon's fair-use policy asks callers to identify themselves.
-const userAgent = 'PiedeMove/1.0 (+https://github.com/piedemove)';
+const userAgent = 'PiedeMove/1.0 (+https://github.com/LucaCraft89/piedemove)';
 
 const piemonteBbox = (west: 6.6, south: 44.0, east: 9.3, north: 46.6);
 

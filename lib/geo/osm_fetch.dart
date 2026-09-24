@@ -21,7 +21,7 @@ const osmMaxAge = Duration(days: 30);
 const osmTileOverlapDegrees = 0.02;
 
 const osmUserAgent =
-    'PiedeMove/0.1 (Turin transit planner; github.com/piedemove)';
+    'PiedeMove/0.1 (Turin transit planner; github.com/LucaCraft89/piedemove)';
 
 /// Mirrors, tried in rotation. `overpass.osm.ch` is deliberately absent: it
 /// serves Switzerland only and answers 200 with an empty element list.

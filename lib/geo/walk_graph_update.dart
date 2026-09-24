@@ -25,7 +25,7 @@ import 'walk_graph.dart';
 /// Where the manifest lives. The one place to change when the release
 /// workflow (phase 5c) picks its final location.
 const walkManifestUrl =
-    'https://github.com/piedemove/piedemove/releases/download/walk-graph-latest/manifest.json';
+    'https://github.com/LucaCraft89/piedemove/releases/download/walk-graph-latest/manifest.json';
 
 const walkUpdateInterval = Duration(days: 1);
 const walkUpdateTimeout = Duration(seconds: 20);

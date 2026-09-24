@@ -1,17 +1,29 @@
-# piedemove
+# PiedeMove
 
-A new Flutter project.
+Android (Flutter) public-transport planner for Turin, for free-pass holders.
+Rides cost nothing, so **walking metres are the cost**: it shows every line that
+can make a hop, generates footpath transfers between nearby stops, and trades
+waiting and transfers for less walking. Bus, tram, metro, funicular. No fares,
+no cars or bikes, no walking-only trips. Fully on-device: no backend, no
+account, no tracking, no Google data.
 
-## Getting Started
+## Build
 
-This project is a starting point for a Flutter application.
+    flutter pub get
+    flutter analyze && flutter test
+    flutter build apk --release
+    dart tool/build_index.dart     # GTFS ingest -> index.bin (on first run)
 
-A few resources to get you started if this is your first Flutter project:
+## Known data gaps
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+- GTT publishes no transfers file: footpaths between stops are estimated.
+- The regional (Regione Piemonte) bus feed is schedule-only, no realtime.
+- OpenStreetMap footpath and crossing quality varies; approximate data is
+  marked in the app.
+- Realtime and alerts come from GTT's GTFS-RT feeds and may be missing.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Licences
+
+Code: MIT (`LICENSE`). Data is **not** MIT; see `NOTICE.md`. In short: GTT data
+is for non-commercial use with attribution, so PiedeMove stays free, ad-free
+and non-commercial. Map data is © OpenStreetMap contributors (ODbL).
