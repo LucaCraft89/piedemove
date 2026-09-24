@@ -97,3 +97,14 @@ Grant/revoke: `adb shell pm grant|revoke <pkg> android.permission.ACCESS_FINE_LO
 
 `lib/location/live_trip.dart` is the one progress engine: `advanceLive` projects the fix onto segments (`projectAhead`, forward-only, 60 m cutoff keeps progress + "estimated"), state carries `along` metres. Pure helpers: `splitLeg` (travelled/ahead, joined at the dot), `walkStripText`, `nextManeuver`, `rerouteWalkLeg` (WalkRouter.reroute). Tests: `test/progress_test.dart` (incl. noisy replay). Not on a device: strip UI and fade are 6b.
 - 6b: live strip uses walkStripText + maneuverLabel; Ricalcola -> LiveTripController.recalculateWalk (rerouteWalkLeg from last fix); active walk leg drawn from live route via splitLeg (walkFeatures). Phone: app launches only; live flow unverified.
+
+## Mock location on the phone (verified 2026-09-24, db4ae341, Android 16, no root)
+
+- `adb shell cmd location providers add-test-provider gps` (+ `set-test-provider-enabled gps true`), then `set-test-provider-location gps --location LAT,LON --accuracy 5`. No appops needed. Remove with `remove-test-provider gps` (also `network`; a stale network test provider from an old session may exist).
+- The app's stream (geolocator, fused) **blends real and mock**: one-off sets flip back to the real fix within seconds. Feed the mock at 1 Hz from a background loop reading a pos file; keep it running for the whole check. (Do not `pkill -f` the loop's own name from the same shell.)
+- Plan origin "La mia posizione" is the fix at plan time; a real fix at plan time bakes the real position into the route. Set the mock first, then plan, then Avvia.
+- Track: build it from the app's own leg. Temporary `debugPrint('PMTRACK lat,lon;...')` of `first.lat/lon` in `LiveTripController.start` (never commit), read via `adb logcat -d -s flutter`, interpolate by metres, offset east/west for off-route.
+- Coords on 1080x2400: planner "Dove vai?" tap (225,348); "Parti alle" chip (405,472), dial "12" (540,1120), OK (855,1725) - the dialog can reopen on a stray tap; Cerca (880,470); first card (540,1830); Avvia (795,1455); strip Ricalcola (812,1950).
+- Night runs return no service: set "Parti alle" 12:xx.
+- Walk legs have no off-route banner by design (riding only); the strip always carries an inline Ricalcola.
+- 6b verified live (mock): strip 380 -> 230 m with the fix advanced 150 m, next-maneuver line, travelled part faded / ahead bright joined at the dot, Ricalcola from a fix 200 m off reroutes the leg from the dot (450 m, new first maneuver) without replanning. Not verified: ride-leg off-route banner, no-fix Ricalcola fallback.
