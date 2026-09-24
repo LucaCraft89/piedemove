@@ -253,7 +253,8 @@ WalkGraph? readWalkGraphBytes(Uint8List gz) {
 /// shipped bytes, else null. Returns the graph and its origin.
 (WalkGraph, String)? loadWalkLayers({File? downloaded, Uint8List? shipped}) {
   final d = downloaded == null ? null : readWalkGraphFile(downloaded);
-  if (d != null) return (d, 'downloaded');
   final s = shipped == null ? null : readWalkGraphBytes(shipped);
+  // An app update may ship a graph newer than a stale download: newest wins.
+  if (d != null && (s == null || d.header.osmTime >= s.header.osmTime)) return (d, 'downloaded');
   return s == null ? null : (s, 'asset');
 }

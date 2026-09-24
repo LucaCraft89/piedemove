@@ -200,6 +200,10 @@ void layerTests() {
       final f = File('${d.path}/x')..writeAsBytesSync(bytes);
       expect(loadWalkLayers(downloaded: f, shipped: bytes)!.$2, 'downloaded');
     });
+    test('a downloaded graph older than the shipped one loses', () {
+      final older = File('assets/walk_graph.pmwg.gz'); // osmTime below the fixture's
+      expect(loadWalkLayers(downloaded: older, shipped: bytes)!.$2, 'asset');
+    });
     test('corrupt or missing downloaded falls back to shipped', () {
       final f = File('${d.path}/x')..writeAsBytesSync([1, 2, 3, 4]);
       expect(loadWalkLayers(downloaded: f, shipped: bytes)!.$2, 'asset');
