@@ -158,7 +158,7 @@ class _MapViewState extends ConsumerState<MapView> {
     final focus = ref.watch(focusProvider);
     // Live progress redraws the same focus: the travelled split moved (§9.11).
     final progress = ref.watch(liveTripProvider
-        .select((l) => l == null ? -1 : l.legIndex * 100000 + l.vertex));
+        .select((l) => l == null ? -1 : l.legIndex * 100000 + (l.along / 10).floor() + l.route.legs[l.legIndex].lat.length * 7));
     if (progress != _progress) {
       _progress = progress;
       _focusDrawn = false;

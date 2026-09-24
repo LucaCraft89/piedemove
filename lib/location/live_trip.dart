@@ -24,6 +24,7 @@ import 'package:piedemove/data/transit_index.dart';
 import 'package:piedemove/geo/distance.dart';
 import 'package:piedemove/geo/line_providers.dart';
 import 'package:piedemove/geo/lines_io.dart';
+import 'package:piedemove/geo/walk_providers.dart';
 import 'package:piedemove/geo/walk_router.dart';
 import 'package:piedemove/realtime/gtfs_rt.dart';
 import 'package:piedemove/realtime/store.dart';
@@ -650,6 +651,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   StreamSubscription<Position>? _sub;
   Timer? _stale;
   int _lastCueSeq = 0;
+  LiveFix? _lastPos;
 
   void start(Journey journey) {
     final ix = _ref.read(transitIndexProvider).valueOrNull;
@@ -734,9 +736,34 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     }
   }
 
+  /// "Ricalcola" on a walk leg: re-route from the last fix. False when there
+  /// is no fix, no graph or no route, so the caller can fall back to a replan.
+  bool recalculateWalk() {
+    final s = state, p = _lastPos;
+    final source = _ref.read(walkRouterProvider).valueOrNull;
+    if (s == null || p == null || source == null) return false;
+    final leg = s.leg;
+    final cur = WalkRoute(
+      [for (var i = 0; i < leg.lat.length; i++) [leg.lon[i], leg.lat[i]]],
+      leg.metres,
+      leg.maneuvers,
+    );
+    final next = rerouteWalkLeg(s, p.lat, p.lon, source.router, cur);
+    if (next == null) return false;
+    state = next;
+    return true;
+  }
+
   void _onFix(Position p) {
     final s = state;
     if (s == null) return;
+    _lastPos = LiveFix(
+      lat: p.latitude,
+      lon: p.longitude,
+      accuracy: p.accuracy,
+      speed: p.speed,
+      at: DateTime.now(),
+    );
     final vehicle = _vehicleFor(s);
     final next = advanceLive(
       s,

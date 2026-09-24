@@ -96,3 +96,4 @@ Grant/revoke: `adb shell pm grant|revoke <pkg> android.permission.ACCESS_FINE_LO
 ## Progress engine (fix phase 6a, code/replay only)
 
 `lib/location/live_trip.dart` is the one progress engine: `advanceLive` projects the fix onto segments (`projectAhead`, forward-only, 60 m cutoff keeps progress + "estimated"), state carries `along` metres. Pure helpers: `splitLeg` (travelled/ahead, joined at the dot), `walkStripText`, `nextManeuver`, `rerouteWalkLeg` (WalkRouter.reroute). Tests: `test/progress_test.dart` (incl. noisy replay). Not on a device: strip UI and fade are 6b.
+- 6b: live strip uses walkStripText + maneuverLabel; Ricalcola -> LiveTripController.recalculateWalk (rerouteWalkLeg from last fix); active walk leg drawn from live route via splitLeg (walkFeatures). Phone: app launches only; live flow unverified.

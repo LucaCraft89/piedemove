@@ -367,24 +367,26 @@ Map<String, dynamic> walkFeatures(
         destination: destLat == null || destLon == null ? null : (destLat, destLon));
     if (ends == null) continue;
     final a = [ends.$1.$2, ends.$1.$1], b = [ends.$2.$2, ends.$2.$1];
+    final props = {'metres': leg.walkMetres.round()};
+    // The active walk leg is drawn from the live route (it may have been
+    // rerouted) and cut at the rider by the progress engine's splitLeg.
+    if (live != null && i == live.legIndex && i < live.route.legs.length) {
+      final cut = splitLeg(live.route.legs[i], live.along);
+      for (final (part, travelled) in [(cut.travelled, 1), (cut.ahead, 0)]) {
+        if (part.length < 2) continue;
+        out['features'].add(_line(
+            i * 2 + travelled, part, {...props, 'approx': 0, 'travelled': travelled}));
+      }
+      continue;
+    }
     final walked = path(i) ?? leg.route?.polyline;
     final points = walked ?? [a, b];
-    final props = {
-      'metres': leg.walkMetres.round(),
-      'approx': walked == null ? 1 : 0,
-    };
-    final done = live == null
-        ? 0.0
-        : i < live.legIndex
-            ? 1.0
-            : i == live.legIndex && leg.walkMetres > 0
-                ? (1 - live.metresToEnd / leg.walkMetres).clamp(0.0, 1.0)
-                : 0.0;
+    final done = live != null && i < live.legIndex ? 1.0 : 0.0;
     for (final (part, travelled) in splitWalk(points, done)) {
       out['features'].add(_line(
         i * 2 + travelled,
         part,
-        {...props, 'travelled': travelled},
+        {...props, 'approx': walked == null ? 1 : 0, 'travelled': travelled},
       ));
     }
   }

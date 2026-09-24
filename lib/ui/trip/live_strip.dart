@@ -7,10 +7,10 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:piedemove/geo/walk_router.dart';
 import 'package:piedemove/location/live_trip.dart';
 import 'package:piedemove/routing/journey.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
-import 'package:piedemove/ui/trip/trip_format.dart';
 import 'package:piedemove/ui/trip/trip_plan.dart';
 
 /// `Scendi a Peschiera tra 3 fermate`, `A piedi: Trapani tra 120 m`.
@@ -22,8 +22,26 @@ String liveLabel(LiveTripState s) {
     if (s.stopsRemaining == 1) return 'Scendi a $name alla prossima fermata';
     return 'Scendi a $name tra ${s.stopsRemaining} fermate';
   }
-  final metres = metresLabel(s.metresToEnd);
-  return name.isEmpty ? 'Cammina per $metres' : 'A piedi verso $name · tra $metres';
+  return walkStripText(s);
+}
+
+/// Second strip line for a routed walk: the next turn, crossing or steps.
+String? maneuverLabel(LiveTripState s) {
+  final m = nextManeuver(s.leg, s.vertex);
+  if (m == null || m.type == ManeuverType.arrive) return null;
+  final what = switch (m.type) {
+    ManeuverType.cross => 'Attraversa',
+    ManeuverType.steps => 'Scale',
+    ManeuverType.left || ManeuverType.sharpLeft => 'Svolta a sinistra',
+    ManeuverType.slightLeft => 'Leggermente a sinistra',
+    ManeuverType.right || ManeuverType.sharpRight => 'Svolta a destra',
+    ManeuverType.slightRight => 'Leggermente a destra',
+    _ => 'Prosegui',
+  };
+  final along = s.leg.cumulative[m.pointIndex.clamp(0, s.leg.lastVertex)];
+  final n = (((along - s.along) / 10).round() * 10).clamp(0, 1 << 30);
+  final st = m.street;
+  return '$what${st == null || st.isEmpty ? '' : ' su $st'} tra $n m';
 }
 
 class LiveStrip extends ConsumerWidget {
@@ -56,6 +74,10 @@ class LiveStrip extends ConsumerWidget {
                 if (live.offRoute)
                   _RecalculateBanner(
                     onRecalculate: () {
+                      if (live.leg.kind == LegKind.walk &&
+                          controller.recalculateWalk()) {
+                        return;
+                      }
                       controller.stop();
                       ref.read(tripPlanProvider.notifier).plan();
                     },
@@ -75,12 +97,21 @@ class LiveStrip extends ConsumerWidget {
                         children: [
                           Text(liveLabel(live),
                               style: theme.textTheme.titleMedium),
+                          if (live.leg.kind == LegKind.walk &&
+                              maneuverLabel(live) != null)
+                            Text(maneuverLabel(live)!,
+                                style: theme.textTheme.bodyMedium),
                           if (live.estimated)
                             Text('posizione stimata',
                                 style: theme.textTheme.bodySmall),
                         ],
                       ),
                     ),
+                    if (live.leg.kind == LegKind.walk)
+                      TextButton(
+                        onPressed: controller.recalculateWalk,
+                        child: const Text('Ricalcola'),
+                      ),
                     IconButton(
                       tooltip: 'Termina il viaggio',
                       onPressed: controller.stop,
