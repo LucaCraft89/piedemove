@@ -8,6 +8,8 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:piedemove/ui/map/map_focus.dart';
+import 'package:piedemove/ui/map/map_style.dart';
 import 'package:piedemove/ui/sheets/alert_sheet.dart';
 import 'package:piedemove/ui/sheets/line_sheet.dart';
 import 'package:piedemove/ui/sheets/stop_sheet.dart';
@@ -60,24 +62,32 @@ class EntityNav extends StateNotifier<List<EntityRef>> {
 final entityNavProvider =
     StateNotifierProvider<EntityNav, List<EntityRef>>((_) => EntityNav());
 
-/// Opens [entity], reusing the sheet when one is already up.
+/// Opens [entity]. The sheet itself is [EntitySheet], drawn by the home page
+/// over the map (not a modal), so the map stays usable at peek.
 void openEntity(BuildContext context, WidgetRef ref, EntityRef entity) {
-  final alreadyOpen = ref.read(entityNavProvider).isNotEmpty;
+  // Called from a search page or a picker: come back to the map first.
+  final nav = Navigator.of(context);
+  if (nav.canPop()) nav.popUntil((r) => r.isFirst);
   ref.read(entityNavProvider.notifier).push(entity);
-  if (alreadyOpen) return;
-  showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    builder: (_) => const _EntitySheet(),
-  ).whenComplete(ref.read(entityNavProvider.notifier).clear);
 }
 
-class _EntitySheet extends ConsumerWidget {
-  const _EntitySheet();
+/// Peek / half / expanded, resting at peek for a focus entity (a line or
+/// vehicle) and at half for a stop or alert. It takes only its own height.
+class EntitySheet extends ConsumerStatefulWidget {
+  const EntitySheet({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<EntitySheet> createState() => _EntitySheetState();
+}
+
+class _EntitySheetState extends ConsumerState<EntitySheet> {
+  late final double _initial = switch (ref.read(entityNavProvider).lastOrNull) {
+    LineRef() || VehicleRef() => sheetPeek,
+    _ => sheetHalf,
+  };
+
+  @override
+  Widget build(BuildContext context) {
     final stack = ref.watch(entityNavProvider);
     final entity = stack.lastOrNull;
     if (entity == null) return const SizedBox.shrink();
@@ -86,17 +96,17 @@ class _EntitySheet extends ConsumerWidget {
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
         if (!ref.read(entityNavProvider.notifier).pop()) {
-          Navigator.of(context).pop();
+          ref.read(focusProvider.notifier).close();
         }
       },
       child: DraggableScrollableSheet(
-        initialChildSize: 0.5,
-        minChildSize: 0.15,
-        maxChildSize: 0.92,
+        initialChildSize: _initial,
+        minChildSize: sheetPeek,
+        maxChildSize: sheetFull,
         snap: true,
-        snapSizes: const [0.15, 0.5, 0.92],
-        expand: false,
+        snapSizes: sheetSnaps,
         builder: (context, controller) => Material(
+          elevation: 8,
           color: Theme.of(context).colorScheme.surface,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
           clipBehavior: Clip.antiAlias,

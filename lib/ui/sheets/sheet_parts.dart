@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:piedemove/places/favourites.dart';
 import 'package:piedemove/realtime/gtfs_rt.dart';
 import 'package:piedemove/settings/settings.dart';
+import 'package:piedemove/ui/map/map_focus.dart';
 import 'package:piedemove/ui/nav/entity.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
 
@@ -18,12 +19,16 @@ class SheetHeader extends ConsumerWidget {
     this.subtitle,
     this.leading,
     this.trailing,
+    this.onClose,
   });
 
   final String title;
   final String? subtitle;
   final Widget? leading;
   final Widget? trailing;
+
+  /// Default: close the entity sheet and drop the focus.
+  final VoidCallback? onClose;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -43,13 +48,23 @@ class SheetHeader extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: theme.textTheme.headlineSmall),
+              Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.headlineSmall,
+              ),
               if (subtitle != null)
                 Text(subtitle!, style: theme.textTheme.bodySmall),
             ],
           ),
         ),
         ?trailing,
+        IconButton(
+          tooltip: 'Chiudi',
+          onPressed: onClose ?? ref.read(focusProvider.notifier).close,
+          icon: const Icon(Icons.close),
+        ),
       ],
     );
   }

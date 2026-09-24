@@ -38,6 +38,17 @@ const _stopsSource = 'pm-stops';
 const _linesSource = 'pm-lines';
 const _connectorsSource = 'pm-connectors';
 const _focusStopsSource = 'pm-focus-stops';
+const _focusLinesSource = 'pm-focus-lines';
+
+/// Ambient layers hidden while something is focused (never rebuilt or tiered).
+const _ambientLayers = [
+  'pm-line-casing',
+  'pm-lines',
+  'pm-lines-approx',
+  'pm-line-picked',
+  'pm-line-arrows',
+  'pm-stop-connectors',
+];
 const _walkSource = 'pm-walk';
 const _vehiclesSource = 'pm-vehicles';
 const _entrancesSource = 'pm-entrances';
@@ -133,7 +144,7 @@ class _MapViewState extends ConsumerState<MapView> {
           .addPostFrameCallback((_) => _addEntrances(entrances));
     }
 
-    final focus = ref.watch(mapFocusProvider);
+    final focus = ref.watch(focusProvider);
     // Live progress redraws the same focus: the travelled split moved (§9.11).
     final progress = ref.watch(liveTripProvider
         .select((l) => l == null ? -1 : l.legIndex * 100000 + l.vertex));
@@ -271,17 +282,8 @@ class _MapViewState extends ConsumerState<MapView> {
         LineLayerProperties(
           lineColor: ambientColor(tokens.modes),
           // A journey's context line stays thin; everything else is ambient.
-          lineWidth: [
-            'case',
-            ['==', ['get', 'ridden'], 0], 1.6,
-            ambientWidth,
-          ],
-          // Travelled ground fades; what is ahead keeps full colour (§9.11).
-          lineOpacity: [
-            'case',
-            ['==', ['get', 'travelled'], 1], 0.4,
-            tierOpacity,
-          ],
+          lineWidth: ambientWidth,
+          lineOpacity: tierOpacity,
           lineCap: 'round',
           lineJoin: 'round',
         ),
@@ -350,6 +352,92 @@ class _MapViewState extends ConsumerState<MapView> {
       return;
     }
 
+    // Focus lines: own source and layers, added once per style and only ever
+    // updated by _applyFocus. Ambient tiering never applies to them.
+    try {
+      await controller.addSource(
+        _focusLinesSource,
+        GeojsonSourceProperties(
+          data: empty,
+          tolerance: lineSourceTolerance,
+          buffer: lineSourceBuffer,
+        ),
+      );
+      await controller.addLineLayer(
+        _focusLinesSource,
+        'pm-focus-casing',
+        LineLayerProperties(
+          lineColor: _hex(surface),
+          lineWidth: focusWidth(extra: 2.0),
+          lineOpacity: 0.8,
+          lineCap: 'round',
+          lineJoin: 'round',
+        ),
+        belowLayerId: below,
+        filter: notApproxFilter,
+        enableInteraction: false,
+      );
+      await controller.addLineLayer(
+        _focusLinesSource,
+        'pm-focus-lines',
+        LineLayerProperties(
+          lineColor: ambientColor(tokens.modes),
+          lineWidth: focusWidth(),
+          lineOpacity: [
+            'case',
+            ['==', ['get', 'travelled'], 1], travelledOpacity,
+            1.0,
+          ],
+          lineCap: 'round',
+          lineJoin: 'round',
+        ),
+        belowLayerId: below,
+        filter: notApproxFilter,
+        enableInteraction: false,
+      );
+      await controller.addLineLayer(
+        _focusLinesSource,
+        'pm-focus-approx',
+        LineLayerProperties(
+          lineColor: ambientColor(tokens.modes),
+          lineWidth: approxLineWidth,
+          lineOpacity: approxLineOpacity,
+          lineCap: 'round',
+          lineJoin: 'round',
+          lineDasharray: approxLineDash,
+        ),
+        belowLayerId: below,
+        filter: isApproxFilter,
+        enableInteraction: false,
+      );
+      await controller.addSymbolLayer(
+        _focusLinesSource,
+        'pm-focus-arrows',
+        SymbolLayerProperties(
+          textField: '›',
+          textFont: const ['Noto Sans Regular'],
+          textSize: 16,
+          textColor: _hex(onSurface),
+          textHaloColor: _hex(surface),
+          textHaloWidth: 1.0,
+          textAllowOverlap: true,
+          textIgnorePlacement: true,
+          symbolPlacement: 'line',
+          symbolSpacing: 90,
+          textKeepUpright: false,
+        ),
+        belowLayerId: below,
+        filter: ['==', ['get', 'arrow'], 1],
+        enableInteraction: false,
+      );
+    } catch (e) {
+      debugPrint('pm: layer linee selezionate failed: $e');
+      if (mounted) {
+        ref.read(mapStatusProvider.notifier).state =
+            'Linea selezionata non disponibile';
+      }
+    }
+
     // Everything below is optional dressing: its own try/catch each.
     try {
       final connectors =
@@ -410,9 +498,23 @@ class _MapViewState extends ConsumerState<MapView> {
         'pm-focus-stop-dots',
         CircleLayerProperties(
           circleColor: modeColor(tokens.modes),
-          circleRadius: ['case', ['==', ['get', 'big'], 1], 7.0, 3.5],
+          // Small stops shrink when zoomed out, so a dense route stays a line.
+          circleRadius: [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            for (final (zoom, small, _) in focusDotByZoom) ...[
+              zoom,
+              ['case', ['==', ['get', 'big'], 1], focusEndDotRadius, small],
+            ],
+          ],
           circleStrokeColor: _hex(surface),
-          circleStrokeWidth: 2.0,
+          circleStrokeWidth: [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            for (final (zoom, _, ring) in focusDotByZoom) ...[zoom, ring],
+          ],
         ),
       );
       await controller.addSymbolLayer(
@@ -434,6 +536,8 @@ class _MapViewState extends ConsumerState<MapView> {
     } catch (e) {
       debugPrint('pm: layer fermate percorso failed: $e');
     }
+    // A style reload dropped the focus with the sources: draw it again.
+    if (mounted && !_focusDrawn) setState(() {});
   }
 
   /// Metro entrances (§10.5): small dots with labels, metro colour, from z15.
@@ -505,19 +609,24 @@ class _MapViewState extends ConsumerState<MapView> {
     final empty = <String, dynamic>{'type': 'FeatureCollection', 'features': []};
 
     try {
+      // Ambient layers are hidden, never re-sourced: their data and tiering
+      // are untouched, so clearing the focus is a visibility flip.
+      final focused = focus != null;
+      for (final layer in _ambientLayers) {
+        await controller.setLayerVisibility(layer, !focused);
+      }
       switch (focus) {
         case null:
-          await controller.setGeoJsonSource(_linesSource, ambient ?? empty);
+          await controller.setGeoJsonSource(_focusLinesSource, empty);
           await controller.setGeoJsonSource(_focusStopsSource, empty);
           await controller.setGeoJsonSource(_walkSource, empty);
-          await controller.setLayerVisibility('pm-stop-poles', true);
-          await controller.setLayerVisibility('pm-stop-labels', true);
-          await controller.setLayerVisibility('pm-stop-clusters', true);
-          await controller.setLayerVisibility('pm-stop-cluster-count', true);
+          await _showAmbientStops(controller);
         case RouteFocus(:final route):
           final lines = routeFocusLines(ix, net!, route);
-          await controller.setGeoJsonSource(_linesSource, lines);
+          // Fit first, then hand over the data: a source set while the camera
+          // animates renders only some tiles on-device.
           if (focus != wasFitted) await _fitTo(controller, lines);
+          await controller.setGeoJsonSource(_focusLinesSource, lines);
           await controller.setGeoJsonSource(
               _focusStopsSource, routeFocusStops(ix, route));
           await controller.setGeoJsonSource(_walkSource, empty);
@@ -525,10 +634,10 @@ class _MapViewState extends ConsumerState<MapView> {
         case JourneyFocus(:final journey):
           final live = ref.read(liveTripProvider);
           final lines = journeyFocusLines(ix, net!, journey, live: live);
-          await controller.setGeoJsonSource(_linesSource, lines);
           if (focus != wasFitted) {
             await _fitTo(controller, journeyFocusStops(ix, journey));
           }
+          await controller.setGeoJsonSource(_focusLinesSource, lines);
           await controller.setGeoJsonSource(
               _focusStopsSource, journeyFocusStops(ix, journey));
           final place = ref.read(selectedPlaceProvider);
@@ -607,7 +716,7 @@ class _MapViewState extends ConsumerState<MapView> {
         if (lon > maxLon) maxLon = lon;
       }
     }
-    if (minLat > maxLat) return;
+    if (minLat > maxLat || !mounted) return;
     try {
       await controller.animateCamera(
         CameraUpdate.newLatLngBounds(
@@ -615,11 +724,12 @@ class _MapViewState extends ConsumerState<MapView> {
             southwest: LatLng(minLat, minLon),
             northeast: LatLng(maxLat, maxLon),
           ),
-          left: 40,
-          right: 40,
-          top: 160,
-          // The sheet covers the lower half of the screen.
-          bottom: 360,
+          left: focusFitSide,
+          right: focusFitSide,
+          top: focusFitTop,
+          // The sheet rests at peek.
+          bottom: MediaQuery.of(context).size.height * sheetPeek +
+              focusFitBottomExtra,
         ),
       );
     } catch (e) {
@@ -627,14 +737,22 @@ class _MapViewState extends ConsumerState<MapView> {
     }
   }
 
+  static const _ambientStopLayers = [
+    'pm-stop-poles',
+    'pm-stop-labels',
+    'pm-stop-clusters',
+    'pm-stop-cluster-count',
+  ];
+
   Future<void> _hideAmbientStops(MapLibreMapController controller) async {
-    for (final layer in const [
-      'pm-stop-poles',
-      'pm-stop-labels',
-      'pm-stop-clusters',
-      'pm-stop-cluster-count',
-    ]) {
+    for (final layer in _ambientStopLayers) {
       await controller.setLayerVisibility(layer, false);
+    }
+  }
+
+  Future<void> _showAmbientStops(MapLibreMapController controller) async {
+    for (final layer in _ambientStopLayers) {
+      await controller.setLayerVisibility(layer, true);
     }
   }
 

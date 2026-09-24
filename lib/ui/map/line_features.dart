@@ -53,9 +53,35 @@ List<Object> get tierOpacity => [
 /// line off the street.
 List<Object> get ambientWidth => [
       '*',
-      ['interpolate', ['linear'], ['zoom'], 11, 1.4, 14, 2.6, 17, 4.5],
+      ['interpolate', ['linear'], ['zoom'], for (final (z, w) in ambientBaseWidths) ...[z, w]],
       ['min', ['+', 1, ['*', 0.4, ['-', ['get', 'n'], 1]]], 3],
       ['match', ['get', 'mode'], 'bus', 1.0, railWidthFactor],
+    ];
+
+/// Focus stroke: ride context stays thin, the rest is full width. The zoom
+/// interpolation is the top-level expression (MapLibre only allows `zoom` there)
+/// and each stop value is a data expression; [extra] widens a casing.
+List<Object> focusWidth({double extra = 0}) => [
+      'interpolate',
+      ['linear'],
+      ['zoom'],
+      for (final (zoom, base) in ambientBaseWidths) ...[
+        zoom,
+        [
+          '+',
+          extra,
+          [
+            'case',
+            ['==', ['get', 'ridden'], 0], contextLineWidth,
+            [
+              '*',
+              base,
+              ['min', ['+', 1, ['*', 0.4, ['-', ['get', 'n'], 1]]], 3],
+              ['match', ['get', 'mode'], 'bus', 1.0, railWidthFactor],
+            ],
+          ],
+        ],
+      ],
     ];
 
 /// Mode colour when routes share the segment, the route's own shade when only
@@ -101,7 +127,9 @@ Map<String, dynamic> _line(
       'type': 'Feature',
       'id': id,
       'geometry': {'type': 'LineString', 'coordinates': coords},
-      'properties': props,
+      // Every property the styles read is always present: a missing one
+      // makes a `==` filter or paint expression fail on-device.
+      'properties': {'approx': 0, 'travelled': 0, ...props},
     };
 
 List<List<double>> _slice(SnappedPattern p, int from, int to) => [

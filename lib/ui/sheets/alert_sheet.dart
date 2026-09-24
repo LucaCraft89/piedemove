@@ -187,7 +187,10 @@ void showAlertList(BuildContext context, WidgetRef ref) {
               padding: const EdgeInsets.all(Gap.screen),
               children: [
                 const Grabber(),
-                const SheetHeader(title: 'Avvisi'),
+                SheetHeader(
+                  title: 'Avvisi',
+                  onClose: () => Navigator.of(context).pop(),
+                ),
                 if (alerts.isEmpty)
                   const Padding(
                     padding: EdgeInsets.only(top: Gap.element),

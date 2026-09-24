@@ -16,6 +16,7 @@ import 'package:piedemove/location/device_location.dart';
 import 'package:piedemove/location/live_trip.dart';
 import 'package:piedemove/places/photon.dart';
 import 'package:piedemove/realtime/store.dart';
+import 'package:piedemove/ui/map/map_focus.dart';
 import 'package:piedemove/ui/map/map_view.dart';
 import 'package:piedemove/ui/nav/entity.dart';
 import 'package:piedemove/ui/sheets/alert_sheet.dart';
@@ -86,10 +87,13 @@ class _HomePageState extends ConsumerState<HomePage> {
                   if (indexState.hasError)
                     const _Chip('Orari non disponibili'),
                   if (status != null) _Chip(status),
+                  if (ref.watch(focusProvider) != null) const _CancellaPill(),
                   if (trip.sheetHidden && trip.result != null)
                     _ReopenChip(
                       onReopen: ref.read(tripPlanProvider.notifier).reopenSheet,
-                      onClear: ref.read(tripPlanProvider.notifier).clear,
+                      onClear: ref.watch(focusProvider) != null
+                          ? null
+                          : ref.read(tripPlanProvider.notifier).clear,
                     ),
                   if (stale.length == RtFeedKind.values.length)
                     const _Chip('Dati in tempo reale non disponibili')
@@ -110,7 +114,9 @@ class _HomePageState extends ConsumerState<HomePage> {
             ),
           ),
           // A running trip owns the bottom of the screen (§12).
-          if (live != null)
+          if (ref.watch(entityNavProvider).isNotEmpty)
+            const EntitySheet()
+          else if (live != null)
             const LiveStrip()
           else if (showTrip)
             const TripSheet()
@@ -342,12 +348,49 @@ class _WhenRow extends ConsumerWidget {
   }
 }
 
+/// Drops whatever the map is focused on. A live trip asks first.
+class _CancellaPill extends ConsumerWidget {
+  const _CancellaPill();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => Padding(
+        padding: const EdgeInsets.only(top: Gap.element),
+        child: ActionChip(
+          avatar: const Icon(Icons.close, size: 16),
+          label: const Text('Cancella'),
+          onPressed: () async {
+            final focus = ref.read(focusProvider.notifier);
+            if (focus.needsConfirm) {
+              final ok = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Terminare il viaggio?'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text('Annulla'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Termina'),
+                    ),
+                  ],
+                ),
+              );
+              if (ok != true) return;
+            }
+            focus.cancella();
+          },
+        ),
+      );
+}
+
 /// The trip sheet was closed: reopen it, or clear the trip (§11.2).
 class _ReopenChip extends StatelessWidget {
   const _ReopenChip({required this.onReopen, required this.onClear});
 
   final VoidCallback onReopen;
-  final VoidCallback onClear;
+  final VoidCallback? onClear;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -359,12 +402,14 @@ class _ReopenChip extends StatelessWidget {
               label: const Text('Mostra i percorsi'),
               onPressed: onReopen,
             ),
-            const SizedBox(width: 8),
-            ActionChip(
-              avatar: const Icon(Icons.close, size: 16),
-              label: const Text('Cancella'),
-              onPressed: onClear,
-            ),
+            if (onClear != null) ...[
+              const SizedBox(width: 8),
+              ActionChip(
+                avatar: const Icon(Icons.close, size: 16),
+                label: const Text('Cancella'),
+                onPressed: onClear,
+              ),
+            ],
           ],
         ),
       );

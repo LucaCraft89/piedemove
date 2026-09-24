@@ -303,3 +303,12 @@ for approval of look, palette and line style before phase 6.
   OpenFreeMap/OpenMapTiles, Photon, Regione Piemonte, "no Google data or APIs",
   licence and version. Both Settings and About wrap the list in a
   `SafeArea(top: false)`: the last row was landing under the navigation bar.
+
+## Built in fix phase 2 (focus survives everything)
+
+- `FocusController` (`lib/ui/map/map_focus.dart`, `focusProvider`) is the only owner of `MapFocus?` (route | journey). It *sets* focus by listening to `entityNavProvider` (top is Line/Vehicle) and to the selected trip journey; it *clears* only via `close()` (sheet X, `SheetHeader`) and `cancella()` (top pill). Stop/alert sheets, minimise, pan/zoom, realtime ticks never touch it.
+- Entity sheet is no longer modal: `openEntity` pushes onto the stack (popping any search/picker route first) and `HomePage` draws `EntitySheet` over the map. Snaps `sheetPeek/Half/Full` (map_style.dart); rests at peek for line/vehicle, half for stop/alert. `SheetHeader` has the X (`onClose` overrides).
+- `_CancellaPill` in home_page: shown whenever focus is set; a live trip asks "Terminare il viaggio?" first (code-only verified, needs a real trip).
+- Map: focus has its own source `pm-focus-lines` + layers `pm-focus-casing/-lines/-approx/-arrows` (`focusWidth()` puts `zoom` at the top level). While focused the ambient layers (`_ambientLayers`) are hidden, never re-sourced, so no tiering runs; clearing focus flips visibility back. Fit camera once per new focus, bottom padding = peek.
+- On-device lessons: give every feature every property a style reads (`approx`, `travelled` default 0 in `_line`); focus stop dots shrink when zoomed out (`focusDotByZoom`) or their rings hide the route line at city zoom.
+- Feed drift: `lineNetworkProvider` returns null when the phone's downloaded feed differs from `assets/lines.bin.gz`; focus then has no geometry. Rebuild with `dart tool/build_index.dart --force && dart tool/build_lines.dart`.
