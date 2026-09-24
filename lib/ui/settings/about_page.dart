@@ -76,7 +76,7 @@ class AboutPage extends StatelessWidget {
               style: text.bodyMedium,
             ),
             const SizedBox(height: Gap.screen),
-            Text('Versione 1.0.0', style: text.bodySmall),
+            Text('Versione 0.9.0-beta.1', style: text.bodySmall),
           ],
         ),
       ),

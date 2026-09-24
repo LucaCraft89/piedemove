@@ -653,6 +653,9 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   int _lastCueSeq = 0;
   LiveFix? _lastPos;
 
+  /// The latest device fix, or null when none arrived yet.
+  LiveFix? get lastFix => _lastPos;
+
   void start(Journey journey) {
     final ix = _ref.read(transitIndexProvider).valueOrNull;
     if (ix == null) return;
@@ -744,7 +747,9 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     if (s == null || p == null || source == null) return false;
     final leg = s.leg;
     final cur = WalkRoute(
-      [for (var i = 0; i < leg.lat.length; i++) [leg.lon[i], leg.lat[i]]],
+      [
+        for (var i = 0; i < leg.lat.length; i++) [leg.lon[i], leg.lat[i]],
+      ],
       leg.metres,
       leg.maneuvers,
     );

@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:piedemove/geo/walk_router.dart';
 import 'package:piedemove/location/live_trip.dart';
+import 'package:piedemove/places/photon.dart';
 import 'package:piedemove/routing/journey.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
 import 'package:piedemove/ui/trip/trip_plan.dart';
@@ -18,7 +19,9 @@ String liveLabel(LiveTripState s) {
   final leg = s.leg;
   final name = leg.endName;
   if (leg.kind == LegKind.ride) {
-    if (s.stopsRemaining <= 0) return 'Scendi ora${name.isEmpty ? '' : ' a $name'}';
+    if (s.stopsRemaining <= 0) {
+      return 'Scendi ora${name.isEmpty ? '' : ' a $name'}';
+    }
     if (s.stopsRemaining == 1) return 'Scendi a $name alla prossima fermata';
     return 'Scendi a $name tra ${s.stopsRemaining} fermate';
   }
@@ -53,7 +56,8 @@ class LiveStrip extends ConsumerWidget {
     if (live == null) return const SizedBox.shrink();
     final controller = ref.read(liveTripProvider.notifier);
     final theme = Theme.of(context);
-    final boarding = live.leg.kind == LegKind.walk &&
+    final boarding =
+        live.leg.kind == LegKind.walk &&
         !live.isLastLeg &&
         live.route.legs[live.legIndex + 1].kind == LegKind.ride;
 
@@ -78,8 +82,22 @@ class LiveStrip extends ConsumerWidget {
                           controller.recalculateWalk()) {
                         return;
                       }
+                      // Replan from where the rider is now (no fix: same query).
+                      final fix = controller.lastFix;
                       controller.stop();
-                      ref.read(tripPlanProvider.notifier).plan();
+                      final plan = ref.read(tripPlanProvider.notifier);
+                      if (fix != null) {
+                        plan.setFrom(
+                          Place(
+                            name: 'La mia posizione',
+                            address: '',
+                            lat: fix.lat,
+                            lon: fix.lon,
+                          ),
+                        );
+                        plan.setWhen(WhenMode.now);
+                      }
+                      plan.plan();
                     },
                   ),
                 Row(
@@ -95,15 +113,21 @@ class LiveStrip extends ConsumerWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(liveLabel(live),
-                              style: theme.textTheme.titleMedium),
+                          Text(
+                            liveLabel(live),
+                            style: theme.textTheme.titleMedium,
+                          ),
                           if (live.leg.kind == LegKind.walk &&
                               maneuverLabel(live) != null)
-                            Text(maneuverLabel(live)!,
-                                style: theme.textTheme.bodyMedium),
+                            Text(
+                              maneuverLabel(live)!,
+                              style: theme.textTheme.bodyMedium,
+                            ),
                           if (live.estimated)
-                            Text('posizione stimata',
-                                style: theme.textTheme.bodySmall),
+                            Text(
+                              'posizione stimata',
+                              style: theme.textTheme.bodySmall,
+                            ),
                         ],
                       ),
                     ),
@@ -130,8 +154,8 @@ class LiveStrip extends ConsumerWidget {
                           live.leg.kind == LegKind.ride
                               ? 'Sono sceso'
                               : boarding
-                                  ? 'Sono salito'
-                                  : 'Sono arrivato',
+                              ? 'Sono salito'
+                              : 'Sono arrivato',
                         ),
                       ),
                     ),

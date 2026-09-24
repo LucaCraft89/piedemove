@@ -241,6 +241,9 @@ class _MapViewState extends ConsumerState<MapView> {
       },
       onMapClick: (point, _) => _onMapClick(point),
       onStyleLoadedCallback: () {
+        // A repeated callback for the same style would re-add every layer
+        // ("already exists" -> a stuck status chip): once per style.
+        if (_styleReady) return;
         _styleReady = true;
         _styleTimer?.cancel();
         if (ref.read(mapStatusProvider) == 'Mappa di base non disponibile') {

@@ -405,6 +405,32 @@ class Planner {
         ));
       }
     }
+    // Two rides meeting at one stop with no walk between (e.g. M1 > M1, or line
+    // 2 | line 2 on another trip) are one ride when a single line covers the
+    // whole hop: merge, at the shared stop.
+    for (var i = 1; i < legs.length;) {
+      final a = legs[i - 1], b = legs[i];
+      if (a.kind == LegKind.ride && b.kind == LegKind.ride) {
+        final opts =
+            _lineOptions(a.fromStop, b.toStop, a.readyTime, date, req);
+        if (opts.isNotEmpty &&
+            opts.any((o) => o.arrival <= b.arrival + 60)) {
+          final best = opts.reduce((x, y) => x.arrival <= y.arrival ? x : y);
+          legs[i - 1] = Leg(
+            kind: LegKind.ride,
+            fromStop: a.fromStop,
+            toStop: b.toStop,
+            departure: best.departure,
+            arrival: best.arrival,
+            readyTime: a.readyTime,
+            options: opts,
+          );
+          legs.removeAt(i);
+          continue;
+        }
+      }
+      i++;
+    }
     // The access walk starts at the origin, which is not a stop. It is the
     // seed label's own walk, so no label chain leg carries it: add it here.
     final seed = ordered.first;

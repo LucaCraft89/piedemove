@@ -12,6 +12,7 @@ import 'package:piedemove/ui/map/map_view.dart';
 import 'package:piedemove/ui/nav/entity.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
 import 'package:piedemove/ui/widgets/line_badge.dart';
+import 'package:piedemove/ui/widgets/scheduled_only.dart';
 
 import 'sheet_parts.dart';
 
@@ -35,9 +36,7 @@ void showLinePicker(
     context: context,
     backgroundColor: Colors.transparent,
     builder: (_) => _LinePicker(routes: routes),
-  ).whenComplete(
-    () => ref.read(linePickerProvider.notifier).state = const [],
-  );
+  ).whenComplete(() => ref.read(linePickerProvider.notifier).state = const []);
 }
 
 class _LinePicker extends ConsumerWidget {
@@ -80,6 +79,10 @@ class _LinePicker extends ConsumerWidget {
                     ),
                 ],
               ),
+              if (ix != null && routes.any((r) => ix.isScheduledOnly(r.$2)))
+                const ScheduledOnlyNote(
+                  text: 'Alcune linee: solo orario, senza mappa',
+                ),
             ],
           ),
         ),

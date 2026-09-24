@@ -135,7 +135,16 @@ void main() {
   }, skip: skip);
 
   test('a ride leg carries every line that makes the hop', () {
-    final multi = journeys
+    // Another trip (to Porta Nuova): merged same-line splits leave the golden
+    // set without a shared hop, so check the post-pass on a busy corridor.
+    final busy = planner.plan(PlanRequest(
+      originLat: ix.stopLat[ix.stopIndexById['3454']!],
+      originLon: ix.stopLon[ix.stopIndexById['3454']!],
+      destLat: 45.0620,
+      destLon: 7.6780,
+      when: DateTime(2026, 9, 25, 12),
+    ));
+    final multi = [...journeys, ...busy]
         .expand((j) => j.legs)
         .where((l) => l.kind == LegKind.ride && l.options.length > 1);
     expect(multi, isNotEmpty,
