@@ -144,3 +144,27 @@ the every-line post-pass, so a mode switched off in Settings never appears.
 the first time something plans), `plannerProvider`, `suspendedStopsProvider`
 (alert effect 1) and `detouredRoutesProvider` (effect 4), plus
 `activeAlertsProvider` for the results banner.
+
+## Built in phase 5b (real pedestrian routing)
+
+Full detail in `docs/walk_routing.md`. Short version:
+
+- Walking runs on the shipped/downloaded graph (`lib/geo/walk_*.dart`); every
+  tunable number is in `walk_costs.dart`. `WalkRouter.route` gives polyline on
+  real edges, true metres, maneuvers (start/turn/cross/steps/arrive, each with
+  polyline index + metres); `WalkRouter.reroute(lat, lon, route)` re-plans from
+  any position to the leg target (phase 6 consumes both).
+- RAPTOR plans on estimates with the cap widened by `walkDetourFactor`;
+  `routeWalks` (`lib/routing/walk_legs.dart`) re-prices every walk leg with
+  routed metres/time, re-times missed rides, applies the real cap, then the
+  lists are sorted, so displayed AND scored metres are routed ones.
+- Lesson (found on the phone, not in tests): the RAPTOR label chain has no leg
+  for the walk from the origin. `_buildJourney` now prepends it (fromStop -1);
+  before, every journey silently omitted the access walk from metres and map.
+  Tests that start AT a stop (the golden) cannot see this: keep one off-stop
+  origin test (`routing_unit_test`).
+- Lesson: `Isolate.run(() => ...)` written inside an async provider captures
+  the async frame (a Future) and fails with "object is unsendable" on device
+  only when the closure is built there; use a non-async helper (`_loadInIsolate`).
+- On device (db4ae341, release): graph parse+grid ~360 ms once; plan ~190 ms;
+  routeWalks 1-2 ms for 6-9 candidates.
