@@ -68,11 +68,27 @@ String ambientGeoJson(TransitIndex ix, LineNetwork net) {
   final tiers = routeTiers(ix);
   final merger = LineMerger();
   final routeTier = <String, int>{};
+  // Unsnapped hops (straight chords): kept out of the way-merge but still
+  // drawn, thin and dotted, marked approximate, so a line never just stops.
+  final chords = <String, MergedSeg>{};
   for (final p in net.patterns) {
     final type = ix.routeTypeOfPattern(p.pattern);
     final name = ix.routeShortNameOfPattern(p.pattern);
     routeTier[name] = tiers[ix.patternRoute[p.pattern]];
+    final snapped = type == RouteType.bus || type == RouteType.tram;
     for (var i = 1; i < p.vertexCount; i++) {
+      if (snapped && p.vertexWay[i] < 0) {
+        final aLat = p.vertexLat[i - 1] / 1e6, aLon = p.vertexLon[i - 1] / 1e6;
+        final bLat = p.vertexLat[i] / 1e6, bLon = p.vertexLon[i] / 1e6;
+        final fwd = aLat < bLat || (aLat == bLat && aLon <= bLon);
+        final c = chords.putIfAbsent(
+            '$type/${fwd ? '$aLat,$aLon,$bLat,$bLon' : '$bLat,$bLon,$aLat,$aLon'}',
+            () => fwd
+                ? MergedSeg(aLat, aLon, bLat, bLon, type, -1)
+                : MergedSeg(bLat, bLon, aLat, aLon, type, -1));
+        c.routes.add(name);
+        continue;
+      }
       merger.add(
         mode: type,
         route: name,
@@ -85,7 +101,9 @@ String ambientGeoJson(TransitIndex ix, LineNetwork net) {
     }
   }
 
-  offsetSharedBusTram(merger.segments);
+  // Chords ride along so a shifted street and the dotted hop after it still
+  // meet at one vertex.
+  offsetSharedBusTram(merger.segments, chords: chords.values.toList());
 
   final features = <Map<String, dynamic>>[];
   var id = 0;
@@ -148,6 +166,28 @@ String ambientGeoJson(TransitIndex ix, LineNetwork net) {
       },
     });
   }
+  for (final c in chords.values) {
+    features.add({
+      'type': 'Feature',
+      'id': id++,
+      'geometry': {
+        'type': 'LineString',
+        'coordinates': [
+          [double.parse(c.aLon.toStringAsFixed(6)), double.parse(c.aLat.toStringAsFixed(6))],
+          [double.parse(c.bLon.toStringAsFixed(6)), double.parse(c.bLat.toStringAsFixed(6))],
+        ],
+      },
+      'properties': {
+        'mode': _modeKey(c.mode),
+        'routes': c.routes.join(','),
+        'n': c.routes.length,
+        'tier': c.routes.map((r) => routeTier[r] ?? 2).reduce(math.min),
+        'arrow': 0,
+        'approx': 1,
+        'shade': c.routes.length == 1 ? shadeOf(c.routes.first) : -1,
+      },
+    });
+  }
   return jsonEncode({'type': 'FeatureCollection', 'features': features});
 }
 
@@ -204,7 +244,7 @@ double _metres(double aLat, double aLon, double bLat, double bLon) {
 /// holding half a stroke width. Move it into the layer if it reads too thin.
 const sharedMetres = 12.0, sharedDegrees = 15.0, sharedShiftMetres = 3.0;
 
-void offsetSharedBusTram(List<MergedSeg> segs) {
+void offsetSharedBusTram(List<MergedSeg> segs, {List<MergedSeg> chords = const []}) {
   final trams = [for (final s in segs) if (s.mode == RouteType.tram) s];
   if (trams.isEmpty) return;
   final cell = sharedMetres / 111320 * 2;
@@ -231,8 +271,32 @@ void offsetSharedBusTram(List<MergedSeg> segs) {
       }
     }
   }
-  for (final e in shift.entries) {
-    _shift(e.key, e.value * sharedShiftMetres);
+
+  // Displace **nodes**, not segments: a node moves by the mean of the shifts
+  // of every segment of its mode that meets there (unshifted ones count as
+  // zero), and both ends of a segment read the moved node. Every joint keeps
+  // one shared vertex, so the shift can never open a gap in a line.
+  String nodeKey(int mode, double lat, double lon) => '$mode/$lat,$lon';
+  final sumLat = <String, double>{}, sumLon = <String, double>{};
+  final count = <String, int>{};
+  for (final s in [...segs, ...chords]) {
+    final m = (shift[s] ?? 0) * sharedShiftMetres;
+    final rad = _bearing(s) * math.pi / 180;
+    final dLat = m == 0 ? 0.0 : math.cos(rad) * m / 111320;
+    final dLon = m == 0 ? 0.0 : -math.sin(rad) * m / (111320 * 0.707);
+    for (final k in [nodeKey(s.mode, s.aLat, s.aLon), nodeKey(s.mode, s.bLat, s.bLon)]) {
+      sumLat.update(k, (v) => v + dLat, ifAbsent: () => dLat);
+      sumLon.update(k, (v) => v + dLon, ifAbsent: () => dLon);
+      count.update(k, (v) => v + 1, ifAbsent: () => 1);
+    }
+  }
+  for (final s in [...segs, ...chords]) {
+    final ka = nodeKey(s.mode, s.aLat, s.aLon), kb = nodeKey(s.mode, s.bLat, s.bLon);
+    final aLat = s.aLat, aLon = s.aLon, bLat = s.bLat, bLon = s.bLon;
+    s.aLat = aLat + sumLat[ka]! / count[ka]!;
+    s.aLon = aLon + sumLon[ka]! / count[ka]!;
+    s.bLat = bLat + sumLat[kb]! / count[kb]!;
+    s.bLon = bLon + sumLon[kb]! / count[kb]!;
   }
 }
 
@@ -250,14 +314,4 @@ double _bearing(MergedSeg s) {
   final dx = (s.bLon - s.aLon) * 111320 * 0.707;
   final deg = math.atan2(dy, dx) * 180 / math.pi;
   return (deg + 360) % 180;
-}
-
-void _shift(MergedSeg s, double metres) {
-  final rad = _bearing(s) * math.pi / 180;
-  final dLat = math.cos(rad) * metres / 111320;
-  final dLon = -math.sin(rad) * metres / (111320 * 0.707);
-  s.aLat += dLat;
-  s.aLon += dLon;
-  s.bLat += dLat;
-  s.bLon += dLon;
 }

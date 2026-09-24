@@ -229,3 +229,11 @@ off-road segments, doubled lines, missing lines, wrong colours, wrong lane.
 11. `queryRenderedFeaturesInRect` hands the feature id back as a **String** on
    Android and a num elsewhere; casting to `num?` threw and swallowed every
    segment tap. Parse either.
+
+12. Two gap causes (fix round phase 1): chords were dropped from the ambient
+   network, so an unsnapped hop simply ended the line; and the bus/tram shift
+   moved each segment on its own, opening a 3 m gap at every joint. -> Chords
+   ship as `approx = 1` features (thin dotted layer `pm-lines-approx`), and the
+   shift displaces **nodes** (mean of incident shifts), chords included.
+   `dart tool/gap_detector.dart` (and `test/gap_detector_test.dart`) checks the
+   shipped `ambient.json.gz` against every pattern hop: must print 0 gaps.

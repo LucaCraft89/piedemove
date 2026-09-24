@@ -27,6 +27,7 @@ import 'package:piedemove/ui/sheets/line_picker.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
 
 import 'line_features.dart';
+import 'map_style.dart';
 import 'map_focus.dart';
 import 'stop_features.dart';
 import 'vehicle_features.dart';
@@ -244,7 +245,11 @@ class _MapViewState extends ConsumerState<MapView> {
     try {
       await controller.addSource(
         _linesSource,
-        GeojsonSourceProperties(data: ambient),
+        GeojsonSourceProperties(
+          data: ambient,
+          tolerance: lineSourceTolerance,
+          buffer: lineSourceBuffer,
+        ),
       );
       await controller.addLineLayer(
         _linesSource,
@@ -257,6 +262,7 @@ class _MapViewState extends ConsumerState<MapView> {
           lineJoin: 'round',
         ),
         belowLayerId: below,
+        filter: notApproxFilter,
         enableInteraction: false,
       );
       await controller.addLineLayer(
@@ -280,6 +286,23 @@ class _MapViewState extends ConsumerState<MapView> {
           lineJoin: 'round',
         ),
         belowLayerId: below,
+        filter: notApproxFilter,
+        enableInteraction: false,
+      );
+      // Unsnapped hops: thin dotted, so a line never just stops (§9.3).
+      await controller.addLineLayer(
+        _linesSource,
+        'pm-lines-approx',
+        LineLayerProperties(
+          lineColor: ambientColor(tokens.modes),
+          lineWidth: approxLineWidth,
+          lineOpacity: ['*', tierOpacity, approxLineOpacity],
+          lineCap: 'round',
+          lineJoin: 'round',
+          lineDasharray: approxLineDash,
+        ),
+        belowLayerId: below,
+        filter: isApproxFilter,
         enableInteraction: false,
       );
       // Picker candidates (§9.8): same source, thicker, filtered to the tap.
