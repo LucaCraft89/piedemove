@@ -92,3 +92,7 @@ off-route banner, the metro/tunnel fallback, travelled-vs-ahead as it moves.
 ## Position dot checks (fix phase 4)
 
 Grant/revoke: `adb shell pm grant|revoke <pkg> android.permission.ACCESS_FINE_LOCATION` (+ COARSE), then relaunch. Theme reload: `adb shell cmd uimode night no|yes`. Recentre: swipe the map, tap the FAB at (975,1935) on a 1080x2400 screen. Verified 2026-09-24: first-launch prompt, chip after "Don't allow", chip re-prompts, dot survives theme toggle, FAB recentres. Not verified: heading wedge (needs movement), services-off path, permanent-denial settings jump.
+
+## Progress engine (fix phase 6a, code/replay only)
+
+`lib/location/live_trip.dart` is the one progress engine: `advanceLive` projects the fix onto segments (`projectAhead`, forward-only, 60 m cutoff keeps progress + "estimated"), state carries `along` metres. Pure helpers: `splitLeg` (travelled/ahead, joined at the dot), `walkStripText`, `nextManeuver`, `rerouteWalkLeg` (WalkRouter.reroute). Tests: `test/progress_test.dart` (incl. noisy replay). Not on a device: strip UI and fade are 6b.

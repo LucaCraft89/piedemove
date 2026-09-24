@@ -24,6 +24,7 @@ import 'package:piedemove/data/transit_index.dart';
 import 'package:piedemove/geo/distance.dart';
 import 'package:piedemove/geo/line_providers.dart';
 import 'package:piedemove/geo/lines_io.dart';
+import 'package:piedemove/geo/walk_router.dart';
 import 'package:piedemove/realtime/gtfs_rt.dart';
 import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/routing/journey.dart';
@@ -58,9 +59,13 @@ class LiveLeg {
     required this.arrival,
     this.tripId,
     this.approximate = false,
+    this.maneuvers = const [],
   });
 
   final LegKind kind;
+
+  /// Routed walk legs: turns/crossings, `pointIndex` into this polyline.
+  final List<Maneuver> maneuvers;
 
   /// Polyline in degrees; at least two points.
   final List<double> lat;
@@ -121,6 +126,7 @@ class LiveTripState {
     required this.journey,
     this.legIndex = 0,
     this.vertex = 0,
+    this.along = 0,
     this.metresToEnd = 0,
     this.stopsRemaining = 0,
     this.estimated = false,
@@ -139,6 +145,10 @@ class LiveTripState {
 
   /// Progress along the current leg's polyline. Monotone within a leg.
   final int vertex;
+
+  /// Metres travelled along the current leg: the forward-only projection of
+  /// the rider onto its polyline. The travelled/ahead boundary.
+  final double along;
 
   final double metresToEnd;
 
@@ -167,6 +177,7 @@ class LiveTripState {
   LiveTripState copyWith({
     int? legIndex,
     int? vertex,
+    double? along,
     double? metresToEnd,
     int? stopsRemaining,
     bool? estimated,
@@ -178,23 +189,24 @@ class LiveTripState {
     int? cueSeq,
     bool clearOffRouteSince = false,
     bool clearCue = false,
-  }) =>
-      LiveTripState(
-        route: route,
-        journey: journey,
-        legIndex: legIndex ?? this.legIndex,
-        vertex: vertex ?? this.vertex,
-        metresToEnd: metresToEnd ?? this.metresToEnd,
-        stopsRemaining: stopsRemaining ?? this.stopsRemaining,
-        estimated: estimated ?? this.estimated,
-        offRoute: offRoute ?? this.offRoute,
-        finished: finished ?? this.finished,
-        offRouteSince:
-            clearOffRouteSince ? null : (offRouteSince ?? this.offRouteSince),
-        lastFix: lastFix ?? this.lastFix,
-        cue: clearCue ? null : (cue ?? this.cue),
-        cueSeq: cueSeq ?? this.cueSeq,
-      );
+  }) => LiveTripState(
+    route: route,
+    journey: journey,
+    legIndex: legIndex ?? this.legIndex,
+    vertex: vertex ?? this.vertex,
+    along: along ?? this.along,
+    metresToEnd: metresToEnd ?? this.metresToEnd,
+    stopsRemaining: stopsRemaining ?? this.stopsRemaining,
+    estimated: estimated ?? this.estimated,
+    offRoute: offRoute ?? this.offRoute,
+    finished: finished ?? this.finished,
+    offRouteSince: clearOffRouteSince
+        ? null
+        : (offRouteSince ?? this.offRouteSince),
+    lastFix: lastFix ?? this.lastFix,
+    cue: clearCue ? null : (cue ?? this.cue),
+    cueSeq: cueSeq ?? this.cueSeq,
+  );
 }
 
 /// Flattens [journey] into polylines. [net] is optional: without snapped
@@ -235,7 +247,9 @@ LiveRoute buildLiveRoute(
         }
         for (var p = from + 1; p <= to; p++) {
           stopVertex.add((geom.stopVertex[p] - a).clamp(0, b - a));
-          stopNames.add(cleanStopName(ix.stopNames[ix.patternStopAt(option.pattern, p)]));
+          stopNames.add(
+            cleanStopName(ix.stopNames[ix.patternStopAt(option.pattern, p)]),
+          );
         }
       } else if (from >= 0 && to > from) {
         // No snapped path: the stops themselves are the polyline.
@@ -253,6 +267,7 @@ LiveRoute buildLiveRoute(
     }
 
     final walked = leg.kind == LegKind.walk ? leg.route : null;
+    var maneuvers = const <Maneuver>[];
     if (walked != null && walked.polyline.length > 1) {
       // Routed walk: the real pedestrian path, not a chord.
       for (final p in walked.polyline) {
@@ -260,7 +275,10 @@ LiveRoute buildLiveRoute(
         lat.add(p[1]);
       }
       stopVertex.add(lat.length - 1);
-      stopNames.add(leg.toStop >= 0 ? cleanStopName(ix.stopNames[leg.toStop]) : '');
+      stopNames.add(
+        leg.toStop >= 0 ? cleanStopName(ix.stopNames[leg.toStop]) : '',
+      );
+      maneuvers = walked.maneuvers;
     }
 
     if (lat.length < 2) {
@@ -269,8 +287,8 @@ LiveRoute buildLiveRoute(
       final a = leg.fromStop >= 0
           ? (ix.stopLat[leg.fromStop], ix.stopLon[leg.fromStop])
           : (originLat == null || originLon == null
-              ? null
-              : (originLat, originLon));
+                ? null
+                : (originLat, originLon));
       final b = leg.toStop >= 0
           ? (ix.stopLat[leg.toStop], ix.stopLon[leg.toStop])
           : (destLat == null || destLon == null ? null : (destLat, destLon));
@@ -290,22 +308,27 @@ LiveRoute buildLiveRoute(
 
     final cumulative = <double>[0];
     for (var i = 1; i < lat.length; i++) {
-      cumulative.add(cumulative[i - 1] +
-          haversineMetres(lat[i - 1], lon[i - 1], lat[i], lon[i]));
+      cumulative.add(
+        cumulative[i - 1] +
+            haversineMetres(lat[i - 1], lon[i - 1], lat[i], lon[i]),
+      );
     }
 
-    legs.add(LiveLeg(
-      kind: leg.kind,
-      lat: lat,
-      lon: lon,
-      cumulative: cumulative,
-      stopVertex: stopVertex,
-      stopNames: stopNames,
-      departure: leg.departure,
-      arrival: leg.arrival,
-      tripId: tripId,
-      approximate: approximate,
-    ));
+    legs.add(
+      LiveLeg(
+        kind: leg.kind,
+        lat: lat,
+        lon: lon,
+        cumulative: cumulative,
+        stopVertex: stopVertex,
+        stopNames: stopNames,
+        departure: leg.departure,
+        arrival: leg.arrival,
+        tripId: tripId,
+        approximate: approximate,
+        maneuvers: maneuvers,
+      ),
+    );
   }
   return LiveRoute(legs);
 }
@@ -345,29 +368,25 @@ LiveTripState advanceLive(
     estimated = true;
   }
 
-  // Nearest vertex ahead of the last one: progress never runs backwards.
-  var best = state.vertex;
-  var bestMetres = double.infinity;
-  for (var i = state.vertex; i < leg.lat.length; i++) {
-    final d = haversineMetres(lat, lon, leg.lat[i], leg.lon[i]);
-    if (d < bestMetres) {
-      bestMetres = d;
-      best = i;
-    }
-  }
-  // ponytail: vertex granularity, not point-on-segment; vertices are metres
-  // apart on snapped geometry. Project onto the segment if it ever reads coarse.
+  // Forward-only projection onto the segments from the last progress on.
+  final proj = projectAhead(leg, lat, lon, state.along);
+  var along = proj.along;
+  var best = _vertexAt(leg, along);
+  var bestMetres = proj.distance;
 
   if (bestMetres > liveOnRouteCutoff) {
     // Too far to trust: keep the last progress and say the position is a guess.
+    along = state.along;
     best = state.vertex;
     estimated = true;
   }
 
   final endLat = leg.lat.last, endLon = leg.lon.last;
   final straightToEnd = haversineMetres(lat, lon, endLat, endLon);
-  final alongToEnd = leg.metres - leg.cumulative[best];
-  final metresToEnd = estimated ? math.min(alongToEnd, straightToEnd) : alongToEnd;
+  final alongToEnd = leg.metres - along;
+  final metresToEnd = estimated
+      ? math.min(alongToEnd, straightToEnd)
+      : alongToEnd;
 
   var stopsRemaining = 0;
   for (final v in leg.stopVertex) {
@@ -376,6 +395,7 @@ LiveTripState advanceLive(
 
   state = state.copyWith(
     vertex: best,
+    along: along,
     estimated: estimated,
     metresToEnd: metresToEnd,
     stopsRemaining: stopsRemaining,
@@ -401,23 +421,153 @@ LiveTripState advanceLive(
     }
   }
 
-  final boarding = leg.kind == LegKind.walk &&
+  final boarding =
+      leg.kind == LegKind.walk &&
       !state.isLastLeg &&
       state.route.legs[state.legIndex + 1].kind == LegKind.ride;
-  final nearVehicle = vehicleLat != null &&
+  final nearVehicle =
+      vehicleLat != null &&
       vehicleLon != null &&
       haversineMetres(lat, lon, vehicleLat, vehicleLon) <= liveBoardRadius;
   final movingLikeAVehicle = fix.speed > walkSpeed * 1.6;
 
   final advance = switch (leg.kind) {
     LegKind.ride => straightToEnd <= liveAlightRadius,
-    LegKind.walk => boarding
-        ? straightToEnd <= liveBoardRadius &&
-            (nearVehicle || movingLikeAVehicle)
-        : straightToEnd <= liveWalkEndRadius,
+    LegKind.walk =>
+      boarding
+          ? straightToEnd <= liveBoardRadius &&
+                (nearVehicle || movingLikeAVehicle)
+          : straightToEnd <= liveWalkEndRadius,
   };
   if (advance) return nextLeg(state);
   return state;
+}
+
+/// Result of [projectAhead].
+typedef Projection = ({double along, double distance});
+
+/// Projects (lat, lon) onto [leg]'s segments from [from] metres on, and
+/// returns the nearest point's metres along the leg and its distance. Never
+/// less than [from]: forward-only, so a fix behind the rider cannot rewind.
+Projection projectAhead(LiveLeg leg, double lat, double lon, double from) {
+  var bestAlong = from;
+  var bestDist = double.infinity;
+  final kx = math.cos(lat * math.pi / 180) * 111320.0, ky = 110540.0;
+  for (var i = 0; i + 1 < leg.lat.length; i++) {
+    if (leg.cumulative[i + 1] < from) continue;
+    final ax = (leg.lon[i] - lon) * kx, ay = (leg.lat[i] - lat) * ky;
+    final bx = (leg.lon[i + 1] - lon) * kx, by = (leg.lat[i + 1] - lat) * ky;
+    final dx = bx - ax, dy = by - ay;
+    final len2 = dx * dx + dy * dy;
+    final t = len2 == 0 ? 0.0 : (-(ax * dx + ay * dy) / len2).clamp(0.0, 1.0);
+    final px = ax + t * dx, py = ay + t * dy;
+    final d = math.sqrt(px * px + py * py);
+    if (d < bestDist) {
+      bestDist = d;
+      bestAlong =
+          leg.cumulative[i] + t * (leg.cumulative[i + 1] - leg.cumulative[i]);
+    }
+  }
+  return (along: math.max(bestAlong, from), distance: bestDist);
+}
+
+/// Last vertex at or before [along] metres (1 cm slack for float noise).
+int _vertexAt(LiveLeg leg, double along) {
+  var v = 0;
+  while (v + 1 < leg.lat.length && leg.cumulative[v + 1] <= along + 0.01) {
+    v++;
+  }
+  return v;
+}
+
+/// The active leg cut at the rider: `[lon, lat]` pairs, both including the
+/// boundary point so the two lines join with no gap.
+({List<List<double>> travelled, List<List<double>> ahead}) splitLeg(
+  LiveLeg leg,
+  double along,
+) {
+  final v = _vertexAt(leg, along);
+  final travelled = <List<double>>[
+    for (var i = 0; i <= v; i++) [leg.lon[i], leg.lat[i]],
+  ];
+  final ahead = <List<double>>[];
+  var boundary = [leg.lon[v], leg.lat[v]];
+  if (v + 1 < leg.lat.length) {
+    final span = leg.cumulative[v + 1] - leg.cumulative[v];
+    final t = span == 0
+        ? 0.0
+        : ((along - leg.cumulative[v]) / span).clamp(0.0, 1.0);
+    boundary = [
+      leg.lon[v] + t * (leg.lon[v + 1] - leg.lon[v]),
+      leg.lat[v] + t * (leg.lat[v + 1] - leg.lat[v]),
+    ];
+    travelled.add(boundary);
+    ahead.add(boundary);
+    for (var i = v + 1; i < leg.lat.length; i++) {
+      ahead.add([leg.lon[i], leg.lat[i]]);
+    }
+  } else {
+    ahead.add(boundary);
+  }
+  return (travelled: travelled, ahead: ahead);
+}
+
+/// First maneuver of the leg still ahead of the rider, or null.
+Maneuver? nextManeuver(LiveLeg leg, int vertex) {
+  for (final m in leg.maneuvers) {
+    if (m.pointIndex > vertex) return m;
+  }
+  return null;
+}
+
+/// Strip text for a walk leg: "Cammina ancora N m fino a STOP" (or "fino
+/// alla destinazione" when the leg ends at a place, not a stop).
+String walkStripText(LiveTripState s) {
+  final n = ((s.metresToEnd / 10).round() * 10).clamp(0, 1 << 30);
+  final name = s.leg.endName;
+  return 'Cammina ancora $n m fino ${name.isEmpty ? 'alla destinazione' : 'a $name'}';
+}
+
+/// Off-route / "Ricalcola" for a walk leg: re-routes from the rider to where
+/// the leg was heading and swaps it in with fresh progress. Null when the leg
+/// is not a routed walk or the router finds nothing (the state is then kept).
+LiveTripState? rerouteWalkLeg(
+  LiveTripState s,
+  double lat,
+  double lon,
+  WalkRouter router,
+  WalkRoute current,
+) {
+  if (s.leg.kind != LegKind.walk || s.finished) return null;
+  final r = router.reroute(lat, lon, current);
+  if (r == null || r.polyline.length < 2) return null;
+  final old = s.leg;
+  final la = <double>[for (final p in r.polyline) p[1]];
+  final lo = <double>[for (final p in r.polyline) p[0]];
+  final cum = <double>[0];
+  for (var i = 1; i < la.length; i++) {
+    cum.add(cum[i - 1] + haversineMetres(la[i - 1], lo[i - 1], la[i], lo[i]));
+  }
+  final legs = [...s.route.legs];
+  legs[s.legIndex] = LiveLeg(
+    kind: LegKind.walk,
+    lat: la,
+    lon: lo,
+    cumulative: cum,
+    stopVertex: [la.length - 1],
+    stopNames: old.stopNames,
+    departure: old.departure,
+    arrival: old.arrival,
+    maneuvers: r.maneuvers,
+  );
+  return LiveTripState(
+    route: LiveRoute(legs),
+    journey: s.journey,
+    legIndex: s.legIndex,
+    metresToEnd: cum.last,
+    stopsRemaining: 1,
+    lastFix: s.lastFix,
+  );
 }
 
 /// Marks the current leg done. Also the manual "Sono salito" / "Sono sceso".
@@ -430,6 +580,7 @@ LiveTripState nextLeg(LiveTripState s) {
   return s.copyWith(
     legIndex: index,
     vertex: 0,
+    along: 0,
     metresToEnd: leg.metres,
     stopsRemaining: leg.stopVertex.length,
     offRoute: false,
@@ -443,7 +594,11 @@ LiveTripState _cue(LiveTripState s, LiveCue cue) =>
 
 /// No fix for 20 s: hold the position, estimate from the schedule, and label
 /// it. Called on a timer, so a stalled GPS still shows an honest strip.
-LiveTripState staleLive(LiveTripState s, DateTime now, {DateTime? serviceStart}) {
+LiveTripState staleLive(
+  LiveTripState s,
+  DateTime now, {
+  DateTime? serviceStart,
+}) {
   final last = s.lastFix;
   if (s.finished || last == null || now.difference(last) < liveNoFixFor) {
     return s;
@@ -453,20 +608,22 @@ LiveTripState staleLive(LiveTripState s, DateTime now, {DateTime? serviceStart})
   if (serviceStart == null || leg.arrival <= leg.departure) return state;
   // Schedule-based estimate: linear along the leg between its two times.
   final elapsed = now.difference(serviceStart).inSeconds - leg.departure;
-  final fraction =
-      (elapsed / (leg.arrival - leg.departure)).clamp(0.0, 1.0).toDouble();
+  final fraction = (elapsed / (leg.arrival - leg.departure))
+      .clamp(0.0, 1.0)
+      .toDouble();
   final target = leg.metres * fraction;
   var v = state.vertex;
   while (v + 1 < leg.lat.length && leg.cumulative[v + 1] <= target) {
     v++;
   }
-  if (v <= state.vertex) return state;
+  if (v <= state.vertex || leg.cumulative[v] <= state.along) return state;
   var stopsRemaining = 0;
   for (final sv in leg.stopVertex) {
     if (sv > v) stopsRemaining++;
   }
   state = state.copyWith(
     vertex: v,
+    along: leg.cumulative[v],
     metresToEnd: leg.metres - leg.cumulative[v],
     stopsRemaining: stopsRemaining,
   );
@@ -560,14 +717,18 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   void _listen() {
     if (_sub != null) return;
     try {
-      _sub = Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.bestForNavigation,
-          distanceFilter: 5,
-        ),
-      ).listen(_onFix, onError: (Object e) {
-        debugPrint('pm: live position stream failed: $e');
-      });
+      _sub =
+          Geolocator.getPositionStream(
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.bestForNavigation,
+              distanceFilter: 5,
+            ),
+          ).listen(
+            _onFix,
+            onError: (Object e) {
+              debugPrint('pm: live position stream failed: $e');
+            },
+          );
     } catch (e) {
       debugPrint('pm: live position stream unavailable: $e');
     }
@@ -597,8 +758,13 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     final s = state;
     if (s == null) return;
     final date = s.journey.date;
-    _apply(staleLive(s, DateTime.now(),
-        serviceStart: DateTime(date.year, date.month, date.day)));
+    _apply(
+      staleLive(
+        s,
+        DateTime.now(),
+        serviceStart: DateTime(date.year, date.month, date.day),
+      ),
+    );
   }
 
   void _apply(LiveTripState next) {
@@ -640,5 +806,5 @@ class LiveTripController extends StateNotifier<LiveTripState?>
 
 final liveTripProvider =
     StateNotifierProvider<LiveTripController, LiveTripState?>(
-  LiveTripController.new,
-);
+      LiveTripController.new,
+    );
