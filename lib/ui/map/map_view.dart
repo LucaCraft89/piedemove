@@ -122,12 +122,15 @@ class _MapViewState extends ConsumerState<MapView> {
   /// A style reload drops every source, and `setGeoJsonSource` does not fail
   /// loudly on Android when the source is gone — so track it here.
   bool _stopsAdded = false;
+  bool _stopsBusy = false;
   bool _vehiclesAdded = false;
+  bool _vehiclesBusy = false;
 
   /// Feature id -> vehicle id, in the order the collection was built.
   final _vehicleIds = <String>[];
 
   bool _linesAdded = false;
+  bool _linesBusy = false;
   bool _entrancesAdded = false;
   bool _meAdded = false;
   Position? _meDrawn;
@@ -243,8 +246,11 @@ class _MapViewState extends ConsumerState<MapView> {
           ref.read(mapStatusProvider.notifier).state = null;
         }
         _stopsAdded = false;
+        _stopsBusy = false;
         _vehiclesAdded = false;
+        _vehiclesBusy = false;
         _linesAdded = false;
+        _linesBusy = false;
         _entrancesAdded = false;
         _meAdded = false;
         _focusDrawn = false;
@@ -297,6 +303,7 @@ class _MapViewState extends ConsumerState<MapView> {
     final below = _stopsAdded ? 'pm-stop-clusters' : null;
     final empty = <String, dynamic>{'type': 'FeatureCollection', 'features': []};
 
+    if (_linesBusy) return; // an add is in flight
     if (_linesAdded) {
       try {
         await controller.setGeoJsonSource(_linesSource, ambient);
@@ -307,6 +314,7 @@ class _MapViewState extends ConsumerState<MapView> {
     }
 
     _linesAdded = true;
+    _linesBusy = true;
     try {
       await controller.addSource(
         _linesSource,
@@ -399,12 +407,17 @@ class _MapViewState extends ConsumerState<MapView> {
       );
     } catch (e) {
       debugPrint('pm: layer linee failed: $e');
-      _linesAdded = false;
-      if (mounted) {
-        ref.read(mapStatusProvider.notifier).state = 'Linee non disponibili';
+      _linesBusy = false;
+      // Duplicate add across a style reload: the layers are there, carry on.
+      if (!'$e'.contains('already exists')) {
+        _linesAdded = false;
+        if (mounted) {
+          ref.read(mapStatusProvider.notifier).state = 'Linee non disponibili';
+        }
+        return;
       }
-      return;
     }
+    _linesBusy = false;
 
     // Focus lines: own source and layers, added once per style and only ever
     // updated by _applyFocus. Ambient tiering never applies to them.
@@ -671,7 +684,7 @@ class _MapViewState extends ConsumerState<MapView> {
       );
     } catch (e) {
       debugPrint('pm: layer ingressi metro failed: $e');
-      _entrancesAdded = false;
+      _entrancesAdded = '$e'.contains('already exists');
     }
     unawaited(_raiseMe());
   }
@@ -910,6 +923,7 @@ class _MapViewState extends ConsumerState<MapView> {
     final onSurface = _textColor;
     final surface = _haloColor;
 
+    if (_stopsBusy) return; // an add is in flight
     // Already on this style: replacing the data is enough.
     if (_stopsAdded) {
       try {
@@ -925,13 +939,14 @@ class _MapViewState extends ConsumerState<MapView> {
         await add();
       } catch (e) {
         debugPrint('pm: layer $what failed: $e');
-        if (mounted) {
+        if (mounted && !'$e'.contains('already exists')) {
           ref.read(mapStatusProvider.notifier).state = 'Livello $what non disponibile';
         }
       }
     }
 
     _stopsAdded = true;
+    _stopsBusy = true;
     await layer('fermate', () async {
       await controller.addSource(
         _stopsSource,
@@ -1063,6 +1078,7 @@ class _MapViewState extends ConsumerState<MapView> {
         enableInteraction: false,
       );
     });
+    _stopsBusy = false;
     unawaited(_raiseMe());
   }
 
@@ -1148,6 +1164,7 @@ class _MapViewState extends ConsumerState<MapView> {
         : PmTokens.lightTokens;
     final surface = _haloColor;
 
+    if (_vehiclesBusy) return; // an add is in flight; the next tick updates
     if (_vehiclesAdded) {
       try {
         await controller.setGeoJsonSource(_vehiclesSource, data);
@@ -1158,6 +1175,7 @@ class _MapViewState extends ConsumerState<MapView> {
     }
 
     _vehiclesAdded = true;
+    _vehiclesBusy = true;
     try {
       await addVehicleIcons(controller, tokens.modes);
       await controller.addSource(
@@ -1208,12 +1226,16 @@ class _MapViewState extends ConsumerState<MapView> {
       );
     } catch (e) {
       debugPrint('pm: layer veicoli failed: $e');
-      _vehiclesAdded = false;
-      if (mounted) {
+      // A duplicate add (two adds racing across a style reload) leaves the
+      // layers in place: that is success, not a failure.
+      final dup = '$e'.contains('already exists');
+      _vehiclesAdded = dup;
+      if (mounted && !dup) {
         ref.read(mapStatusProvider.notifier).state =
             'Livello veicoli non disponibile';
       }
     }
+    _vehiclesBusy = false;
     unawaited(_raiseMe());
   }
 }
