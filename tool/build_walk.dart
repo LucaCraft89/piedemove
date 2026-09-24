@@ -25,6 +25,8 @@ const _tileDegrees = 0.04;
 const _defaultBbox = [44.985, 7.56, 45.145, 7.79];
 const _endpoints = [
   'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
 ];
 
 /// A mirror serving a snapshot older than this is as good as failing: mixed

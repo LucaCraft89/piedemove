@@ -38,8 +38,23 @@ jobs:
           curl -fsSL "https://github.com/${{ github.repository }}/releases/download/$TAG/manifest.json" \
             -o build_prev_manifest.json || echo "no previous release"
 
+      # Tiles cached per ISO week: a rerun after an Overpass failure resumes, next week refetches.
+      - id: week
+        run: echo "w=$(date +%G-%V)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v4
+        with:
+          path: build/walk_osm
+          key: walk-osm-${{ steps.week.outputs.w }}-${{ github.run_id }}
+          restore-keys: walk-osm-${{ steps.week.outputs.w }}-
+
       - name: Build graph
         run: dart tool/build_walk.dart --asset "" --url walk_graph.pmwg.gz
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: build/walk_osm
+          key: walk-osm-${{ steps.week.outputs.w }}-${{ github.run_id }}
 
       - name: Sanity + change check
         id: sanity
