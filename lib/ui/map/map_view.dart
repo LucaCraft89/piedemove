@@ -127,10 +127,15 @@ class _MapViewState extends ConsumerState<MapView> {
 
     final vehicles = ref.watch(realtimeProvider.select((s) => s.vehicles));
     final showVehicles = ref.watch(vehiclesVisibleProvider);
+    final focusNow = ref.watch(focusProvider);
     if (_styleReady) {
-      WidgetsBinding.instance.addPostFrameCallback(
-        (_) => _updateVehicles(showVehicles ? vehicles.values : const []),
-      );
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final ix = ref.read(transitIndexProvider).valueOrNull;
+        _updateVehicles(showVehicles
+            ? vehiclesForRoutes(
+                ix, vehicles.values, ix == null ? null : focusRoutes(ix, focusNow))
+            : const []);
+      });
     }
 
     final ambient = ref.watch(ambientLinesProvider).valueOrNull;
@@ -528,9 +533,16 @@ class _MapViewState extends ConsumerState<MapView> {
           textAnchor: 'top',
           textColor: _hex(onSurface),
           textHaloColor: _hex(surface),
-          textHaloWidth: 1.4,
+          textHaloWidth: 1.6,
+          textOpacity: 1,
+          // Ends win collisions (sort key), so a dense route thins out
+          // legibly at low zoom and shows every name once there is room.
+          // ignore-placement must stay false: a layer that ignores placement
+          // never enters the collision index, so its own labels pile up.
+          textAllowOverlap: false,
+          textIgnorePlacement: false,
+          symbolSortKey: ['-', 0, ['get', 'big']],
         ),
-        filter: ['==', ['get', 'big'], 1],
         enableInteraction: false,
       );
     } catch (e) {

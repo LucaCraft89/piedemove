@@ -312,3 +312,10 @@ for approval of look, palette and line style before phase 6.
 - Map: focus has its own source `pm-focus-lines` + layers `pm-focus-casing/-lines/-approx/-arrows` (`focusWidth()` puts `zoom` at the top level). While focused the ambient layers (`_ambientLayers`) are hidden, never re-sourced, so no tiering runs; clearing focus flips visibility back. Fit camera once per new focus, bottom padding = peek.
 - On-device lessons: give every feature every property a style reads (`approx`, `travelled` default 0 in `_line`); focus stop dots shrink when zoomed out (`focusDotByZoom`) or their rings hide the route line at city zoom.
 - Feed drift: `lineNetworkProvider` returns null when the phone's downloaded feed differs from `assets/lines.bin.gz`; focus then has no geometry. Rebuild with `dart tool/build_index.dart --force && dart tool/build_lines.dart`.
+
+## Built in fix phase 2b (focus: vehicles + stop names)
+
+- Vehicles follow focus: `focusRoutes(ix, focus)` (RouteFocus -> its route, JourneyFocus -> routes of its ride legs' first option, null -> all) and `vehiclesForRoutes` in `vehicle_features.dart` (pure, tested in `test/vehicle_filter_test.dart`). `MapView.build` watches `focusProvider` and feeds the filtered list to `_updateVehicles`, so realtime ticks and clearing focus both go through the same filter.
+- Stop-name bug: `pm-focus-stop-labels` had `filter big == 1`, so only termini were labelled. Now every focus stop is labelled (ends first via `symbolSortKey`), halo 1.6, opacity 1.
+- Gotcha: MapLibre `text-ignore-placement: true` keeps a layer out of the collision index, so its own labels pile up. Keep it false with `text-allow-overlap` false: ends win, dense routes thin out legibly at low zoom, every name shows once there is room.
+- Phone: `flutter install` uninstalls (wipes the on-device index, first cold start fails, second launch after ~2 min works). Use `adb install -r` to keep data.

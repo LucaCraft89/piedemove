@@ -13,6 +13,8 @@ import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:piedemove/data/transit_index.dart';
 import 'package:piedemove/realtime/gtfs_rt.dart';
 import 'package:piedemove/realtime/link.dart';
+import 'package:piedemove/routing/journey.dart';
+import 'package:piedemove/ui/map/map_focus.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
 import 'package:piedemove/ui/widgets/line_badge.dart';
 
@@ -29,6 +31,28 @@ String _modeKey(int routeType) => switch (routeType) {
       RouteType.funicular => 'funicular',
       _ => 'bus',
     };
+
+/// Route indices whose vehicles stay visible under [focus]; null = no focus,
+/// show all. A journey keeps the routes its ride legs draw (first option).
+Set<int>? focusRoutes(TransitIndex ix, MapFocus? focus) => switch (focus) {
+      null => null,
+      RouteFocus(:final route) => {route},
+      JourneyFocus(:final journey) => {
+          for (final l in journey.legs)
+            if (l.kind == LegKind.ride && l.options.isNotEmpty)
+              ix.patternRoute[l.options.first.pattern],
+        },
+    };
+
+/// Vehicles allowed by [routes] (null = all); unknown-route ones drop when set.
+Iterable<RtVehicle> vehiclesForRoutes(
+  TransitIndex? ix,
+  Iterable<RtVehicle> vehicles,
+  Set<int>? routes,
+) =>
+    routes == null || ix == null
+        ? vehicles
+        : vehicles.where((v) => routes.contains(routeIndexOf(ix, v)));
 
 /// Feature ids are list positions: the plugin hands back an id string on tap,
 /// and a vehicle id is not a number. [order] receives the matching ids.
