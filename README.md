@@ -7,6 +7,12 @@ waiting and transfers for less walking. Bus, tram, metro, funicular. No fares,
 no cars or bikes, no walking-only trips. Fully on-device: no backend, no
 account, no tracking, no Google data.
 
+## Install
+
+Download the APK from the [Releases page](https://github.com/LucaCraft89/piedemove/releases)
+(latest: `0.9.0-beta.1`, a prerelease), allow installing from unknown sources,
+and open it. Report problems in [Issues](https://github.com/LucaCraft89/piedemove/issues).
+
 ## Build
 
     flutter pub get
