@@ -85,6 +85,53 @@ class OsmData {
   }
 }
 
+/// Overpass-shaped JSON from `osmium cat -f opl` text (nodes with x/y, ways
+/// with N refs, tags percent-escaped). Lets Geofabrik extracts feed
+/// [OsmData.addOverpass]. `osm3s` = newest object timestamp, the PBF's age.
+Map<String, dynamic> oplToOverpass(Iterable<String> lines) {
+  String dec(String s) => s.contains('%')
+      ? s.replaceAllMapped(RegExp(r'%([0-9a-fA-F]+)%'),
+          (m) => String.fromCharCode(int.parse(m[1]!, radix: 16)))
+      : s;
+  final elements = <Map<String, dynamic>>[];
+  var newest = '';
+  for (final line in lines) {
+    if (line.length < 2 || (line[0] != 'n' && line[0] != 'w')) continue;
+    final f = line.split(' ');
+    final isNode = line[0] == 'n';
+    final e = <String, dynamic>{
+      'type': isNode ? 'node' : 'way',
+      'id': int.parse(f[0].substring(1)),
+    };
+    var located = !isNode;
+    for (final t in f.skip(1)) {
+      if (t.isEmpty) continue;
+      final v = t.substring(1);
+      switch (t[0]) {
+        case 't':
+          if (v.compareTo(newest) > 0) newest = v;
+        case 'x':
+          e['lon'] = double.parse(v);
+        case 'y':
+          e['lat'] = double.parse(v);
+          located = true;
+        case 'N':
+          e['nodes'] = [for (final r in v.split(',')) if (r.isNotEmpty) int.parse(r.substring(1))];
+        case 'T':
+          e['tags'] = {
+            for (final kv in v.split(',')) if (kv.contains('='))
+              dec(kv.substring(0, kv.indexOf('='))): dec(kv.substring(kv.indexOf('=') + 1))
+          };
+      }
+    }
+    if (located && (!isNode || e.containsKey('lon'))) elements.add(e);
+  }
+  return {
+    if (newest.isNotEmpty) 'osm3s': {'timestamp_osm_base': newest},
+    'elements': elements,
+  };
+}
+
 extension OsmClip on OsmData {
   /// Keeps only the ways with at least one node inside the box (and their
   /// nodes): tiles overlap the bbox edge, and a far-off way is dead weight.

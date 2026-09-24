@@ -38,23 +38,28 @@ jobs:
           curl -fsSL "https://github.com/${{ github.repository }}/releases/download/$TAG/manifest.json" \
             -o build_prev_manifest.json || echo "no previous release"
 
-      # Tiles cached per ISO week: a rerun after an Overpass failure resumes, next week refetches.
+      # OSM input: Geofabrik extract (Overpass is unreachable/throttled from runners).
+      # PBF cached per ISO week; the bbox is _defaultBbox in tool/build_walk.dart (lon,lat order).
       - id: week
         run: echo "w=$(date +%G-%V)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache@v4
         with:
-          path: build/walk_osm
-          key: walk-osm-${{ steps.week.outputs.w }}-${{ github.run_id }}
-          restore-keys: walk-osm-${{ steps.week.outputs.w }}-
+          path: build/nord-ovest.osm.pbf
+          key: geofabrik-nord-ovest-${{ steps.week.outputs.w }}
+      - name: Fetch extract
+        run: |
+          mkdir -p build
+          [ -s build/nord-ovest.osm.pbf ] || curl -fL --retry 5 --retry-all-errors \
+            https://download.geofabrik.de/europe/italy/nord-ovest-latest.osm.pbf \
+            -o build/nord-ovest.osm.pbf
+          sudo apt-get update -qq && sudo apt-get install -y -qq osmium-tool
+          osmium extract --bbox 7.56,44.985,7.79,45.145 --overwrite \
+            build/nord-ovest.osm.pbf -o build/turin.osm.pbf
+          osmium tags-filter --overwrite build/turin.osm.pbf w/highway -o build/turin-hw.osm.pbf
+          osmium cat --overwrite build/turin-hw.osm.pbf -f opl -o build/turin.opl
 
       - name: Build graph
-        run: dart tool/build_walk.dart --asset "" --url walk_graph.pmwg.gz
-
-      - uses: actions/cache/save@v4
-        if: always()
-        with:
-          path: build/walk_osm
-          key: walk-osm-${{ steps.week.outputs.w }}-${{ github.run_id }}
+        run: dart tool/build_walk.dart --input build/turin.opl --asset "" --url walk_graph.pmwg.gz
 
       - name: Sanity + change check
         id: sanity

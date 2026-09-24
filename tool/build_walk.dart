@@ -3,7 +3,7 @@
 ///     dart tool/build_walk.dart [--bbox S,W,N,E] [--cache build/walk_osm]
 ///         [--out build/walk_graph.pmwg.gz] [--manifest build/walk_manifest.json]
 ///         [--asset assets/walk_graph.pmwg.gz] [--url <graph file url>]
-///         [--offline] [--input a.json,b.json]
+///         [--offline] [--input a.json,b.opl]
 ///
 /// Input is Overpass JSON: fetched per 0.04 degree tile and cached gzipped
 /// under --cache (build time only, the app never calls Overpass for walking),
@@ -58,7 +58,10 @@ Future<void> main(List<String> args) async {
   final data = OsmData();
   if (input.isNotEmpty) {
     for (final f in input.split(',')) {
-      data.addOverpass(jsonDecode(_read(File(f))) as Map<String, dynamic>);
+      // .opl = `osmium cat -f opl` of a Geofabrik extract (CI); else Overpass JSON.
+      data.addOverpass(f.endsWith('.opl')
+          ? oplToOverpass(File(f).readAsLinesSync())
+          : jsonDecode(_read(File(f))) as Map<String, dynamic>);
     }
   } else {
     final client = http.Client();
