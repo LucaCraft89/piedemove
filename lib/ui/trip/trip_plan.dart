@@ -228,6 +228,11 @@ class TripPlanController extends StateNotifier<TripState> {
         walkSpeed: request.walkSpeed,
         retime: (leg, ready, date) => planner.retimeRide(leg, ready, request, date),
         maxExtraSeconds: request.maxExtraMinutes * 60,
+        deadline: request.arriveBy
+            ? request.when.hour * 3600 +
+                request.when.minute * 60 +
+                request.when.second
+            : null,
       );
       debugPrint('pm: plan $planned ms, routeWalks ${clock.elapsedMilliseconds - planned} ms '
           'for ${candidates.length} candidates -> ${journeys.length}');

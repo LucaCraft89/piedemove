@@ -6,11 +6,15 @@ import 'package:piedemove/data/transit_index.dart';
 ///
 ///   stops:    (id, name, lat, lon)
 ///   patterns: (routeShortName, routeType, [stopIds], [[depSecondsPerStop]])
+///
+/// Each pattern is its own route; [regionalPatterns] marks some as coming from
+/// the regional (scheduled-only) feed.
 TransitIndex syntheticIndex({
   required List<(String, String, double, double)> stops,
   required List<(String, int, List<String>, List<List<int>>)> patterns,
   int serviceStartDay = 20000,
   int serviceDayCount = 7,
+  Set<int> regionalPatterns = const {},
 }) {
   final stopIds = [for (final s in stops) s.$1];
   final stopIndex = {for (var i = 0; i < stops.length; i++) stops[i].$1: i};
@@ -85,6 +89,10 @@ TransitIndex syntheticIndex({
     routeShortNames: routeShort,
     routeLongNames: routeShort,
     routeTypes: Int8List.fromList(routeType),
+    routeFeed: Int8List.fromList([
+      for (var r = 0; r < routeIds.length; r++)
+        regionalPatterns.contains(r) ? feedRegional : feedGtt,
+    ]),
     patternRoute: Int32List.fromList(patternRoute),
     patternDir: Int8List(patternRoute.length),
     patternStopOffset: Int32List.fromList(patternStopOffset),

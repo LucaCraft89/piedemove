@@ -16,6 +16,7 @@ import 'package:piedemove/data/feeds.dart';
 import 'package:piedemove/data/providers.dart';
 import 'package:piedemove/data/transit_index.dart';
 import 'package:piedemove/routing/departures.dart';
+import 'package:piedemove/routing/journey.dart' show serviceDayTime;
 
 import 'gtfs_rt.dart';
 
@@ -236,21 +237,22 @@ DelayLookup buildDelayLookup(TransitIndex ix, RealtimeState rt) {
       if (delay != null) return delay;
       final time = update.timeBySequence[p + 1];
       if (time != null && startOfDay != null) {
-        return time - (startOfDay + ix.depOf(trip, p));
+        final scheduled = serviceDayTime(startOfDay, ix.depOf(trip, p));
+        return time - scheduled.millisecondsSinceEpoch ~/ 1000;
       }
     }
     return update.tripDelay;
   };
 }
 
-/// `YYYYMMDD` -> local midnight of that service day, in epoch seconds.
-int? _startOfDay(String? yyyymmdd) {
+/// `YYYYMMDD` -> that service day's date.
+DateTime? _startOfDay(String? yyyymmdd) {
   if (yyyymmdd == null || yyyymmdd.length != 8) return null;
   final year = int.tryParse(yyyymmdd.substring(0, 4));
   final month = int.tryParse(yyyymmdd.substring(4, 6));
   final day = int.tryParse(yyyymmdd.substring(6, 8));
   if (year == null || month == null || day == null) return null;
-  return DateTime(year, month, day).millisecondsSinceEpoch ~/ 1000;
+  return DateTime(year, month, day);
 }
 
 /// Null until the index is ready; callers fall back to scheduled times.

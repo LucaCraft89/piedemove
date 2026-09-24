@@ -608,7 +608,8 @@ LiveTripState staleLive(
   var state = s.copyWith(estimated: true);
   if (serviceStart == null || leg.arrival <= leg.departure) return state;
   // Schedule-based estimate: linear along the leg between its two times.
-  final elapsed = now.difference(serviceStart).inSeconds - leg.departure;
+  final elapsed =
+      now.difference(serviceDayTime(serviceStart, leg.departure)).inSeconds;
   final fraction = (elapsed / (leg.arrival - leg.departure))
       .clamp(0.0, 1.0)
       .toDouble();
