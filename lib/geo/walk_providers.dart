@@ -37,6 +37,17 @@ Future<Directory?> walkDir() async {
   }
 }
 
+// Top level on purpose: a closure made inside the async provider captures the
+// async frame (a Future), which cannot cross the isolate boundary.
+WalkSource? _loadSource(File? file, Uint8List? bytes) {
+  final l = loadWalkLayers(downloaded: file, shipped: bytes);
+  return l == null ? null : WalkSource(WalkRouter(l.$1), l.$2);
+}
+
+// Not async, so the closure captures only its two arguments.
+Future<WalkSource?> _loadInIsolate(File? file, Uint8List? bytes) =>
+    Isolate.run(() => _loadSource(file, bytes));
+
 final walkRouterProvider = FutureProvider<WalkSource?>((ref) async {
   final clock = Stopwatch()..start();
   final dir = await walkDir();
@@ -49,10 +60,7 @@ final walkRouterProvider = FutureProvider<WalkSource?>((ref) async {
   }
   final file = dir == null ? null : File('${dir.path}/$walkDownloadedName');
   final bytes = shipped == null ? null : Uint8List.fromList(shipped);
-  final source = await Isolate.run(() {
-    final l = loadWalkLayers(downloaded: file, shipped: bytes);
-    return l == null ? null : WalkSource(WalkRouter(l.$1), l.$2);
-  });
+  final source = await _loadInIsolate(file, bytes);
   debugPrint('pm: walk graph ${source?.origin ?? 'none'}: parse+grid '
       '${clock.elapsedMilliseconds} ms, ${source?.router.graph.edgeCount} edges');
 

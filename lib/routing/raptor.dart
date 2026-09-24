@@ -405,17 +405,21 @@ class Planner {
         ));
       }
     }
-    // The access walk starts at the origin, which is not a stop.
-    if (legs.isNotEmpty && legs.first.kind == LegKind.walk) {
-      final f = legs.first;
-      legs[0] = Leg(
-        kind: LegKind.walk,
-        fromStop: -1,
-        toStop: f.toStop,
-        departure: f.departure,
-        arrival: f.arrival,
-        walkMetres: f.walkMetres,
-      );
+    // The access walk starts at the origin, which is not a stop. It is the
+    // seed label's own walk, so no label chain leg carries it: add it here.
+    final seed = ordered.first;
+    if (seed.walk > 0) {
+      final secs = walkSeconds(seed.walk, walkSpeed: req.walkSpeed);
+      legs.insert(
+          0,
+          Leg(
+            kind: LegKind.walk,
+            fromStop: -1,
+            toStop: seed.stop,
+            departure: seed.arrival - secs,
+            arrival: seed.arrival,
+            walkMetres: seed.walk,
+          ));
     }
     if (legs.isNotEmpty && legs.last.kind == LegKind.walk) {
       final f = legs.last;

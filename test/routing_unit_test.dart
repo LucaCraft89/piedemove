@@ -122,6 +122,22 @@ void main() {
       }
     });
 
+    test('the walk from the origin is a leg of its own, first, from no stop', () {
+      final r = request();
+      final off = PlanRequest(
+          originLat: r.originLat + 0.0005, originLon: r.originLon,
+          destLat: r.destLat, destLon: r.destLon, when: r.when,
+          walkCapMetres: r.walkCapMetres);
+      final js = planner.plan(off);
+      expect(js, isNotEmpty);
+      for (final j in js) {
+        final first = j.legs.first;
+        expect(first.kind, LegKind.walk);
+        expect(first.fromStop, -1);
+        expect(first.walkMetres, greaterThan(0));
+      }
+    });
+
     test('a ride leg lists every line that makes the hop', () {
       final journeys = planner.plan(PlanRequest(
         originLat: 45.0000,
