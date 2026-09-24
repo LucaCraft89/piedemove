@@ -1,0 +1,71 @@
+# Rebuilds the pedestrian graph from OSM and republishes it to the fixed
+# release tag `walk-graph-latest` (asset URL is walkManifestUrl in the app).
+name: walk-graph
+
+on:
+  schedule:
+    - cron: '17 3 * * 1' # weekly, Monday 03:17 UTC
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Publish even if the graph is unchanged'
+        type: boolean
+        default: false
+
+concurrency: walk-graph
+
+permissions:
+  contents: write # release assets; actions: write below for keep-alive
+  actions: write
+
+env:
+  TAG: walk-graph-latest
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+
+      - name: Previous manifest
+        run: |
+          curl -fsSL "https://github.com/${{ github.repository }}/releases/download/$TAG/manifest.json" \
+            -o build_prev_manifest.json || echo "no previous release"
+
+      - name: Build graph
+        run: dart tool/build_walk.dart --asset "" --url walk_graph.pmwg.gz
+
+      - name: Sanity + change check
+        id: sanity
+        run: |
+          dart tool/walk_sanity.dart build/walk_manifest.json build_prev_manifest.json | tee sanity.txt
+          echo "changed=$(grep -o 'changed=.*' sanity.txt | tail -1 | cut -d= -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release assets
+        if: steps.sanity.outputs.changed == 'true' || inputs.force
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp build/walk_graph.pmwg.gz walk_graph.pmwg.gz
+          cp build/walk_manifest.json manifest.json
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --title "Walk graph (latest)" \
+              --notes "Automated OSM pedestrian graph. Do not edit."
+          # graph first, manifest last: the app only sees the new manifest once the graph is in place
+          gh release upload "$TAG" walk_graph.pmwg.gz --clobber
+          gh release upload "$TAG" manifest.json --clobber
+
+  keepalive: # scheduled workflows are disabled after 60 days without repo activity
+    runs-on: ubuntu-latest
+    needs: build
+    if: always()
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow enable walk-graph.yml --repo "${{ github.repository }}"

@@ -102,6 +102,11 @@ Future<void> main(List<String> args) async {
     'size': gz.length,
     'sha256': sha256.convert(gz).toString(),
     'payloadSha256': head.sha256Hex,
+    // Read by tool/walk_sanity.dart to compare against the previous release.
+    'nodes': graph.nodeCount,
+    'edges': graph.edgeCount,
+    'mainComponentShare': graph.componentEdges.reduce((a, b) => a > b ? a : b) /
+        graph.edgeCount,
     'url': url,
   };
   File(manifestPath)
