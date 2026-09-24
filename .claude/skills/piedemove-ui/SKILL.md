@@ -340,3 +340,9 @@ for approval of look, palette and line style before phase 6.
 - `map_view.dart`: overlay tokens/halo/text follow the resolved basemap (`_pal`, `_mapDark`), not the app theme. Palette change sets `_styleReady=false`, the plugin reloads the style, `onStyleLoadedCallback` re-adds every layer. A style not loaded after 10 s shows chip "Mappa di base non disponibile".
 - Gotcha: `onStyleLoadedCallback` and the build post-frame both call the add methods; a second call hit `setGeoJsonSource` on a source not yet added, failed, re-added -> "Layer already exists" chips. Fix: `_stopsBusy/_linesBusy/_vehiclesBusy` guards and treat "already exists" as success.
 - Open for 7b: contrast (>=3:1) script/test of overlay tokens vs each `MapPalette`, z12/14/16 matrix. Colour style roads were pale-tuned so green lines stay readable; dark roads brightened.
+
+## Fix 7a1 (focus sometimes not drawn)
+
+- Root cause: `_applyFocus` awaited many native calls (visibility flips, `_fitTo` animation, several `setGeoJsonSource`) and could run twice at once (tap during a fit or a style reload). Interleaved runs let an older focus write its sources last, leaving the wrong or empty focus on the map.
+- Fix: `LatestRunner` (`lib/ui/map/latest_runner.dart`, test `test/latest_runner_test.dart`): one job at a time, only the newest queued request kept, so the last requested state always ends drawn. `_applyFocus` now records `_focus/_focusDrawn` at request time and queues `_applyFocusNow`. Use it for any other multi-await map redraw.
+- Phone: repeated quick taps and clearing restore the correct map, no "already exists" in logcat; the intermittent bug itself was not reproduced on demand (code-level fix).

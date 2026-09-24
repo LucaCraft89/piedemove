@@ -33,6 +33,7 @@ import 'basemap_style.dart';
 import 'line_features.dart';
 import 'me_layer.dart';
 import 'map_style.dart';
+import 'latest_runner.dart';
 import 'map_focus.dart';
 import 'stop_features.dart';
 import 'vehicle_features.dart';
@@ -691,7 +692,22 @@ class _MapViewState extends ConsumerState<MapView> {
 
   /// Focus rebuilds the sources so unrelated lines and stops are **absent**,
   /// never dimmed (§9.9). Clearing focus puts the ambient network back.
-  Future<void> _applyFocus(
+  final _focusRunner = LatestRunner();
+
+  /// Queued and coalesced: overlapping draws (a tap during a fit animation or
+  /// a style reload) used to interleave and leave stale data on the map.
+  void _applyFocus(
+    MapFocus? focus,
+    LineNetwork? net,
+    Map<String, dynamic>? ambient,
+  ) {
+    if (focus != null && net == null) return; // redraws when geometry lands
+    _focus = focus;
+    _focusDrawn = true;
+    _focusRunner.request(() => _applyFocusNow(focus, net, ambient));
+  }
+
+  Future<void> _applyFocusNow(
     MapFocus? focus,
     LineNetwork? net,
     Map<String, dynamic>? ambient,
@@ -703,8 +719,6 @@ class _MapViewState extends ConsumerState<MapView> {
     if (focus != null && net == null) return;
     final wasFitted = _fitted;
     _fitted = focus;
-    _focus = focus;
-    _focusDrawn = true;
     final empty = <String, dynamic>{'type': 'FeatureCollection', 'features': []};
 
     try {
