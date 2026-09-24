@@ -1,4 +1,4 @@
-/// Knot detector for the emitted ambient geometry (fix phase 1b).
+/// Knot detector for the emitted ambient geometry.
 ///
 ///     dart tool/knot_detector.dart
 ///
@@ -14,14 +14,18 @@ library;
 import 'dart:io';
 import 'dart:math' as math;
 
-import 'package:piedemove/geo/line_smooth.dart';
 import 'gap_detector.dart';
 
 /// Two degrees above the cleaner's cut-off: coordinates are rounded to 6
 /// decimals after cleaning.
-const knotDegrees = spurDegrees + 2;
-const knotMinLegMetres = 5.0;
+const knotDegrees = 150.0;
+const knotMinLegMetres = 2.0;
 const knotLoopMetres = 80.0;
+const chainSpikeMaxLegMetres = 15.0;
+
+/// Exact-coordinate key of a drawn vertex (6 decimals).
+int jointKey(double lat, double lon) =>
+    ((lat * 1e6).round() << 23) | ((lon * 1e6).round() & 0x7FFFFF);
 
 const _mLat = 111320.0, _mLon = 111320.0 * 0.707;
 

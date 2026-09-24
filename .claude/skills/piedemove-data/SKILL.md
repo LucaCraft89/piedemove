@@ -68,7 +68,7 @@ parsed by the same `buildIndex`; the regional one is then folded in:
 - both calendars are rebased onto one service window;
 - `routeFeed[route]` is `feedGtt` or `feedRegional`; `ix.isScheduledOnly(route)`
   and `ix.patternScheduledOnly(p)` are the checks everything else uses.
-  `shapes.txt` is never read (183 MB of the 216 MB).
+  `shapes.txt` is never read by the index build (183 MB of the 216 MB); only `tool/build_lines.dart` reads it, for the pattern geometry (the shape is the evidence the lines are matched to).
 
 Regional routes are excluded from OSM tiles, the snap corridor and the line
 network (`lib/geo/line_build.dart`), so inside a trip they draw as approximate

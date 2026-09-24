@@ -11,9 +11,9 @@ import 'dart:math' as math;
 
 import '../data/transit_index.dart';
 import 'line_merge.dart';
-import 'line_smooth.dart';
 import 'lines_io.dart';
 import 'pattern_snap.dart';
+import 'road_graph.dart';
 
 /// Peak window used for the headway tier: two hours of a weekday morning.
 const peakStart = 7 * 3600, peakEnd = 9 * 3600;
@@ -64,182 +64,148 @@ String _modeKey(int routeType) => switch (routeType) {
       _ => 'bus',
     };
 
-/// Merges every snapped pattern and returns the ambient FeatureCollection.
-String ambientGeoJson(TransitIndex ix, LineNetwork net) {
+/// Draw order in the source: later features paint on top. Where a bus and a
+/// tram share a street the tram (wider, see `ambientWidth`) is drawn first, so
+/// the bus stroke sits inside it and both stay visible with no geometry shift.
+int _drawRank(int type) => switch (type) {
+      RouteType.tram => 0,
+      RouteType.bus => 1,
+      _ => 2,
+    };
+
+double _r6(double v) => double.parse(v.toStringAsFixed(6));
+
+/// Merges every matched pattern by graph segment identity and returns the
+/// ambient FeatureCollection: road-matched chains, dotted approximate
+/// stretches (`approx = 1`, the GTFS shape itself), and one line per metro or
+/// funicular route.
+String ambientGeoJson(
+    TransitIndex ix, LineNetwork net, Map<GraphMode, RoadGraph> graphs) {
   final tiers = routeTiers(ix);
   final merger = LineMerger();
   final routeTier = <String, int>{};
-  // Unsnapped hops (straight chords): kept out of the way-merge but still
-  // drawn, thin and dotted, marked approximate, so a line never just stops.
-  final chords = <String, MergedSeg>{};
+  // Dotted stretches keyed by their exact points: patterns sharing a stretch
+  // share the feature.
+  final approx = <String, ({int mode, List<double> pts, Set<String> routes})>{};
+
+  final rail = <int, List<SnappedPattern>>{};
   for (final p in net.patterns) {
     final type = ix.routeTypeOfPattern(p.pattern);
-    final name = ix.routeShortNameOfPattern(p.pattern);
-    routeTier[name] = tiers[ix.patternRoute[p.pattern]];
-    final snapped = type == RouteType.bus || type == RouteType.tram;
-    final kept = spurFreeIndices(p.vertexLat, p.vertexLon);
-    for (var k = 1; k < kept.length; k++) {
-      final i = kept[k], prev = kept[k - 1];
-      if (snapped && p.vertexWay[i] < 0) {
-        final aLat = p.vertexLat[prev] / 1e6, aLon = p.vertexLon[prev] / 1e6;
-        final bLat = p.vertexLat[i] / 1e6, bLon = p.vertexLon[i] / 1e6;
-        final fwd = aLat < bLat || (aLat == bLat && aLon <= bLon);
-        final c = chords.putIfAbsent(
-            '$type/${fwd ? '$aLat,$aLon,$bLat,$bLon' : '$bLat,$bLon,$aLat,$aLon'}',
-            () => fwd
-                ? MergedSeg(aLat, aLon, bLat, bLon, type, -1)
-                : MergedSeg(bLat, bLon, aLat, aLon, type, -1));
-        c.routes.add(name);
-        continue;
-      }
-      merger.add(
-        mode: type,
-        route: name,
-        way: p.vertexWay[i],
-        aLat: p.vertexLat[prev] / 1e6,
-        aLon: p.vertexLon[prev] / 1e6,
-        bLat: p.vertexLat[i] / 1e6,
-        bLon: p.vertexLon[i] / 1e6,
-      );
-    }
-  }
+    final route = ix.routeShortNameOfPattern(p.pattern);
+    routeTier[route] = tiers[ix.patternRoute[p.pattern]];
+    final edges = p.vertexEdge;
+    if (edges == null) continue;
+    final graph = graphs[switch (type) {
+      RouteType.tram => GraphMode.tram,
+      RouteType.bus => GraphMode.bus,
+      _ => GraphMode.rail,
+    }];
 
-  // Chords ride along so a shifted street and the dotted hop after it still
-  // meet at one vertex.
-  offsetSharedBusTram(merger.segments, chords: chords.values.toList());
+    if (edges.contains(edgeShape)) {
+      (rail[ix.patternRoute[p.pattern]] ??= []).add(p);
+      continue;
+    }
+    var lastEdge = -3;
+    final run = <double>[]; // flat lat,lon of the current dotted stretch
+    void flush() {
+      if (run.length >= 4) {
+        final key = '$type/${run.join(',')}';
+        approx
+            .putIfAbsent(key, () => (mode: type, pts: [...run], routes: <String>{}))
+            .routes
+            .add(route);
+      }
+      run.clear();
+    }
+
+    for (var k = 1; k < p.vertexCount; k++) {
+      final e = edges[k];
+      final lat = p.vertexLat[k] / 1e6, lon = p.vertexLon[k] / 1e6;
+      if (e >= 0 && graph != null) {
+        flush();
+        if (e == lastEdge) continue; // a stop's own vertex inside the segment
+        lastEdge = e;
+        final a = graph.edgeFrom[e], b = graph.edgeTo[e];
+        merger.add(
+          mode: type,
+          route: route,
+          from: a,
+          to: b,
+          fromLat: graph.nodeLat[a],
+          fromLon: graph.nodeLon[a],
+          toLat: graph.nodeLat[b],
+          toLon: graph.nodeLon[b],
+        );
+      } else {
+        lastEdge = -3;
+        if (run.isEmpty) run..add(p.vertexLat[k - 1] / 1e6)..add(p.vertexLon[k - 1] / 1e6);
+        run..add(lat)..add(lon);
+      }
+    }
+    flush();
+  }
 
   final features = <Map<String, dynamic>>[];
   var id = 0;
-
-  // Metro and funicular are not snapped to OSM, so way identity cannot merge
-  // them: draw the longest direction-0 pattern of each such route as is, once,
-  // so the two directions do not double the line (§9.3).
-  final rail = <int, SnappedPattern>{};
-  for (final p in net.patterns) {
-    final type = ix.routeTypeOfPattern(p.pattern);
-    if (type != RouteType.metro && type != RouteType.funicular) continue;
-    if (ix.patternDir[p.pattern] != 0) continue;
-    final route = ix.patternRoute[p.pattern];
-    if ((rail[route]?.vertexCount ?? 0) < p.vertexCount) rail[route] = p;
-  }
-  for (final e in rail.entries) {
-    final p = e.value;
-    features.add({
-      'type': 'Feature',
-      'id': id++,
-      'geometry': {
-        'type': 'LineString',
-        'coordinates': [
-          for (var i = 0; i < p.vertexCount; i++)
-            [p.vertexLon[i] / 1e6, p.vertexLat[i] / 1e6],
-        ],
-      },
-      'properties': {
-        'mode': _modeKey(ix.routeTypes[e.key]),
-        'routes': ix.routeShortNames[e.key],
-        'n': 1,
-        'tier': 0,
-        'arrow': 0,
-        'shade': shadeOf(ix.routeShortNames[e.key]),
-      },
-    });
-  }
-  // Every chain end and chord end is a joint: those vertices stay exact.
-  // Turnaround stubs collapse first: their tip becomes a chain end.
-  var raw = [
-    for (final c in chainSegments(merger.segments))
-      MergedChain(c.mode, c.routes, c.oneDirection, collapseRetrace(c.pts)),
-  ];
-  // Dangling micro stubs go (see [microStubMetres]); chord ends count as touching.
-  final ends = <int, int>{
-    for (final c in chords.values) ...{
-      jointKey(c.aLat, c.aLon): 2,
-      jointKey(c.bLat, c.bLon): 2,
-    },
-  };
-  for (final c in raw) {
-    for (final k in [
-      jointKey(c.pts[0], c.pts[1]),
-      jointKey(c.pts[c.pts.length - 2], c.pts[c.pts.length - 1]),
-    ]) {
-      ends.update(k, (v) => v + 1, ifAbsent: () => 1);
+  void feature(int mode, List<String> routes, List<double> pts,
+      {required bool oneWay, required bool dotted}) {
+    final coords = <List<double>>[];
+    for (var i = 0; i + 1 < pts.length; i += 2) {
+      final c = [_r6(pts[i + 1]), _r6(pts[i])];
+      if (coords.isNotEmpty && coords.last[0] == c[0] && coords.last[1] == c[1]) continue;
+      coords.add(c);
     }
-  }
-  // Only stubs hanging off the middle of another chain: that is the spike.
-  final interior = <int>{
-    for (final c in raw)
-      for (var i = 2; i + 3 < c.pts.length; i += 2) jointKey(c.pts[i], c.pts[i + 1]),
-  };
-  bool hangsOffMiddle(MergedChain c) {
-    final a = jointKey(c.pts[0], c.pts[1]);
-    final b = jointKey(c.pts[c.pts.length - 2], c.pts[c.pts.length - 1]);
-    return (ends[a] == 1 && interior.contains(a)) ||
-        (ends[b] == 1 && interior.contains(b));
-  }
-
-  raw = [
-    for (final c in raw)
-      if (polylineMetres(c.pts) >= microStubMetres || !hangsOffMiddle(c)) c,
-  ];
-  final pinned = <int>{
-    for (final c in raw) ...[
-      jointKey(c.pts[0], c.pts[1]),
-      jointKey(c.pts[c.pts.length - 2], c.pts[c.pts.length - 1]),
-    ],
-    for (final c in chords.values) ...[
-      jointKey(c.aLat, c.aLon),
-      jointKey(c.bLat, c.bLon),
-    ],
-  };
-  for (final chain in raw) {
-    final smooth = smoothPolyline(
-        dropKinkLoops(dropSpikes(chain.pts, pinned: pinned), pinned: pinned),
-        pinned: pinned);
-    final coords = [
-      for (var i = 0; i + 1 < smooth.length; i += 2)
-        [
-          double.parse(smooth[i + 1].toStringAsFixed(6)),
-          double.parse(smooth[i].toStringAsFixed(6)),
-        ],
-    ];
-    if (coords.length < 2) continue;
+    if (coords.length < 2) return;
     features.add({
       'type': 'Feature',
       'id': id++,
       'geometry': {'type': 'LineString', 'coordinates': coords},
       'properties': {
-        'mode': _modeKey(chain.mode),
-        'routes': chain.routes.join(','),
-        'n': chain.routes.length,
-        'tier': chain.routes
-            .map((r) => routeTier[r] ?? 2)
-            .reduce((a, b) => a < b ? a : b),
-        'arrow': chain.oneDirection ? 1 : 0,
-        'shade': chain.routes.length == 1 ? shadeOf(chain.routes.first) : -1,
+        'mode': _modeKey(mode),
+        'routes': routes.join(','),
+        'n': routes.length,
+        'tier': routes.map((r) => routeTier[r] ?? 2).reduce(math.min),
+        'arrow': oneWay ? 1 : 0,
+        if (dotted) 'approx': 1,
+        'shade': routes.length == 1 ? shadeOf(routes.first) : -1,
       },
     });
   }
-  for (final c in chords.values) {
-    features.add({
-      'type': 'Feature',
-      'id': id++,
-      'geometry': {
-        'type': 'LineString',
-        'coordinates': [
-          [double.parse(c.aLon.toStringAsFixed(6)), double.parse(c.aLat.toStringAsFixed(6))],
-          [double.parse(c.bLon.toStringAsFixed(6)), double.parse(c.bLat.toStringAsFixed(6))],
+
+  final chains = chainSegments(merger.segments)
+    ..sort((a, b) => _drawRank(a.mode).compareTo(_drawRank(b.mode)));
+  for (final c in chains) {
+    feature(c.mode, c.routes, c.pts, oneWay: c.oneDirection, dotted: false);
+  }
+  for (final a in approx.values) {
+    feature(a.mode, a.routes.toList()..sort(), a.pts, oneWay: false, dotted: true);
+  }
+
+  // Metro and funicular with a published shape: each
+  // route draws its longest pattern, plus any pattern serving a stop the ones
+  // drawn so far do not (a branch), so the two directions never double up.
+  for (final e in rail.entries) {
+    final patterns = e.value..sort((a, b) => b.vertexCount.compareTo(a.vertexCount));
+    final covered = <int>{};
+    for (final p in patterns) {
+      final stops = {
+        for (var i = 0; i < p.stopVertex.length; i++) ix.patternStopAt(p.pattern, i)
+      };
+      if (covered.isNotEmpty && covered.containsAll(stops)) continue;
+      covered.addAll(stops);
+      feature(
+        ix.routeTypes[e.key],
+        [ix.routeShortNames[e.key]],
+        [
+          for (var i = 0; i < p.vertexCount; i++) ...[
+            p.vertexLat[i] / 1e6,
+            p.vertexLon[i] / 1e6,
+          ]
         ],
-      },
-      'properties': {
-        'mode': _modeKey(c.mode),
-        'routes': c.routes.join(','),
-        'n': c.routes.length,
-        'tier': c.routes.map((r) => routeTier[r] ?? 2).reduce(math.min),
-        'arrow': 0,
-        'approx': 1,
-        'shade': c.routes.length == 1 ? shadeOf(c.routes.first) : -1,
-      },
-    });
+        oneWay: false,
+        dotted: p.vertexEdge != null && p.vertexEdge!.contains(edgeApprox),
+      );
+    }
   }
   return jsonEncode({'type': 'FeatureCollection', 'features': features});
 }
@@ -288,83 +254,3 @@ double _metres(double aLat, double aLon, double bLat, double bLon) {
   return math.sqrt(dy * dy + dx * dx);
 }
 
-/// §9.5 — where a tram segment and a bus segment run within
-/// [sharedMetres] and [sharedDegrees] of parallel, push the two apart so both
-/// stay visible on the shared street. Bus to one side, tram to the other.
-///
-/// ponytail: the shift is baked into the geometry in metres, not applied as a
-/// pixel `line-offset` at draw time, so it shrinks with the zoom instead of
-/// holding half a stroke width. Move it into the layer if it reads too thin.
-const sharedMetres = 12.0, sharedDegrees = 15.0, sharedShiftMetres = 3.0;
-
-void offsetSharedBusTram(List<MergedSeg> segs, {List<MergedSeg> chords = const []}) {
-  final trams = [for (final s in segs) if (s.mode == RouteType.tram) s];
-  if (trams.isEmpty) return;
-  final cell = sharedMetres / 111320 * 2;
-  final grid = <int, List<MergedSeg>>{};
-  int key(double lat, double lon) =>
-      ((lat / cell).floor() << 20) ^ (lon / cell).floor();
-  for (final t in trams) {
-    grid.putIfAbsent(key(t.aLat, t.aLon), () => []).add(t);
-    grid.putIfAbsent(key(t.bLat, t.bLon), () => []).add(t);
-  }
-
-  final shift = <MergedSeg, int>{};
-  for (final s in segs) {
-    if (s.mode == RouteType.tram) continue;
-    for (final d in const [-1, 0, 1]) {
-      for (final e in const [-1, 0, 1]) {
-        final near = grid[key(s.aLat + d * cell, s.aLon + e * cell)];
-        if (near == null) continue;
-        for (final t in near) {
-          if (!_parallelAndClose(s, t)) continue;
-          shift[s] = 1;
-          shift[t] = -1;
-        }
-      }
-    }
-  }
-
-  // Displace **nodes**, not segments: a node moves by the mean of the shifts
-  // of every segment of its mode that meets there (unshifted ones count as
-  // zero), and both ends of a segment read the moved node. Every joint keeps
-  // one shared vertex, so the shift can never open a gap in a line.
-  String nodeKey(int mode, double lat, double lon) => '$mode/$lat,$lon';
-  final sumLat = <String, double>{}, sumLon = <String, double>{};
-  final count = <String, int>{};
-  for (final s in [...segs, ...chords]) {
-    final m = (shift[s] ?? 0) * sharedShiftMetres;
-    final rad = _bearing(s) * math.pi / 180;
-    final dLat = m == 0 ? 0.0 : math.cos(rad) * m / 111320;
-    final dLon = m == 0 ? 0.0 : -math.sin(rad) * m / (111320 * 0.707);
-    for (final k in [nodeKey(s.mode, s.aLat, s.aLon), nodeKey(s.mode, s.bLat, s.bLon)]) {
-      sumLat.update(k, (v) => v + dLat, ifAbsent: () => dLat);
-      sumLon.update(k, (v) => v + dLon, ifAbsent: () => dLon);
-      count.update(k, (v) => v + 1, ifAbsent: () => 1);
-    }
-  }
-  for (final s in [...segs, ...chords]) {
-    final ka = nodeKey(s.mode, s.aLat, s.aLon), kb = nodeKey(s.mode, s.bLat, s.bLon);
-    final aLat = s.aLat, aLon = s.aLon, bLat = s.bLat, bLon = s.bLon;
-    s.aLat = aLat + sumLat[ka]! / count[ka]!;
-    s.aLon = aLon + sumLon[ka]! / count[ka]!;
-    s.bLat = bLat + sumLat[kb]! / count[kb]!;
-    s.bLon = bLon + sumLon[kb]! / count[kb]!;
-  }
-}
-
-bool _parallelAndClose(MergedSeg a, MergedSeg b) {
-  final da = (_bearing(a) - _bearing(b)).abs() % 180;
-  if (math.min(da, 180 - da) > sharedDegrees) return false;
-  return _metres(a.aLat, a.aLon, b.aLat, b.aLon) <= sharedMetres ||
-      _metres(a.bLat, a.bLon, b.bLat, b.bLon) <= sharedMetres;
-}
-
-/// Undirected bearing in [0, 180): both segments must measure the same way or
-/// the two shifts would land on the same side.
-double _bearing(MergedSeg s) {
-  final dy = (s.bLat - s.aLat) * 111320;
-  final dx = (s.bLon - s.aLon) * 111320 * 0.707;
-  final deg = math.atan2(dy, dx) * 180 / math.pi;
-  return (deg + 360) % 180;
-}

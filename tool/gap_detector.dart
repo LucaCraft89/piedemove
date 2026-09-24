@@ -1,19 +1,17 @@
-/// Gap detector for the line network (FIX_MASTER phase 1).
+/// Gap detector for the line network.
 ///
 ///     dart tool/gap_detector.dart [-v]
 ///
-/// Walks every snapped pattern in `assets/lines.bin.gz` (after the same spur
-/// clean-up the ambient build applies) and checks that the geometry the map
-/// really draws (`assets/ambient.json.gz`, the exact string handed to MapLibre)
-/// contains each hop, end to end:
+/// Walks every matched pattern in `assets/lines.bin.gz` and checks that the
+/// geometry the map really draws (`assets/ambient.json.gz`, the exact string
+/// handed to MapLibre) contains each hop, end to end:
 ///   * missing   - no single drawn feature passes within [matchMetres] of both
-///                 ends of a hop (chords must ship as `approx = 1` features)
+///                 ends of a hop (dotted stretches ship as `approx = 1`)
 ///   * joint     - two consecutive hops whose drawn features are different and
 ///                 whose end points do not meet within [joinMetres]
 ///
-/// Smoothing moves interior vertices by at most [smoothTotalDeviationMetres]
-/// and the bus/tram shift by 3 m, so vertices are matched to the drawn
-/// polyline, not to drawn vertices; chain ends are exact, so joints are not.
+/// The build no longer moves or smooths vertices, so the tolerance only has to
+/// cover coordinate rounding (6 decimals, ~0.1 m).
 library;
 
 import 'dart:convert';
@@ -21,14 +19,11 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:piedemove/geo/line_smooth.dart';
 import 'package:piedemove/geo/lines_io.dart';
-import 'package:piedemove/geo/pattern_snap.dart';
 
-/// Two drawn features meeting closer than this are joined (sub-2 m connector
-/// features bridge the rest).
-const joinMetres = 2.0;
-const matchMetres = smoothTotalDeviationMetres + 3.0;
+/// Two drawn features meeting closer than this are joined.
+const joinMetres = 1.0;
+const matchMetres = 1.0;
 
 class Gap {
   Gap(this.pattern, this.hop, this.cause, this.detail);
@@ -141,36 +136,21 @@ double _distToSeg(double px, double py, double ax, double ay, double bx, double 
   return math.sqrt(math.pow(px - ax - t * dx, 2) + math.pow(py - ay - t * dy, 2));
 }
 
-double _hopMetres(SnappedPattern p, int a, int b) => math.sqrt(
-    math.pow((p.vertexLat[a] - p.vertexLat[b]) / 1e6 * _mLat, 2) +
-        math.pow((p.vertexLon[a] - p.vertexLon[b]) / 1e6 * _mLon, 2));
-
 List<Gap> findGaps(LineNetwork net, EmittedGeometry emitted) {
   final gaps = <Gap>[];
   for (final p in net.patterns) {
-    final kept = spurFreeIndices(p.vertexLat, p.vertexLon);
     final near = <int, Set<int>>{};
     Set<int> at(int i) => near.putIfAbsent(
         i, () => emitted.near(p.vertexLat[i] / 1e6, p.vertexLon[i] / 1e6));
     Set<int>? prev;
-    for (var k = 1; k < kept.length; k++) {
-      final i = kept[k], a = kept[k - 1];
-      var cur = at(a).intersection(at(i));
-      if (cur.isEmpty) {
-        // A stub tip is dropped from drawn chains (spike removal), so a hop to
-        // or from one ends up to [spurMaxLegMetres] short of the drawn line.
-        final wideA = emitted.near(p.vertexLat[a] / 1e6, p.vertexLon[a] / 1e6,
-            tol: matchMetres + spurMaxLegMetres);
-        final wideI = emitted.near(p.vertexLat[i] / 1e6, p.vertexLon[i] / 1e6,
-            tol: matchMetres + spurMaxLegMetres);
-        final wide = wideA.isNotEmpty && wideI.isNotEmpty ? wideA : <int>{};
-        if (wide.isNotEmpty && _hopMetres(p, a, i) <= 2 * spurMaxLegMetres) {
-          prev = null;
-          continue;
-        }
+    for (var i = 1; i < p.vertexCount; i++) {
+      final a = i - 1;
+      if (p.vertexLat[a] == p.vertexLat[i] && p.vertexLon[a] == p.vertexLon[i]) {
+        continue;
       }
+      final cur = at(a).intersection(at(i));
       if (cur.isEmpty) {
-        gaps.add(Gap(p.pattern, i, p.vertexWay[i] < 0 ? 'missing-chord' : 'missing-hop',
+        gaps.add(Gap(p.pattern, i, p.vertexWay[i] < 0 ? 'missing-dotted' : 'missing-hop',
             'at ${p.vertexLat[a] / 1e6},${p.vertexLon[a] / 1e6}'));
         prev = null;
         continue;

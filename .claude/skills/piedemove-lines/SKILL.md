@@ -8,147 +8,125 @@ description: Road/tram graph, snapping patterns to streets, the merged ambient l
 Its own module (`lib/geo/`) with its own cache file, so a failure here never
 affects routing. Copy nothing from `../piemove-maps`. High-effort work.
 
-## Lessons — why each rule exists
+## Lessons - why each rule exists
 
-1. Slicing a route by **nearest-vertex search** picks the wrong pass on loops
-   and makes ends collide. -> Record the **path vertex index of every stop at
-   build time** and slice by index, never by projection.
-2. Reusing one direction's shape **reversed** draws the wrong carriageway on
-   divided roads. -> Directed graph, each pattern routed in its own direction.
-3. Pedestrian and service ways in the bus graph cause off-road jogs and
-   shortcuts. -> Filtered graph.
-4. "Same road" decided by a **distance guess** (grid cells, tolerances) merged
-   unrelated lines. -> Merge by **shared OSM way identity**, same mode only.
-5. GeoJSON features without a **top-level numeric `id`** silently render nothing
-   on Android. -> Every feature carries one.
-6. **Array-valued** feature properties are unreliable to query back. ->
-   Comma-separated strings and numbers only.
-7. One layer failing blanked everything. -> Each layer added in its own
-   try/catch, plus a visible feed-health indicator.
-8. Stops snapped to the `service=parking_aisle` way beside the kerb, and
-   routing (which refuses service ways mid-route) then had nowhere to go: 2802
-   dead hops. -> Aisles and driveways are out of the graph, and a stop never
-   snaps to a service edge while a road edge is in reach.
-9. Heading alone cannot tell a main carriageway from its controviale. -> The
-   stop-snap score adds the candidate's distance to the pattern's GTFS shape.
-   Chorded hops fell 10.3% -> 3.6% from lessons 8 and 9 together.
-10. Overpass times out (504) on a regex over `highway` values, and answers in
-   ~2 s for the bare `way["highway"]` key; `overpass.osm.ch` holds Switzerland
-   only and answers **200 with an empty element list**. -> Bare key query,
-   local filtering in `wayInMode`, and a tile shorter than 2 KB counts as a
-   miss, not as an empty area.
+1. Slice a route by **vertex index recorded at build time** (stop offsets),
+   never by nearest-vertex search: loops and shared stops pick the wrong pass.
+2. **Directed graph**, each pattern matched in its own direction: reusing one
+   direction reversed draws the wrong carriageway on divided roads.
+3. Pedestrian and service ways (`parking_aisle`, `driveway`) are out of the bus
+   graph: they cause off-road jogs and shortcuts.
+4. "Same road" is decided by **graph segment identity** (mode + node pair),
+   never by distance, grid cells or shifts: proximity merged unrelated lines.
+5. GeoJSON features need a **top-level numeric `id`** or Android renders none.
+6. Feature properties are **primitives / comma strings**; arrays do not query
+   back reliably.
+7. Each map layer in its own try/catch, plus a visible status chip.
+8. Overpass 504s on a regex over `highway` values and answers ~2 s for the
+   bare `way["highway"]` key; `overpass.osm.ch` answers 200 with an empty list.
+   A tile under 2 KB is a miss. A tile that still 504s is fetched as four
+   quadrants and stitched. Regex on `railway` is fine over a small bbox.
+9. `queryRenderedFeaturesInRect` returns the id as a String on Android, a num
+   elsewhere: parse either.
+10. **Per-hop routing was the root failure** (phase 1c). Routing stop to stop
+    turns every unroutable hop into a straight chord (6.7% of drawn length, runs
+    of 34 km), and stops that split OSM segments make every pattern cut the
+    network differently, so merging fragments and cleaner passes multiply. The
+    GTFS **shape** is the evidence of the real path: match the whole pattern to
+    the graph with a HMM, keep whole segments, place stops afterwards.
+11. GTT publishes real **contraflow bus lanes untagged**: a shape running against
+    a one-way is not noise. Keep the contra edge at a penalty (`isContraflow`);
+    without it 770 shape-following hops became dotted jumps.
+12. Tram track must be in the **bus graph** too (penalty): a route typed bus can
+    run on a rack line. Metro/funicular have their shape; a shape-less one is
+    routed stop to stop on the rail graph.
+13. A wide-radius retry must accept only edges the sample projects **beside**
+    (0 < t < 1): a road that merely ends near the shape must not claim samples
+    beyond its end, or the dotted stretch starts 50 m late as a long chord.
+    Trim run-end samples clamped at an edge end for the same reason.
+14. Spur removal on the finished path must compare **direction as well as
+    position**: two consecutive sub-metre edges are "reversed" under a loose
+    position test and get deleted, cutting the drawn line (gap detector caught
+    it). Node-id reverse, or position within 0.5 m **and** bearing > 150 deg.
+15. Dotted stretches must be keyed by **all their points**: endpoints + count
+    collided across different shapes and dropped geometry.
+16. No smoothing, no bus/tram shift: OSM geometry equals the basemap. Where bus
+    and tram share a street, tram is drawn first and wider, bus over it.
 
 ## Build
 
-    dart tool/build_lines.dart [--force-osm] [--reverse]   # -> build/lines.bin
-    dart tool/build_lines.dart --assets-only               # -> assets/*.gz only
-    dart tool/lines_report.dart [--full]                   # 9.12 validation
-    dart tool/gate1_samples.dart                           # GATE 2 sample spots
+    dart tool/build_lines.dart [--force-osm] [--reverse] [--no-assets]
+    dart tool/lines_report.dart [--spurs|--dev|--fail]   # quality report
+    dart tool/gap_detector.dart / knot_detector.dart     # both must print 0
 
-The phone ships three gzipped assets, all written by the same tool and keyed
-to the feed: `assets/ambient.json.gz` (the merged network, pre-built because
-merging costs hundreds of MB of transient objects), `assets/connectors.json.gz`
-and `assets/lines.bin.gz` (pattern geometry, loaded only when focus mode needs
-it). A stale or missing asset costs the map its lines and nothing else.
+One command regenerates everything shipped: `build/lines.bin`,
+`assets/lines.bin.gz`, `assets/ambient.json.gz`, `assets/connectors.json.gz`.
+GTFS shapes are read first (they decide which tiles/ways matter); OSM tiles are
+cached gzipped in `build/osm/`, plus `rail_v1_*` for metro/funicular. About 30 s
+on cached tiles; `build/gaps.txt` lists every dotted stretch with its cause.
+Two processes (the second with `--reverse`) halve the tile fetch.
 
-Tiles are cached gzipped in `build/osm/`. Two processes (the second with
-`--reverse`) halve the fetch: Overpass gives an IP two slots. Current state:
-78 tiles, bus graph 1.08M nodes / 2.03M directed edges, 1433 patterns,
-36 215 hops, **3.64% chorded**, 0 off-shape, 0 oneway violations, 0 vertices
-off the graph.
+State (feed 20260919): bus graph 449k nodes / 907k directed edges (corridor
+around the shapes), 1429 patterns, 36 163 hops, **0.63% hops dotted (0.17% of
+length, longest 1.4 km)**, detour p95 1.013, stop offsets monotone, 0 gaps,
+0 knots. Remaining dotted stretches are data: no OSM road under the shape
+(private/pedestrian areas, missing ways) or a shape 70 m+ off the road.
 
 ## 9.1 OSM fetch
 
-Overpass over the GTT stop bbox padded 0.02°, split into ~0.1° tiles so no
-response is huge. Use `out geom` so ways carry geometry and tags.
-
-Ways: drivable `highway=*` (motorway, trunk, primary, secondary, tertiary,
-unclassified, residential, living_street and their `_link`), `highway=busway`,
-`railway=tram`. Keep tags: `oneway`, `oneway:bus`, `busway`, `junction`,
-`access`, `motor_vehicle`, `bus`, `psv`.
-
-Descriptive User-Agent. Configurable endpoint list with fallback. Fetch once
-per index build, cache the raw result. **Fair use: never re-fetch without a
-version bump or 30-day age.** On failure: retry with backoff, then fall back to
-`shapes.txt` geometry with every line marked **approximate**; retry next launch.
+Overpass tiles (0.1 deg, 0.02 overlap) for the stops **and shapes** of GTT bus
+and tram patterns; `out geom` so ways carry geometry and tags. One extra call
+for metro/funicular tracks. Cached; fair use: never re-fetch before 30 days or a
+cache-version bump. On failure the tile is skipped: the patterns fall back to
+their shape, dotted.
 
 ## 9.2 Graph
 
-Two graphs: bus/road and tram-track.
+`lib/geo/road_graph.dart`. Node = **exact stored coordinate**. One directed edge
+per OSM way segment (point to point), keeping `wayId`, reverse bit, service,
+rail and contraflow flags. Oneway semantics: `oneway=yes|-1`, roundabout,
+`oneway:bus=no`, `busway=opposite_*`. Bus graph: drivable highways incl.
+`busway`, service (not aisles/driveways), tram track at a penalty; no footway,
+path, cycleway, track; ways closed to motor vehicles unless bus/psv allowed.
 
-**Directed edges.** `oneway=yes` (or `junction=roundabout`) contributes edges
-only in its tagged direction; `oneway=-1` reverses; `oneway:bus=no` or
-`busway=opposite_lane|opposite_track` also allows the reverse for buses;
-everything else is bidirectional.
+## 9.3 Matching a pattern
 
-**Exclusions**: no `footway`, `pedestrian`, `path`, `cycleway`, `track`.
-Exclude `service` *except* within 100 m of a pattern's own first or last stop
-(terminus turnarounds), at a higher cost. Exclude ways closed to motor vehicles
-unless `bus`, `psv` or a bus designation allows them.
+`lib/geo/map_match.dart` (`PatternSnapper.snap`), model and stop placement in
+`lib/geo/pattern_snap.dart`.
 
-**Node identity**: dedupe by **exact stored coordinate**. Overpass repeats the
-literal shared coordinate at a real junction — no tolerance merge, ever.
+1. Resample the shape every 15 m; heading over +-15 m.
+2. Candidates: edges within 35 m (70 m beside-only if none), <= 8 per sample.
+   Cost = 0.5 (d / 10 m)^2 + 3 (heading delta / 90)^2 + penalties (service 1,
+   tram-in-bus-graph 2, contraflow 3).
+3. Transition = |graph route - shape arc| / 3 m, U-turn +6, bounded local
+   Dijkstra (2 gc + 50 m). Viterbi; no finite transition or no candidate ends a
+   run.
+4. Runs -> edge sequences; first/last edge dropped if the shape barely touches
+   it; spurs < 60 m removed on the whole path.
+5. Gap between runs: shortest path hugging the shape (corridor factor, <= 1.4 x
+   gap + 120 m, all edges within 40 m of the shape), else the shape's own points
+   as a dotted stretch.
+6. Stops: monotone Viterbi over path positions within reach (never backwards),
+   each gets a vertex; `stopVertex`, `hopApprox` (hop touches a dotted stretch).
+7. No shape: stops snap to an edge heading their way and are joined by shortest
+   paths; failures are dotted straight pieces.
 
-Every edge keeps `wayId`, the way's own direction, and a oneway flag. Grid index
-for nearest-edge queries.
-
-## 9.3 Snapping patterns
-
-For each GTT **bus and tram** pattern (not regional, not metro, not funicular):
-
-1. Snap each stop to an **edge, not a node**. Consider edges within 40 m allowed
-   in the pattern's direction of travel. Score = distance + heading penalty
-   against the bearing to the next stop (previous stop for the last one). This
-   puts the stop on the correct carriageway. Split the edge with a virtual node.
-2. Route each hop (stop i -> i+1) with A*/Dijkstra on the directed graph.
-   `cost = length * corridorFactor`, `corridorFactor = 1 + max(0, d - 25) / 25`
-   where `d` is the edge midpoint's distance from the pattern's GTFS shape (the
-   **modal** shape id of its trips). No shape -> factor 1. Forbid immediate
-   U-turns on the same way except at termini.
-3. Cap each hop at `max(2500, straightLine * 1.8)` metres.
-4. Validate: within the cap, and at most **60 m** off the GTFS shape at any
-   vertex when a shape exists. A failed hop becomes a straight chord flagged
-   approximate **for that hop only**, never the whole pattern.
-5. Cache by `(fromEdgePoint, toEdgePoint, mode)` — many patterns share hops.
-
-Store per pattern: vertex list (Int32 microdegrees), **the vertex index at which
-each stop sits**, per-vertex `wayId` (Int64) + direction bit, per-hop approximate
-flags, per-stop snapped coordinate. Saved to `lines.bin`, versioned, keyed to
-`feed_version`. Tram uses the tram graph. Metro and funicular use their GTFS
-shape (or the stop chain) as-is.
+Stored per pattern: Int32 microdegree vertices, `vertexWay` + dir bit, stop
+vertex, snapped stop coordinate, hop flags. `vertexEdge` (graph edge id, -1
+dotted, -2 shape) is desktop only, used to merge the ambient network.
 
 ## 9.4 Merged ambient network
 
-Per mode, from the snapped patterns:
-
-- For every **directed way segment** used by any pattern, record the set of
-  route ids and the set of travel directions.
-- **Merge = identical OSM way identity, same mode.** Never proximity. Both
-  directions on one two-way way collapse into one feature. Divided roads have
-  one oneway way per carriageway, so each direction lands on its own lane
-  automatically — **no offsetting there, ever**.
-- Chain consecutive segments sharing `(mode, routeSet, directionSet)` into one
-  LineString; break where the set changes.
-- Feature props: numeric top-level `id`, `mode`, `routes` (comma string), `n`
-  (distinct routes), `tier`, `arrow` (0/1), `approx` (0/1).
-- `width = base(zoom) * min(1 + 0.4 * (n - 1), 3)` — **cap 3x**. A merged
-  feature uses the mode base colour; a single-route feature uses that route's
-  own colour (its `route_color` if legible, else a deterministic shade in the
-  mode family).
-- Tiers by zoom: tier 0 (tram, metro, funicular) always; tier 1 (bus with peak
-  headway <= 10 min) from z12; tier 2 (other bus) from z14. A feature's tier is
-  the **lowest** among its routes.
-- Approximate hops (chords) are excluded from the ambient network.
-
-## 9.5 Bus + tram on one street
-
-Implemented at build time in `offsetSharedBusTram`: the shift is baked into
-the geometry in metres (3 m each way), not applied as a pixel `line-offset`.
-
-Tram tracks are separate OSM ways, so identity cannot merge them. One narrow
-documented exception: where a tram segment and a bus segment are **within 12 m
-and within 15° of parallel**, draw two parallel strokes offset
-`±(half stroke width)` via `line-offset`, one per mode colour. Bus<->tram only.
+`lib/geo/line_merge.dart`, `lib/geo/ambient.dart`. Per physical segment (mode,
+node pair): route set and direction set. Chain segments sharing (mode, route
+set, direction set) at nodes with exactly one way in and out (undirected walk
+for two-direction sets), break at forks/ends/set changes. Properties: numeric
+`id`, `mode`, `routes`, `n`, `tier`, `arrow`, `shade`, `approx`. Dotted
+stretches ship as `approx = 1` features (the shape polyline). Metro/funicular
+with a shape: the longest pattern per route plus any pattern serving a stop not
+yet covered. Width = `base(zoom) * min(1 + 0.4 (n - 1), 3)` x mode factor
+(`railWidthFactor` for tram/metro/funicular); tram is listed first, bus over it.
+Tiers as before (0 tram/metro/funicular, 1 bus <= 10 min peak headway, 2 other).
 
 ## 9.6 Arrows
 
@@ -206,49 +184,16 @@ progress and show "position uncertain". Legs before the current one are fully
 travelled. Travelled = mode colour desaturated at ~40% opacity; ahead = full
 colour. Walk legs split the same way.
 
-## 9.12 Validation — must pass before GATE 2
+## 9.12 Validation
 
-`tool/lines_report.dart` prints, per line and overall: patterns fully snapped,
-hops chorded, hops off-shape, edges violating a oneway, vertices more than 8 m
-from any graph edge (chords excluded).
+`dart tool/lines_report.dart` (dotted share, longest dotted run, detour ratio,
+path/shape deviation, monotone stops, invented spurs), `gap_detector` (every hop
+drawn, joints shared), `knot_detector` (folds > 150 deg, legs <= 15 m). Tests:
+`test/lines_unit_test.dart` (synthetic graphs), `test/gap_detector_test.dart`,
+`test/knot_detector_test.dart` run on the shipped assets.
 
-Unit tests on synthetic graphs (`test/lines_unit_test.dart`), all green: a
-two-way junction; a oneway pair where directions 0 and 1 take different edges;
-a loop route where a shared stop appears twice (index slicing takes the right
-pass); a same-way merge of three routes giving `n = 3` with width capped at 3x
-(`lib/geo/line_merge.dart`, shared by `tool/gate1_samples.dart` and, from 9.4,
-by the app layer).
-
-Device check: a scripted tour of fixed viewports — a corso with dual
-carriageways, a shared bus/tram street, the Peschiera/Racconigi corridor, a loop
-route's turnaround, the city centre at z12/z14/z16 — inspected for gaps,
-off-road segments, doubled lines, missing lines, wrong colours, wrong lane.
-
-## Lessons (continued)
-
-11. `queryRenderedFeaturesInRect` hands the feature id back as a **String** on
-   Android and a num elsewhere; casting to `num?` threw and swallowed every
-   segment tap. Parse either.
-
-12. Two gap causes (fix round phase 1): chords were dropped from the ambient
-   network, so an unsnapped hop simply ended the line; and the bus/tram shift
-   moved each segment on its own, opening a 3 m gap at every joint. -> Chords
-   ship as `approx = 1` features (thin dotted layer `pm-lines-approx`), and the
-   shift displaces **nodes** (mean of incident shifts), chords included.
-   `dart tool/gap_detector.dart` (and `test/gap_detector_test.dart`) checks the
-   shipped `ambient.json.gz` against every pattern hop: must print 0 gaps.
-
-13. Phase 1b (knots after phase 1). (a) The phase-1 `assets/lines.bin.gz` had
-   not been built from the current OSM cache: its ambient held 57k features,
-   32k of them zero-length, with jogs at every stop. Always ship assets from a
-   full `dart tool/build_lines.dart` (about 1 min on cached tiles), not only
-   `--assets-only` on an old `build/lines.bin`. (b) Smoothing lives in
-   `lib/geo/line_smooth.dart`: pattern spur removal (`spurFreeIndices`),
-   retrace collapse of turnaround stubs, chain spike/kink-loop removal, then
-   bounded corner cutting (<= 2.5 m per pass, 2 passes). **Every chain end,
-   chord end and stub tip that another chain touches is pinned (exact,
-   never cut)**; cutting a vertex another chain ends at reopens a gap. Never
-   cut a fold (>150 deg): it eats the stub. (c) `dart tool/knot_detector.dart`
-   and `test/knot_detector_test.dart` must print 0 knots; the gap detector now
-   matches vertices to drawn polylines (smoothing moves vertices), joints
-   within 2 m. Approx chords remain only for hops the router cannot snap.
+Device check: `adb shell cmd location providers` mock location + a dev camera
+hook, or a pinch sent with `sendevent` right after launch (it only works before
+any other touch). Look at: a corso with dual carriageways, a shared bus/tram
+street, the Peschiera/Castelfidardo corridor, a roundabout, the centre at
+z14/z16, a suburban stretch, a metro line.

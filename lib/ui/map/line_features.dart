@@ -13,6 +13,7 @@ import 'package:piedemove/geo/lines_io.dart';
 import 'package:piedemove/geo/pattern_snap.dart';
 import 'package:piedemove/location/live_trip.dart';
 import 'package:piedemove/routing/journey.dart';
+import 'package:piedemove/ui/map/map_style.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
 
 /// Tier zoom floors (§9.4): trams and rail always, frequent buses from z12,
@@ -45,10 +46,16 @@ List<Object> get tierOpacity => [
     ];
 
 /// `base(zoom) * min(1 + 0.4 * (n - 1), 3)` — the cap is the whole point.
+///
+/// Rail modes are drawn [railWidthFactor] wider than bus. The ambient source
+/// lists tram first and bus over it, so on a street they share the bus stroke
+/// sits inside the tram stroke and both stay visible without moving either
+/// line off the street.
 List<Object> get ambientWidth => [
       '*',
       ['interpolate', ['linear'], ['zoom'], 11, 1.4, 14, 2.6, 17, 4.5],
       ['min', ['+', 1, ['*', 0.4, ['-', ['get', 'n'], 1]]], 3],
+      ['match', ['get', 'mode'], 'bus', 1.0, railWidthFactor],
     ];
 
 /// Mode colour when routes share the segment, the route's own shade when only

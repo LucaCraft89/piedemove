@@ -11,7 +11,7 @@ import 'dart:typed_data';
 
 import 'distance.dart';
 
-enum GraphMode { bus, tram, foot }
+enum GraphMode { bus, tram, rail, foot }
 
 class OsmWay {
   OsmWay(this.id, this.tags, this.lat, this.lon);
@@ -56,6 +56,9 @@ const _drivableHighways = {
   'tertiary_link',
 };
 
+/// Metro and funicular run on their own tracks, not on any road.
+const _ownRails = {'subway', 'light_rail', 'funicular', 'monorail'};
+
 const _yes = {'yes', 'true', '1', 'designated', 'official', 'permissive'};
 
 bool _busAllowed(Map<String, String> tags) {
@@ -72,8 +75,12 @@ bool _busAllowed(Map<String, String> tags) {
 /// Whether a way belongs to [mode]'s graph at all.
 bool wayInMode(OsmWay w, GraphMode mode) {
   if (mode == GraphMode.tram) return w.tags['railway'] == 'tram';
+  if (mode == GraphMode.rail) return _ownRails.contains(w.tags['railway']);
   if (mode == GraphMode.foot) return _footAllowed(w.tags);
-  if (w.tags['railway'] == 'tram' && w.tags['highway'] == null) return false;
+  // Tram track is in the bus graph too, at a penalty (see the matcher): a
+  // route typed "bus" can run on rails (a rack line), and one on a shared
+  // street stays on the road because that is cheaper.
+  if (w.tags['railway'] == 'tram' && w.tags['highway'] == null) return true;
   final hw = w.tags['highway'];
   if (hw == null || !_drivableHighways.contains(hw)) return false;
   // Parking aisles and driveways are never a bus route and sit right next to
@@ -81,6 +88,14 @@ bool wayInMode(OsmWay w, GraphMode mode) {
   const notARoute = {'parking_aisle', 'driveway', 'drive-through', 'emergency_access'};
   if (hw == 'service' && notARoute.contains(w.tags['service'] ?? '')) return false;
   return _busAllowed(w.tags);
+}
+
+/// A one-way whose opposite direction may be offered at a penalty: not a
+/// roundabout or a motorway, where nothing ever runs against the flow.
+bool _contraOk(OsmWay w) {
+  final hw = w.tags['highway'] ?? '';
+  if (w.tags['junction'] != null) return false;
+  return !(hw.startsWith('motorway') || hw.startsWith('trunk'));
 }
 
 /// On foot: anything with a highway tag except the roads that forbid walking.
@@ -125,6 +140,8 @@ bool _footAllowed(Map<String, String> tags) {
 const _cellDegrees = 0.002; // ~220 m
 const _edgeServiceBit = 1;
 const _edgeReverseBit = 2;
+const _edgeRailBit = 4;
+const _edgeContraBit = 8;
 
 class EdgeHit {
   const EdgeHit(this.edge, this.metres, this.fraction, this.lat, this.lon);
@@ -153,6 +170,14 @@ class RoadGraph {
   int get nodeCount => nodeLat.length;
   int get edgeCount => edgeFrom.length;
 
+  /// True on rail track (tram and own rails) in a graph that also has roads.
+  bool isRail(int edge) => edgeFlags[edge] & _edgeRailBit != 0;
+
+  /// True on the against-the-flow edge of a one-way street (bus graph only):
+  /// allowed, because real contraflow bus lanes are often untagged, but the
+  /// matcher only uses it when the shape insists.
+  bool isContraflow(int edge) => edgeFlags[edge] & _edgeContraBit != 0;
+
   bool isService(int edge) => edgeFlags[edge] & _edgeServiceBit != 0;
 
   /// True when the edge runs against its OSM way's own point order.
@@ -165,19 +190,26 @@ class RoadGraph {
   static RoadGraph build(Iterable<OsmWay> ways, GraphMode mode) =>
       RoadGraphBuilder(mode).addAll(ways).build();
 
-  /// Edges whose geometry passes within [metres] of the point.
+  /// Scratch for [near]: an edge is visited once per call, without a Set.
+  late final Int32List _stamp = Int32List(edgeCount);
+  int _gen = 0;
+
+  /// Edges whose geometry passes within [metres] of the point, nearest first.
   List<EdgeHit> near(double lat, double lon, double metres) {
-    final span = (metres / 111000 / _cellDegrees).ceil() + 1;
+    final cosLat = math.cos(lat * math.pi / 180);
+    final spanLat = (metres / 111320 / _cellDegrees).ceil();
+    final spanLon = (metres / (111320 * cosLat) / _cellDegrees).ceil();
     final baseLat = (lat / _cellDegrees).floor();
     final baseLon = (lon / _cellDegrees).floor();
     final out = <EdgeHit>[];
-    final seen = <int>{};
-    for (var dy = -span; dy <= span; dy++) {
-      for (var dx = -span; dx <= span; dx++) {
+    _gen++;
+    for (var dy = -spanLat; dy <= spanLat; dy++) {
+      for (var dx = -spanLon; dx <= spanLon; dx++) {
         final cell = _grid[(baseLat + dy) * 1000000 + (baseLon + dx)];
         if (cell == null) continue;
         for (final e in cell) {
-          if (!seen.add(e)) continue;
+          if (_stamp[e] == _gen) continue;
+          _stamp[e] = _gen;
           final hit = _project(e, lat, lon);
           if (hit.metres <= metres) out.add(hit);
         }
@@ -187,6 +219,8 @@ class RoadGraph {
     return out;
   }
 
+  /// Planar (equirectangular) projection: exact to well under a metre at the
+  /// ranges used here, and far cheaper than haversine in the matcher's loop.
   EdgeHit _project(int edge, double lat, double lon) {
     final a = edgeFrom[edge], b = edgeTo[edge];
     final scale = math.cos(lat * math.pi / 180);
@@ -198,8 +232,8 @@ class RoadGraph {
     var t = len2 == 0 ? 0.0 : ((px - ax) * dx + (py - ay) * dy) / len2;
     t = t.clamp(0.0, 1.0);
     final cy = ay + dy * t, cx = ax + dx * t;
-    return EdgeHit(edge, haversineMetres(lat, lon, cy, cx / scale), t, cy,
-        cx / scale);
+    final my = (py - cy) * 111320, mx = (px - cx) * 111320;
+    return EdgeHit(edge, math.sqrt(my * my + mx * mx), t, cy, cx / scale);
   }
 
   /// Metres from the point to the closest point of edge [edge].
@@ -263,9 +297,14 @@ class RoadGraphBuilder {
     if (!wayInMode(w, mode)) return;
     // Overlapping Overpass tiles repeat whole ways.
     if (!_seenWays.add(w.id)) return;
-    final (forward, backward) = wayDirections(w, mode);
+    var (forward, backward) = wayDirections(w, mode);
     if (!forward && !backward) return;
-    final service = w.tags['highway'] == 'service' ? _edgeServiceBit : 0;
+    var contra = 0; // the direction opposite to a one-way, kept at a penalty
+    if (mode == GraphMode.bus && forward != backward && _contraOk(w)) {
+      contra = _edgeContraBit;
+    }
+    final service = (w.tags['highway'] == 'service' ? _edgeServiceBit : 0) |
+        (w.tags['highway'] == null && w.tags['railway'] != null ? _edgeRailBit : 0);
     for (var i = 0; i + 1 < w.lat.length; i++) {
       final a = _node(w.lat[i], w.lon[i]);
       final b = _node(w.lat[i + 1], w.lon[i + 1]);
@@ -274,6 +313,8 @@ class RoadGraphBuilder {
           haversineMetres(w.lat[i], w.lon[i], w.lat[i + 1], w.lon[i + 1]);
       if (forward) _edge(a, b, w.id, metres, service);
       if (backward) _edge(b, a, w.id, metres, service | _edgeReverseBit);
+      if (contra != 0 && !backward) _edge(b, a, w.id, metres, service | _edgeReverseBit | contra);
+      if (contra != 0 && !forward) _edge(a, b, w.id, metres, service | contra);
     }
   }
 

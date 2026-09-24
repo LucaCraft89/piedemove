@@ -3,6 +3,9 @@ library;
 
 /// Unsnapped hops: thin dotted, marked approximate (§9.3). Round caps turn the
 /// dash pattern into dots.
+/// Tram, metro and funicular strokes are this much wider than a bus stroke.
+const railWidthFactor = 1.6;
+
 const approxLineWidth = 1.8;
 const approxLineDash = <double>[0.1, 2.2];
 const approxLineOpacity = 0.75;

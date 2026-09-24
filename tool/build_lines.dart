@@ -1,7 +1,12 @@
-/// Line geometry build: Overpass fetch -> directed graphs -> snapped patterns
-/// -> `build/lines.bin`.
+/// Line geometry build: GTFS shapes + Overpass roads -> matched patterns ->
+/// `build/lines.bin` and the phone assets.
 ///
-///     dart tool/build_lines.dart [--force-osm] [--reverse] [--zip path]
+///     dart tool/build_lines.dart [--force-osm] [--reverse] [--no-assets]
+///
+/// Regenerates every shipped line asset from the GTFS zip and the OSM tile
+/// cache (fetching what is missing or older than 30 days). Nothing here is
+/// keyed to a line, a stop or a coordinate: re-run it when GTT or the Turin
+/// roads change.
 library;
 
 import 'dart:convert';
@@ -13,6 +18,7 @@ import 'package:piedemove/data/transit_index.dart';
 import 'package:piedemove/geo/ambient.dart';
 import 'package:piedemove/geo/line_build.dart';
 import 'package:piedemove/geo/lines_io.dart';
+import 'package:piedemove/geo/map_match.dart';
 import 'package:piedemove/geo/osm_fetch.dart';
 import 'package:piedemove/geo/road_graph.dart';
 
@@ -20,6 +26,7 @@ const indexPath = 'build/index.bin';
 const linesPath = 'build/lines.bin';
 
 Future<void> main(List<String> args) async {
+  final started = DateTime.now();
   final zipArg = args.indexOf('--zip');
   final zipPath = zipArg >= 0 ? args[zipArg + 1] : 'build/gtt_gtfs.zip';
 
@@ -30,20 +37,16 @@ Future<void> main(List<String> args) async {
   }
   stdout.writeln('index ${ix.patternCount} patterns, feed ${ix.feedVersion}');
 
-  // Re-pack the phone assets from an existing lines.bin, no Overpass, no snap.
-  if (args.contains('--assets-only')) {
-    final net = await readLinesFile(linesPath, feedVersion: ix.feedVersion);
-    if (net == null) {
-      stderr.writeln('no usable $linesPath for --assets-only');
-      exit(1);
-    }
-    await writeAssets(ix, net);
-    return;
-  }
+  // GTFS shapes first: they decide which OSM tiles and ways are needed.
+  final zip = GtfsZip(zipPath, Directory('build'));
+  final shapeIds = await patternShapeIds(zip, ix);
+  final shapes = await readShapes(zip, shapeIds.whereType<String>().toSet());
+  zip.close();
+  stdout.writeln('shapes ${shapes.length}');
 
   // Two fetchers (Overpass allows two slots per IP) halve the wall time: run
   // a second process with --reverse, it skips whatever the first has cached.
-  final tiles = tilesForIndex(ix);
+  final tiles = tilesForIndex(ix, shapeIds: shapeIds, shapes: shapes);
   if (args.contains('--reverse')) tiles.setAll(0, tiles.reversed.toList());
   stdout.writeln('overpass: ${tiles.length} tiles');
   final files = await fetchOsmTiles(
@@ -54,58 +57,66 @@ Future<void> main(List<String> args) async {
   );
   stdout.writeln('tiles usable ${files.length}/${tiles.length}');
 
-  final Map<GraphMode, RoadGraph> graphs = files.isEmpty
-      ? const {}
-      : buildGraphs(files,
-          corridor: args.contains('--no-corridor') ? null : corridorCells(ix),
+  final rb = railBounds(ix);
+  final railFile = rb == null
+      ? null
+      : await fetchRailWays(rb.$1, rb.$2, rb.$3, rb.$4,
+          cacheDir: Directory('build/osm'),
+          force: args.contains('--force-osm'),
           log: (m) => stdout.writeln('  $m'));
+  final Map<GraphMode, RoadGraph> graphs = buildGraphs(files,
+          corridor: corridorCells(ix, shapeIds, shapes),
+          railFile: railFile,
+          log: (m) => stdout.writeln('  $m'));
+  graphs.removeWhere((_, g) => g.nodeCount == 0); // none fetched: shape/chain fallback
   for (final e in graphs.entries) {
     stdout.writeln('${e.key.name} graph: ${e.value.nodeCount} nodes, '
         '${e.value.edgeCount} directed edges');
   }
 
-  final zip = GtfsZip(zipPath, Directory('build'));
-  final shapeIds = await patternShapeIds(zip, ix);
-  final shapes = await readShapes(zip, shapeIds.whereType<String>().toSet());
-  zip.close();
-  stdout.writeln('shapes ${shapes.length}');
-
-  final started = DateTime.now();
+  final matchStarted = DateTime.now();
+  final stats = <GraphMode, MatchStats>{};
   final net = buildLineNetwork(
     ix: ix,
     graphs: graphs,
     shapeIds: shapeIds,
     shapes: shapes,
     osmApproximate: graphs.isEmpty,
-    log: (m) => stdout.writeln('  $m'),
+    statsOut: stats,
   );
   await writeLinesFile(net, linesPath);
-  await writeAssets(ix, net);
-
-  var hops = 0, chords = 0;
-  for (final p in net.patterns) {
-    hops += p.hopApprox.length;
-    chords += p.approxHops;
+  for (final e in stats.entries) {
+    final s = e.value;
+    stdout.writeln('${e.key.name}: ${s.patterns} patterns, ${s.samples} samples '
+        '(${s.unmatchedSamples} without candidates, ${s.wideRetries} widened), '
+        '${s.runs} runs, ${s.bridged} bridged, ${s.approxGaps} dotted gaps '
+        '(${s.approxMetres.round()} m), ${s.spursRemoved} spurs removed; '
+        'causes ${s.gapCause}');
   }
-  stdout.writeln('''
-patterns   ${net.patterns.length}
-hops       $hops, chorded $chords (${(100 * chords / (hops == 0 ? 1 : hops)).toStringAsFixed(1)}%)
-lines.bin  ${(File(linesPath).lengthSync() / 1e6).toStringAsFixed(1)} MB
-built in   ${DateTime.now().difference(started).inSeconds}s''');
+  File('build/gaps.txt').writeAsStringSync([
+    for (final e in stats.entries) ...e.value.gaps.map((g) => '${e.key.name} $g'),
+  ].join('\n'));
+  stdout.writeln('matched in ${DateTime.now().difference(matchStarted).inSeconds}s');
+
+  if (!args.contains('--no-assets')) await writeAssets(ix, net, graphs);
+
+  stdout.writeln('lines.bin  ${(File(linesPath).lengthSync() / 1e6).toStringAsFixed(1)} MB\n'
+      'built in   ${DateTime.now().difference(started).inSeconds}s');
 }
 
-/// Ships the phone's two line assets: the snapped patterns (focus mode needs
-/// per-pattern geometry) and the pre-merged ambient network (§9.4).
-Future<void> writeAssets(TransitIndex ix, LineNetwork net) async {
+/// Ships the phone's line assets: the matched patterns (focus mode needs
+/// per-pattern geometry), the pre-merged ambient network (§9.4) and the stop
+/// connectors (§9.7).
+Future<void> writeAssets(
+    TransitIndex ix, LineNetwork net, Map<GraphMode, RoadGraph> graphs) async {
   Directory('assets').createSync(recursive: true);
   final lines = File('assets/lines.bin.gz');
   lines.writeAsBytesSync(gzip.encode(File(linesPath).readAsBytesSync()));
   final ambient = File('assets/ambient.json.gz');
-  ambient.writeAsBytesSync(gzip.encode(utf8.encode(ambientGeoJson(ix, net))));
+  ambient.writeAsBytesSync(gzip.encode(utf8.encode(ambientGeoJson(ix, net, graphs))));
   final connectors = File('assets/connectors.json.gz');
   connectors.writeAsBytesSync(gzip.encode(utf8.encode(connectorsGeoJson(ix, net))));
-  stdout.writeln('assets     lines.bin.gz '
-      '${(lines.lengthSync() / 1e6).toStringAsFixed(1)} MB, ambient.json.gz '
-      '${(ambient.lengthSync() / 1e6).toStringAsFixed(1)} MB, connectors.json.gz '
-      '${(connectors.lengthSync() / 1e6).toStringAsFixed(1)} MB');
+  String mb(File f) => (f.lengthSync() / 1e6).toStringAsFixed(2);
+  stdout.writeln('assets     lines.bin.gz ${mb(lines)} MB, ambient.json.gz '
+      '${mb(ambient)} MB, connectors.json.gz ${mb(connectors)} MB');
 }

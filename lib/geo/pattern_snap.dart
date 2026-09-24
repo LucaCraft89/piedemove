@@ -1,30 +1,28 @@
-/// 9.3 — snapping a GTFS pattern onto the directed road/tram graph.
+/// Pattern geometry model (§9.3): what one pattern looks like once matched.
 ///
-/// Stops snap to an **edge**, not a node, so a stop lands on the carriageway
-/// the pattern actually uses. Each hop is routed in the pattern's own
-/// direction; a hop that cannot be routed inside its cap, or that strays from
-/// the GTFS shape, becomes a straight chord flagged approximate **for that hop
-/// only**.
+/// A pattern is **one continuous polyline** ([SnappedPattern.vertexLat]/Lon)
+/// plus the vertex index at which each stop sits. Stops are placed by a
+/// monotone dynamic programme over the finished path (never by nearest-vertex
+/// search), so a stop visited twice on a loop lands on the right pass and the
+/// offsets can never run backwards.
+///
+/// Where a piece of the path is on the road graph, its vertices carry the OSM
+/// way and the directed graph edge; where it is the GTFS shape itself the edge
+/// is [edgeShape]; where the matcher gave up it is [edgeApprox] and is drawn
+/// dotted.
 library;
 
-import 'dart:collection';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'distance.dart';
-import 'road_graph.dart';
 
-const stopSnapRadiusMetres = 40.0;
-/// Last resort for stops set back from the road (rural laybys, squares).
-const wideSnapRadiusMetres = 80.0;
-const headingPenaltyMetres = 60.0;
-const corridorFreeMetres = 25.0;
-const offShapeLimitMetres = 60.0;
+/// `vertexEdge` marker: the segment is an unsnapped stretch, drawn dotted.
+const edgeApprox = -1;
 
-/// Second-chance corridor: a hop that strayed is re-routed hugging the shape.
-const tightCorridorMetres = 8.0;
-const serviceTerminusMetres = 100.0;
-const serviceCostFactor = 3.0;
+/// `vertexEdge` marker: the segment is the GTFS shape as published (metro,
+/// funicular), exact, not on the road graph.
+const edgeShape = -2;
 
 int microdeg(double v) => (v * 1e6).round();
 
@@ -87,7 +85,8 @@ class ShapePolyline {
   }
 }
 
-/// One pattern's geometry on the graph.
+
+/// One pattern's geometry.
 class SnappedPattern {
   SnappedPattern({
     required this.pattern,
@@ -99,6 +98,7 @@ class SnappedPattern {
     required this.stopLat,
     required this.stopLon,
     required this.hopApprox,
+    this.vertexEdge,
   });
 
   final int pattern;
@@ -106,376 +106,274 @@ class SnappedPattern {
   /// Microdegrees.
   final Int32List vertexLat, vertexLon;
 
-  /// OSM way of the edge **leading into** each vertex; -1 for vertex 0 and for
-  /// chord vertices. `vertexDir[i] != 0` means that edge runs against the
-  /// way's own point order.
+  /// OSM way of the segment **leading into** each vertex; -1 for vertex 0 and
+  /// for approximate or shape segments. `vertexDir[i] != 0` means that segment
+  /// runs against the way's own point order.
   final Int64List vertexWay;
   final Uint8List vertexDir;
 
-  /// Vertex index at which each stop sits — slice by index, never by search.
+  /// Vertex index at which each stop sits: slice by index, never by search.
   final Int32List stopVertex;
 
-  /// Snapped stop coordinates, microdegrees.
+  /// Coordinates of the stop's place on the path, microdegrees.
   final Int32List stopLat, stopLon;
 
-  /// One flag per hop (stop i -> i+1); 1 = straight chord, approximate.
+  /// One flag per hop (stop i -> i+1); 1 = the hop touches an approximate
+  /// (dotted) stretch.
   final Uint8List hopApprox;
+
+  /// Directed graph edge of the segment leading into each vertex, or
+  /// [edgeApprox] / [edgeShape]. Only the desktop build has it (edge ids are
+  /// not stable across graph builds), so it is not in `lines.bin`.
+  final Int32List? vertexEdge;
 
   int get vertexCount => vertexLat.length;
   int get approxHops => hopApprox.where((f) => f != 0).length;
 }
 
-class _Snap {
-  _Snap(this.edge, this.fraction, this.lat, this.lon);
-  final int edge; // -1: not snapped, raw stop coordinate
-  final double fraction;
-  final double lat, lon;
-}
+/// A path under construction: vertices with the attributes of the segment
+/// that leads into each of them.
+class PathBuilder {
+  final lat = <double>[], lon = <double>[];
+  final way = <int>[], dir = <int>[], edge = <int>[];
 
-class _Hop {
-  _Hop(this.lat, this.lon, this.way, this.dir, this.length);
-  final List<double> lat, lon;
-  final List<int> way;
-  final List<int> dir;
-  final double length;
-}
+  bool get isEmpty => lat.isEmpty;
 
-/// Min-heap over (cost, edge-state).
-class _Heap {
-  final _cost = <double>[];
-  final _item = <int>[];
-
-  bool get isEmpty => _cost.isEmpty;
-
-  void push(double cost, int item) {
-    _cost.add(cost);
-    _item.add(item);
-    var i = _cost.length - 1;
-    while (i > 0) {
-      final p = (i - 1) >> 1;
-      if (_cost[p] <= _cost[i]) break;
-      _swap(p, i);
-      i = p;
-    }
+  void start(double la, double lo) {
+    lat.add(la);
+    lon.add(lo);
+    way.add(-1);
+    dir.add(0);
+    edge.add(edgeApprox);
   }
 
-  (double, int) pop() {
-    final top = (_cost[0], _item[0]);
-    final last = _cost.length - 1;
-    _swap(0, last);
-    _cost.removeLast();
-    _item.removeLast();
-    var i = 0;
-    while (true) {
-      final l = 2 * i + 1, r = l + 1;
-      var small = i;
-      if (l < _cost.length && _cost[l] < _cost[small]) small = l;
-      if (r < _cost.length && _cost[r] < _cost[small]) small = r;
-      if (small == i) break;
-      _swap(i, small);
-      i = small;
-    }
-    return top;
-  }
-
-  void _swap(int a, int b) {
-    final c = _cost[a];
-    _cost[a] = _cost[b];
-    _cost[b] = c;
-    final it = _item[a];
-    _item[a] = _item[b];
-    _item[b] = it;
+  /// Appends a vertex reached by a segment of the given kind. Repeats of the
+  /// last vertex are dropped, so pieces join without zero-length segments.
+  void add(double la, double lo, int w, int d, int e) {
+    if (lat.isEmpty) return start(la, lo);
+    if (lat.last == la && lon.last == lo) return;
+    lat.add(la);
+    lon.add(lo);
+    way.add(w);
+    dir.add(d);
+    edge.add(e);
   }
 }
 
-class PatternSnapper {
-  PatternSnapper(this.graph);
+/// Places [n] stops on the polyline by a monotone Viterbi: each stop offers the
+/// path positions within reach, the chain minimises the summed distance and may
+/// never move backwards. Returns the metre offset of each stop along the path.
+List<double> placeStops(List<double> vLat, List<double> vLon,
+    List<double> sLat, List<double> sLon) {
+  final nv = vLat.length;
+  final arc = List<double>.filled(nv, 0);
+  for (var i = 1; i < nv; i++) {
+    arc[i] = arc[i - 1] +
+        haversineMetres(vLat[i - 1], vLon[i - 1], vLat[i], vLon[i]);
+  }
+  final n = sLat.length;
+  if (nv < 2) return List<double>.filled(n, 0);
 
-  final RoadGraph graph;
-  final _hopCache = HashMap<String, _Hop?>();
-
-  int cacheHits = 0;
-  int cacheMisses = 0;
-
-  /// Why hops became chords, for `tool/lines_report.dart`.
-  int chordUnsnappedStop = 0, chordNoRoute = 0, chordOffShape = 0;
-  int failExhausted = 0, failCap = 0, failSettled = 0;
-  final deviationBuckets = List<int>.filled(4, 0);
-
-
-
-  /// Snaps one pattern. [stopLat]/[stopLon] are the pattern's stops in order.
-  SnappedPattern snap({
-    required int pattern,
-    required Float64List stopLat,
-    required Float64List stopLon,
-    ShapePolyline? shape,
-  }) {
-    final n = stopLat.length;
-    final snaps = <_Snap>[];
-    for (var i = 0; i < n; i++) {
-      final aheadOf = i + 1 < n ? i + 1 : i - 1;
-      final bearing = bearingBetween(
-          stopLat[i], stopLon[i], stopLat[aheadOf], stopLon[aheadOf]);
-      snaps.add(_snapStop(stopLat[i], stopLon[i],
-          i + 1 < n ? bearing : (bearing + 180) % 360, shape));
+  final candPos = <List<double>>[], candDist = <List<double>>[];
+  for (var s = 0; s < n; s++) {
+    final cosLat = math.cos(sLat[s] * math.pi / 180);
+    final pos = <double>[], dist = <double>[];
+    var bestD = double.infinity, bestPos = 0.0;
+    for (var i = 0; i + 1 < nv; i++) {
+      final ay = vLat[i], by = vLat[i + 1];
+      if (sLat[s] < math.min(ay, by) - 0.0007 ||
+          sLat[s] > math.max(ay, by) + 0.0007) {
+        continue;
+      }
+      final ax = vLon[i] * cosLat, bx = vLon[i + 1] * cosLat;
+      final px = sLon[s] * cosLat;
+      if (px < math.min(ax, bx) - 0.0007 || px > math.max(ax, bx) + 0.0007) {
+        continue;
+      }
+      final dx = bx - ax, dy = by - ay;
+      final len2 = dx * dx + dy * dy;
+      final t = len2 == 0
+          ? 0.0
+          : (((px - ax) * dx + (sLat[s] - ay) * dy) / len2).clamp(0.0, 1.0);
+      final my = (sLat[s] - (ay + dy * t)) * 111320;
+      final mx = (px - (ax + dx * t)) * 111320;
+      final d = math.sqrt(my * my + mx * mx);
+      final p = arc[i] + (arc[i + 1] - arc[i]) * t;
+      pos.add(p);
+      dist.add(d);
+      if (d < bestD) {
+        bestD = d;
+        bestPos = p;
+      }
     }
-
-    final terminusLat = <double>[stopLat.first, stopLat.last];
-    final terminusLon = <double>[stopLon.first, stopLon.last];
-
-    final vLat = <double>[snaps[0].lat];
-    final vLon = <double>[snaps[0].lon];
-    final vWay = <int>[-1];
-    final vDir = <int>[0];
-    final stopVertex = <int>[0];
-    final approx = Uint8List(math.max(0, n - 1));
-
-    for (var i = 0; i + 1 < n; i++) {
-      final a = snaps[i], b = snaps[i + 1];
-      final straight = haversineMetres(a.lat, a.lon, b.lat, b.lon);
-      final cap = math.max(2500.0, straight * 1.8);
-      _Hop? hop;
-      if (a.edge < 0 || b.edge < 0) {
-        chordUnsnappedStop++;
-      } else {
-        hop = _routeCached(a, b, shape, cap, terminusLat, terminusLon);
-        if (hop == null) {
-          chordNoRoute++;
-        } else if (shape != null && _offShape(hop, shape)) {
-          // Routed, but away from the corridor: pull the route onto the shape
-          // hard and try once more before giving up on the hop.
-          hop = _route(a, b, shape, cap, terminusLat, terminusLon,
-              corridorFree: tightCorridorMetres);
-          if (hop == null || _offShape(hop, shape)) {
-            hop = null;
-            chordOffShape++;
-          }
+    if (pos.isEmpty) {
+      // Far from the path (a stop the route only passes at a distance): the
+      // nearest vertex still gives a sane, monotone place.
+      var bi = 0;
+      var bd = double.infinity;
+      for (var i = 0; i < nv; i++) {
+        final d = haversineMetres(sLat[s], sLon[s], vLat[i], vLon[i]);
+        if (d < bd) {
+          bd = d;
+          bi = i;
         }
       }
-      if (hop == null) {
-        approx[i] = 1;
-        vLat.add(b.lat);
-        vLon.add(b.lon);
-        vWay.add(-1);
-        vDir.add(0);
+      candPos.add([arc[bi]]);
+      candDist.add([bd]);
+      continue;
+    }
+    // Keep local minima: one candidate per 30 m stretch, the nearest, and only
+    // those not much worse than the best.
+    final order = [for (var i = 0; i < pos.length; i++) i]
+      ..sort((a, b) => pos[a].compareTo(pos[b]));
+    final keepPos = <double>[], keepDist = <double>[];
+    final limit = math.max(50.0, bestD + 25);
+    for (final i in order) {
+      if (dist[i] > limit) continue;
+      if (keepPos.isNotEmpty && pos[i] - keepPos.last < 30) {
+        if (dist[i] < keepDist.last) {
+          keepPos[keepPos.length - 1] = pos[i];
+          keepDist[keepDist.length - 1] = dist[i];
+        }
       } else {
-        for (var k = 1; k < hop.lat.length; k++) {
-          vLat.add(hop.lat[k]);
-          vLon.add(hop.lon[k]);
-          vWay.add(hop.way[k]);
-          vDir.add(hop.dir[k]);
+        keepPos.add(pos[i]);
+        keepDist.add(dist[i]);
+      }
+    }
+    if (keepPos.isEmpty) {
+      keepPos.add(bestPos);
+      keepDist.add(bestD);
+    }
+    candPos.add(keepPos);
+    candDist.add(keepDist);
+  }
+
+  // Viterbi: cost[j] over the current stop's candidates.
+  var cost = List<double>.from(candDist[0]);
+  final back = <List<int>>[<int>[]];
+  for (var s = 1; s < n; s++) {
+    final next = List<double>.filled(candPos[s].length, double.infinity);
+    final bp = List<int>.filled(candPos[s].length, 0);
+    for (var c = 0; c < candPos[s].length; c++) {
+      for (var p = 0; p < candPos[s - 1].length; p++) {
+        final back0 = candPos[s - 1][p] - candPos[s][c];
+        // Moving backwards is allowed only as a last resort, at a price that
+        // outweighs any distance.
+        final penalty = back0 > 0.5 ? 1e6 + back0 : 0.0;
+        final v = cost[p] + candDist[s][c] + penalty;
+        if (v < next[c]) {
+          next[c] = v;
+          bp[c] = p;
         }
       }
-      stopVertex.add(vLat.length - 1);
     }
+    cost = next;
+    back.add(bp);
+  }
+  var c = 0;
+  for (var i = 1; i < cost.length; i++) {
+    if (cost[i] < cost[c]) c = i;
+  }
+  final out = List<double>.filled(n, 0);
+  for (var s = n - 1; s >= 0; s--) {
+    out[s] = candPos[s][c];
+    if (s > 0) c = back[s][c];
+  }
+  // Last resort clamp: offsets never decrease.
+  for (var s = 1; s < n; s++) {
+    if (out[s] < out[s - 1]) out[s] = out[s - 1];
+  }
+  return out;
+}
 
-    return SnappedPattern(
-      pattern: pattern,
-      vertexLat: Int32List.fromList([for (final v in vLat) microdeg(v)]),
-      vertexLon: Int32List.fromList([for (final v in vLon) microdeg(v)]),
-      vertexWay: Int64List.fromList(vWay),
-      vertexDir: Uint8List.fromList(vDir),
-      stopVertex: Int32List.fromList(stopVertex),
-      stopLat: Int32List.fromList([for (final s in snaps) microdeg(s.lat)]),
-      stopLon: Int32List.fromList([for (final s in snaps) microdeg(s.lon)]),
-      hopApprox: approx,
-    );
+/// Closes a path: places the stops, inserts a vertex at each stop's place and
+/// derives the per-hop approximate flags. [stopLat]/[stopLon] are the stops in
+/// pattern order.
+SnappedPattern finishPath(int pattern, PathBuilder path, List<double> stopLat,
+    List<double> stopLon) {
+  final nv = path.lat.length;
+  final n = stopLat.length;
+  final offsets = placeStops(path.lat, path.lon, stopLat, stopLon);
+
+  final arc = List<double>.filled(nv, 0);
+  for (var i = 1; i < nv; i++) {
+    arc[i] = arc[i - 1] +
+        haversineMetres(path.lat[i - 1], path.lon[i - 1], path.lat[i], path.lon[i]);
   }
 
-  _Snap _snapStop(
-      double lat, double lon, double bearing, ShapePolyline? shape) {
-    var hits = graph.near(lat, lon, stopSnapRadiusMetres);
-    if (hits.isEmpty) hits = graph.near(lat, lon, wideSnapRadiusMetres);
-    // Only edges that run **in the pattern's direction of travel** are
-    // candidates: an edge pointing the other way is the opposite carriageway,
-    // and a hop starting there can only be routed by an impossible loop. The
-    // heading penalty then picks between the ones that do.
-    // Service ways are for terminus turnarounds only: a stop that snaps to one
-    // leaves the hop unroutable, because routing will not use them mid-route.
-    final road = [for (final h in hits) if (!graph.isService(h.edge)) h];
-    var best = _bestOf(road, bearing, 90, shape);
-    best ??= _bestOf(road, bearing, 180, shape);
-    best ??= _bestOf(hits, bearing, 180, shape);
-    if (best == null) return _Snap(-1, 0, lat, lon);
-    return _Snap(best.edge, best.fraction, best.lat, best.lon);
+  final lat = <double>[], lon = <double>[];
+  final way = <int>[], dir = <int>[], edge = <int>[];
+  final stopVertex = List<int>.filled(n, 0);
+  var s = 0;
+  void push(int i, double la, double lo) {
+    lat.add(la);
+    lon.add(lo);
+    way.add(path.way[i]);
+    dir.add(path.dir[i]);
+    edge.add(path.edge[i]);
   }
 
-  EdgeHit? _bestOf(
-      List<EdgeHit> hits, double bearing, double maxDelta, ShapePolyline? shape) {
-    var bestScore = double.infinity;
-    EdgeHit? best;
-    for (final h in hits) {
-      final delta = bearingDelta(graph.bearingOf(h.edge), bearing);
-      if (delta > maxDelta) continue;
-      // Distance to the GTFS shape decides which carriageway or side lane the
-      // stop belongs to; heading alone cannot tell them apart.
-      final offShape = shape == null ? 0.0 : shape.distanceTo(h.lat, h.lon);
-      final score = h.metres + headingPenaltyMetres * delta / 180 + offShape;
-      if (score < bestScore) {
-        bestScore = score;
-        best = h;
-      }
+  for (var i = 0; i < nv; i++) {
+    push(i, path.lat[i], path.lon[i]);
+    // Stops sitting on vertex i itself.
+    while (s < n && offsets[s] <= arc[i] + 0.5) {
+      stopVertex[s++] = lat.length - 1;
     }
-    return best;
+    if (i + 1 >= nv) break;
+    // Stops strictly inside segment i -> i+1 get a vertex of their own, with
+    // the segment's attributes.
+    while (s < n && offsets[s] < arc[i + 1] - 0.5) {
+      final f = (offsets[s] - arc[i]) / (arc[i + 1] - arc[i]);
+      push(i + 1, path.lat[i] + (path.lat[i + 1] - path.lat[i]) * f,
+          path.lon[i] + (path.lon[i + 1] - path.lon[i]) * f);
+      stopVertex[s++] = lat.length - 1;
+    }
+  }
+  while (s < n) {
+    stopVertex[s++] = lat.length - 1;
   }
 
-  /// Largest distance of any hop vertex from the shape, metres.
-  double _shapeDeviation(_Hop hop, ShapePolyline shape) {
-    var worst = 0.0;
-    for (var i = 0; i < hop.lat.length; i++) {
-      final d = shape.distanceTo(hop.lat[i], hop.lon[i]);
-      if (d > worst) worst = d;
-    }
-    return worst;
-  }
+  if (edge.length > 1) edge[0] = edge[1]; // vertex 0 has no segment of its own
 
-  bool _offShape(_Hop hop, ShapePolyline shape) {
-    final d = _shapeDeviation(hop, shape);
-    if (d > offShapeLimitMetres) {
-      deviationBuckets[d < 100
-          ? 0
-          : d < 200
-              ? 1
-              : d < 500
-                  ? 2
-                  : 3]++;
-      return true;
-    }
-    return false;
-  }
-
-  _Hop? _routeCached(_Snap a, _Snap b, ShapePolyline? shape, double cap,
-      List<double> terminusLat, List<double> terminusLon) {
-    final key = '${a.edge}:${a.fraction.toStringAsFixed(3)}>'
-        '${b.edge}:${b.fraction.toStringAsFixed(3)}';
-    if (_hopCache.containsKey(key)) {
-      final cached = _hopCache[key];
-      cacheHits++;
-      if (cached == null) return null;
-      if (shape == null || !_offShape(cached, shape)) return cached;
-      // Shared hop, different corridor: route it again for this pattern only.
-      return _route(a, b, shape, cap, terminusLat, terminusLon);
-    }
-    cacheMisses++;
-    final hop = _route(a, b, shape, cap, terminusLat, terminusLon);
-    _hopCache[key] = hop;
-    return hop;
-  }
-
-  /// Dijkstra/A* over **edge states**, so an immediate U-turn on the same way
-  /// can be forbidden.
-  _Hop? _route(_Snap a, _Snap b, ShapePolyline? shape, double cap,
-      List<double> terminusLat, List<double> terminusLon,
-      {double corridorFree = corridorFreeMetres}) {
-    if (a.edge == b.edge && a.fraction <= b.fraction) {
-      final len = graph.edgeLen[a.edge] * (b.fraction - a.fraction);
-      return _Hop([a.lat, b.lat], [a.lon, b.lon],
-          [-1, graph.edgeWay[a.edge]], [0, graph.isReversed(a.edge) ? 1 : 0], len);
-    }
-
-    final targetNode = graph.edgeFrom[b.edge];
-    final tailLen = graph.edgeLen[b.edge] * b.fraction;
-
-    final dist = HashMap<int, double>();
-    final prev = HashMap<int, int>();
-    final real = HashMap<int, double>();
-    final heap = _Heap();
-
-    final startNode = graph.edgeTo[a.edge];
-    final headLen = graph.edgeLen[a.edge] * (1 - a.fraction);
-    dist[a.edge] = headLen * _factor(a.edge, shape, corridorFree);
-    real[a.edge] = headLen;
-    heap.push(dist[a.edge]! + _heuristic(startNode, targetNode), a.edge);
-
-    final done = <int>{};
-    int? finalEdge;
-    while (!heap.isEmpty) {
-      final (_, edge) = heap.pop();
-      if (!done.add(edge)) continue;
-      final node = graph.edgeTo[edge];
-      if (node == targetNode) {
-        finalEdge = edge;
+  final hopApprox = Uint8List(math.max(0, n - 1));
+  for (var h = 0; h + 1 < n; h++) {
+    for (var v = stopVertex[h] + 1; v <= stopVertex[h + 1]; v++) {
+      if (edge[v] == edgeApprox) {
+        hopApprox[h] = 1;
         break;
       }
-      final soFar = real[edge]!;
-      if (soFar > cap) continue;
-      for (final next in graph.edgesFrom(node)) {
-        if (next == b.edge) continue; // reached through targetNode instead
-        // No immediate U-turn on the same way, except at a terminus.
-        if (graph.edgeWay[next] == graph.edgeWay[edge] &&
-            graph.edgeTo[next] == graph.edgeFrom[edge]) {
-          continue;
-        }
-        if (graph.isService(next) &&
-            !_nearTerminus(next, terminusLat, terminusLon)) {
-          continue;
-        }
-        final len = graph.edgeLen[next];
-        final cost = dist[edge]! + len * _factor(next, shape, corridorFree);
-        if (cost >= (dist[next] ?? double.infinity)) continue;
-        dist[next] = cost;
-        real[next] = soFar + len;
-        prev[next] = edge;
-        heap.push(cost + _heuristic(graph.edgeTo[next], targetNode), next);
-      }
     }
-    if (finalEdge == null) {
-      failExhausted++;
-      failSettled += done.length;
-      return null;
-    }
-    if (real[finalEdge]! + tailLen > cap) {
-      failCap++;
-      return null;
-    }
-
-    final chain = <int>[];
-    for (int? e = finalEdge; e != null; e = prev[e]) {
-      chain.add(e);
-    }
-    final lat = <double>[a.lat], lon = <double>[a.lon];
-    final way = <int>[-1], dir = <int>[0];
-    for (var i = chain.length - 1; i >= 0; i--) {
-      final e = chain[i];
-      final node = graph.edgeTo[e];
-      lat.add(graph.nodeLat[node]);
-      lon.add(graph.nodeLon[node]);
-      way.add(graph.edgeWay[e]);
-      dir.add(graph.isReversed(e) ? 1 : 0);
-    }
-    lat.add(b.lat);
-    lon.add(b.lon);
-    way.add(graph.edgeWay[b.edge]);
-    dir.add(graph.isReversed(b.edge) ? 1 : 0);
-    return _Hop(lat, lon, way, dir, real[finalEdge]! + tailLen);
   }
+  return SnappedPattern(
+    pattern: pattern,
+    vertexLat: Int32List.fromList([for (final v in lat) microdeg(v)]),
+    vertexLon: Int32List.fromList([for (final v in lon) microdeg(v)]),
+    vertexWay: Int64List.fromList(way),
+    vertexDir: Uint8List.fromList(dir),
+    stopVertex: Int32List.fromList(stopVertex),
+    stopLat: Int32List.fromList([for (final i in stopVertex) microdeg(lat[i])]),
+    stopLon: Int32List.fromList([for (final i in stopVertex) microdeg(lon[i])]),
+    hopApprox: hopApprox,
+    vertexEdge: Int32List.fromList(edge),
+  );
+}
 
-  double _heuristic(int node, int target) => haversineMetres(graph.nodeLat[node],
-      graph.nodeLon[node], graph.nodeLat[target], graph.nodeLon[target]);
-
-  double _factor(int edge, ShapePolyline? shape, double corridorFree) {
-    var f = 1.0;
-    if (shape != null) {
-      final midLat = (graph.nodeLat[graph.edgeFrom[edge]] +
-              graph.nodeLat[graph.edgeTo[edge]]) /
-          2;
-      final midLon = (graph.nodeLon[graph.edgeFrom[edge]] +
-              graph.nodeLon[graph.edgeTo[edge]]) /
-          2;
-      final d = shape.distanceTo(midLat, midLon);
-      f = 1 + math.max(0.0, d - corridorFree) / corridorFree;
+/// Geometry for a pattern that is not matched to roads (metro, funicular: own
+/// rails, no OSM graph): the GTFS shape as published. Without a shape the stop
+/// chain is used and marked approximate.
+SnappedPattern snapShapeOnly(int pattern, List<double> stopLat,
+    List<double> stopLon, ShapePolyline? shape,
+    {bool approximate = false}) {
+  final path = PathBuilder();
+  if (shape == null) {
+    for (var i = 0; i < stopLat.length; i++) {
+      path.add(stopLat[i], stopLon[i], -1, 0, edgeApprox);
     }
-    if (graph.isService(edge)) f *= serviceCostFactor;
-    return f;
-  }
-
-  bool _nearTerminus(int edge, List<double> lat, List<double> lon) {
-    for (var i = 0; i < lat.length; i++) {
-      if (graph.distanceToEdge(edge, lat[i], lon[i]) <= serviceTerminusMetres) {
-        return true;
-      }
+  } else {
+    for (var i = 0; i < shape.lat.length; i++) {
+      path.add(shape.lat[i], shape.lon[i], -1, 0,
+          approximate ? edgeApprox : edgeShape);
     }
-    return false;
   }
+  return finishPath(pattern, path, stopLat, stopLon);
 }
