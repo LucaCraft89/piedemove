@@ -111,14 +111,13 @@ Split to save tokens, medium effort, one agent each, token ceiling per agent:
 - **5b-A (data+loader, no phone):** build tool, format+header, shipped asset, loader layering, updater + fake-HTTP tests, fixtures.
 - **5b-B (router+integration):** router, penalties, maneuvers, reroute, replace phase-5 walk drawing/distances/scoring, golden, then phone checks (one screenshot tour).
 
-### STATE (2026-09-24, before context clear)
-Done+tagged: 0, 1, 1b, 1c, 2, 2b, 3, 4, 5. Assets ambient/connectors/lines.bin.gz are regenerated but UNCOMMITTED (needed for on-device match; commit them in a small chore).
-5b: two agents were stopped by the user for token cost. Working tree holds UNREVIEWED, UNCOMMITTED partial work
-(lib/geo/walk_{build,costs,graph,graph_update,providers,router}.dart, lib/routing/walk_legs.dart, tool/build_walk.dart,
-assets/walk_graph.pmwg.gz, docs/walk_routing.md, test/walk_*.dart + fixtures, edits in journey/raptor/providers/line_features/
-map_view/about_page/trip_*/live_trip, walk_path.dart deleted, pubspec). The router was mid-rewrite (multi-candidate seeds/goals in route/_search).
-Next session: `git status`, run analyze+tests to see if it builds, then review vs this section and either finish (5b-A then 5b-B) or revert.
-Then: 5c, 6 (split: 6a pure progress engine + unit tests, 6b UI/strip/phone), 7 (split: 7a styles, 7b contrast+phone), 8.
+### STATE (2026-09-24, after 5b)
+Done+tagged: 0, 1, 1b, 1c, 2, 2b, 3, 4, 5, 5b-A (data/loader/updater), 5b (router+integration, live-checked). Line assets committed.
+Open items: (a) access walk now counts toward the 800 m cap: Politecnico->Bardonecchia shows "no route" - decide cap policy for access walks;
+(b) Pareto front built on estimates, may miss candidates; (c) journeys sometimes have two consecutive ride legs at one stop (uninvestigated);
+(d) transfer/egress walk and crossings not yet seen on phone; (e) route 33 shape has right-angle jogs west end.
+Next: 6a (pure progress engine over locationProvider + WalkRouter.reroute + maneuver list, unit tests, replay test), 6b (strip UI, travelled/ahead fade, phone),
+then 5c (needs user OK to publish), 7a/7b, 8. Agent rules: medium effort, token ceiling, progress log in build/progress/<phase>.log, wip commits, adb install -r only.
 
 ## Phase 5c: keep walk graph fresh (after 5b, needs user OK to publish)
 - Scheduled GitHub Actions workflow: runs `tool/build_walk.dart`, hashes, replaces fixed release
