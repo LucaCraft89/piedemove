@@ -28,6 +28,9 @@ import 'package:piedemove/ui/trip/live_strip.dart';
 import 'package:piedemove/ui/trip/trip_plan.dart';
 import 'package:piedemove/ui/trip/trip_sheet.dart';
 
+/// A picked time this far in the past rolls to tomorrow; closer is "now-ish".
+const pickedTimePastGrace = Duration(minutes: 30);
+
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
 
@@ -327,10 +330,12 @@ class _WhenRow extends ConsumerWidget {
       );
       if (time == null) return;
       final now = DateTime.now();
-      plan.setWhen(
-        mode,
-        DateTime(now.year, now.month, now.day, time.hour, time.minute),
-      );
+      var at = DateTime(now.year, now.month, now.day, time.hour, time.minute);
+      // 00:30 picked at 23:50 means tonight, not this morning.
+      if (at.isBefore(now.subtract(pickedTimePastGrace))) {
+        at = DateTime(now.year, now.month, now.day + 1, time.hour, time.minute);
+      }
+      plan.setWhen(mode, at);
     }
 
     final label = query.whenMode == WhenMode.now || query.when == null

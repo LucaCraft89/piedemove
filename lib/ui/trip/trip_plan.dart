@@ -10,6 +10,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:piedemove/places/photon.dart';
+import 'package:piedemove/realtime/store.dart' show unavailableLookupProvider;
+import 'package:piedemove/routing/departures.dart' show UnavailableLookup;
 import 'package:piedemove/routing/journey.dart';
 import 'package:piedemove/routing/providers.dart';
 import 'package:piedemove/routing/footpaths.dart';
@@ -130,15 +132,21 @@ PlanRequest planRequestFor({
   required PmSettings settings,
   required Set<int> suspendedStops,
   required Set<int> detouredRoutes,
+  UnavailableLookup? unavailable,
 }) {
   final from = query.from!;
   final to = query.to!;
+  final when = query.resolvedWhen();
+  final now = DateTime.now();
+  final today = when.year == now.year &&
+      when.month == now.month &&
+      when.day == now.day;
   return PlanRequest(
     originLat: from.lat,
     originLon: from.lon,
     destLat: to.lat,
     destLon: to.lon,
-    when: query.resolvedWhen(),
+    when: when,
     arriveBy: query.arriveBy,
     walkCapMetres: settings.walkCapMetres,
     walkSpeed: settings.walkSpeed,
@@ -147,6 +155,8 @@ PlanRequest planRequestFor({
     suspendedStops: suspendedStops,
     detouredRoutes: detouredRoutes,
     excludedRouteTypes: settings.excludedModes,
+    // Realtime cancellations describe today's runs only.
+    unavailable: today ? unavailable : null,
   );
 }
 
@@ -236,6 +246,7 @@ class TripPlanController extends StateNotifier<TripState> {
       settings: _ref.read(settingsProvider),
       suspendedStops: _ref.read(suspendedStopsProvider),
       detouredRoutes: _ref.read(detouredRoutesProvider),
+      unavailable: _ref.read(unavailableLookupProvider),
     );
     TripResult result;
     try {

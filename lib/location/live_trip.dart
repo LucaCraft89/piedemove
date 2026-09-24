@@ -43,6 +43,13 @@ const livePoorAccuracy = 50.0;
 const liveOffRouteFor = Duration(seconds: 30);
 const liveNoFixFor = Duration(seconds: 20);
 
+/// A fix is only matched this far ahead of the current progress: on a loop or
+/// a street run twice, a noisy fix must not jump to a later pass for good.
+const liveProjectAheadMetres = 400.0;
+
+/// A dead position stream is re-opened after this pause.
+const liveStreamRetry = Duration(seconds: 5);
+
 /// A cue the controller turns into a vibration exactly once.
 enum LiveCue { oneStopLeft, alightNow }
 
@@ -362,10 +369,13 @@ LiveTripState advanceLive(
   var estimated = false;
   if (fix.accuracy > livePoorAccuracy) {
     // Metro, tunnels, urban canyons: the vehicle beats a 200 m fix.
-    if (vehicleLat != null && vehicleLon != null) {
-      lat = vehicleLat;
-      lon = vehicleLon;
+    if (vehicleLat == null || vehicleLon == null) {
+      // Nothing better to go on: a 120 m circle can sit on the alight stop
+      // while the rider is a stop short. Hold progress, label it a guess.
+      return state.copyWith(estimated: true);
     }
+    lat = vehicleLat;
+    lon = vehicleLon;
     estimated = true;
   }
 
@@ -440,22 +450,32 @@ LiveTripState advanceLive(
                 (nearVehicle || movingLikeAVehicle)
           : straightToEnd <= liveWalkEndRadius,
   };
-  if (advance) return nextLeg(state);
+  if (advance) {
+    final next = nextLeg(state);
+    // Reaching the alight stop is the moment to get off: if the per-stop count
+    // had not already said so (it usually still reads 1 here), say it now.
+    return leg.kind == LegKind.ride && s.stopsRemaining > 0
+        ? _cue(next, LiveCue.alightNow)
+        : next;
+  }
   return state;
 }
 
 /// Result of [projectAhead].
 typedef Projection = ({double along, double distance});
 
-/// Projects (lat, lon) onto [leg]'s segments from [from] metres on, and
+/// Projects (lat, lon) onto [leg]'s segments from [from] metres on (up to
+/// [maxAhead] metres further), and
 /// returns the nearest point's metres along the leg and its distance. Never
 /// less than [from]: forward-only, so a fix behind the rider cannot rewind.
-Projection projectAhead(LiveLeg leg, double lat, double lon, double from) {
+Projection projectAhead(LiveLeg leg, double lat, double lon, double from,
+    {double maxAhead = liveProjectAheadMetres}) {
   var bestAlong = from;
   var bestDist = double.infinity;
   final kx = math.cos(lat * math.pi / 180) * 111320.0, ky = 110540.0;
   for (var i = 0; i + 1 < leg.lat.length; i++) {
     if (leg.cumulative[i + 1] < from) continue;
+    if (leg.cumulative[i] > from + maxAhead) break;
     final ax = (leg.lon[i] - lon) * kx, ay = (leg.lat[i] - lat) * ky;
     final bx = (leg.lon[i + 1] - lon) * kx, by = (leg.lat[i + 1] - lat) * ky;
     final dx = bx - ax, dy = by - ay;
@@ -568,6 +588,9 @@ LiveTripState? rerouteWalkLeg(
     metresToEnd: cum.last,
     stopsRemaining: 1,
     lastFix: s.lastFix,
+    // Keep counting: a reset sequence would collide with the controller's
+    // last vibrated cue and silence the next ride's first one.
+    cueSeq: s.cueSeq,
   );
 }
 
@@ -599,6 +622,7 @@ LiveTripState staleLive(
   LiveTripState s,
   DateTime now, {
   DateTime? serviceStart,
+  int delaySeconds = 0,
 }) {
   final last = s.lastFix;
   if (s.finished || last == null || now.difference(last) < liveNoFixFor) {
@@ -608,8 +632,11 @@ LiveTripState staleLive(
   var state = s.copyWith(estimated: true);
   if (serviceStart == null || leg.arrival <= leg.departure) return state;
   // Schedule-based estimate: linear along the leg between its two times.
-  final elapsed =
-      now.difference(serviceDayTime(serviceStart, leg.departure)).inSeconds;
+  // A late run is behind its timetable: estimate from the expected times, or
+  // "scendi ora" fires while the bus is still a stop or two away.
+  final elapsed = now
+      .difference(serviceDayTime(serviceStart, leg.departure + delaySeconds))
+      .inSeconds;
   final fraction = (elapsed / (leg.arrival - leg.departure))
       .clamp(0.0, 1.0)
       .toDouble();
@@ -651,6 +678,8 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   final Ref _ref;
   StreamSubscription<Position>? _sub;
   Timer? _stale;
+  Timer? _retry;
+  var _foreground = true;
   int _lastCueSeq = 0;
   LiveFix? _lastPos;
 
@@ -660,6 +689,8 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   void start(Journey journey) {
     final ix = _ref.read(transitIndexProvider).valueOrNull;
     if (ix == null) return;
+    // A second start replaces the running trip; its timer and observer go.
+    if (state != null) stop();
     final net = _ref.read(lineNetworkProvider).valueOrNull;
     // The first and last legs end at places, not stops: they need coordinates.
     final query = _ref.read(tripPlanProvider).query;
@@ -692,6 +723,8 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     _sub = null;
     _stale?.cancel();
     _stale = null;
+    _retry?.cancel();
+    _retry = null;
     WidgetsBinding.instance.removeObserver(this);
     unawaited(_wake(false));
     state = null;
@@ -710,10 +743,13 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (this.state == null) return;
     if (state == AppLifecycleState.resumed) {
+      _foreground = true;
       _listen();
       unawaited(_wake(true));
     } else {
       // Foreground only (§12): nothing listens while the app is away.
+      _foreground = false;
+      _retry?.cancel();
       _sub?.cancel();
       _sub = null;
       unawaited(_wake(false));
@@ -733,11 +769,26 @@ class LiveTripController extends StateNotifier<LiveTripState?>
             _onFix,
             onError: (Object e) {
               debugPrint('pm: live position stream failed: $e');
+              _restartSoon();
             },
+            onDone: _restartSoon,
           );
     } catch (e) {
       debugPrint('pm: live position stream unavailable: $e');
+      _restartSoon();
     }
+  }
+
+  /// Location switched off or the stream died in the foreground: drop it and
+  /// try again shortly, instead of waiting for a pause/resume.
+  void _restartSoon() {
+    _sub?.cancel();
+    _sub = null;
+    _retry?.cancel();
+    if (state == null || !_foreground) return;
+    _retry = Timer(liveStreamRetry, () {
+      if (state != null && _foreground) _listen();
+    });
   }
 
   /// "Ricalcola" on a walk leg: re-route from the last fix. False when there
@@ -796,8 +847,22 @@ class LiveTripController extends StateNotifier<LiveTripState?>
         s,
         DateTime.now(),
         serviceStart: DateTime(date.year, date.month, date.day),
+        delaySeconds: _knownDelay(s) ?? 0,
       ),
     );
+  }
+
+  /// The run's latest reported delay, if the trip-update feed has one.
+  int? _knownDelay(LiveTripState s) {
+    final tripId = s.leg.tripId;
+    if (tripId == null) return null;
+    final u = _ref.read(realtimeProvider).tripUpdates[tripId];
+    if (u == null) return null;
+    if (u.delayBySequence.isNotEmpty) {
+      final last = u.delayBySequence.keys.reduce(math.max);
+      return u.delayBySequence[last];
+    }
+    return u.tripDelay;
   }
 
   void _apply(LiveTripState next) {
@@ -824,7 +889,9 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   void dispose() {
     _sub?.cancel();
     _stale?.cancel();
+    _retry?.cancel();
     WidgetsBinding.instance.removeObserver(this);
+    if (state != null) unawaited(_wake(false));
     super.dispose();
   }
 

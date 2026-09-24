@@ -45,7 +45,7 @@ void main() {
   group('downloadToFile', () {
     test('streams the body to the file', () async {
       final path = '${dir.path}/feed.zip';
-      final client = MockClient.streaming((_, __) async => http.StreamedResponse(
+      final client = MockClient.streaming((_, _) async => http.StreamedResponse(
           Stream.fromIterable([
             [1, 2, 3],
             [4, 5],
@@ -76,7 +76,7 @@ void main() {
       }
 
       final client = MockClient.streaming(
-          (_, __) async => http.StreamedResponse(broken(), 200));
+          (_, _) async => http.StreamedResponse(broken(), 200));
       await expectLater(
           downloadToFile('https://example.test/f.zip', path,
               timeout: const Duration(seconds: 5), client: client),
@@ -89,7 +89,7 @@ void main() {
       final path = '${dir.path}/feed.zip';
       final never = StreamController<List<int>>();
       final client = MockClient.streaming(
-          (_, __) async => http.StreamedResponse(never.stream, 200));
+          (_, _) async => http.StreamedResponse(never.stream, 200));
       await expectLater(
           downloadToFile('https://example.test/f.zip', path,
               timeout: const Duration(milliseconds: 50), client: client),

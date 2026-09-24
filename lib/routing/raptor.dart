@@ -33,6 +33,7 @@ class PlanRequest {
     this.suspendedStops = const <int>{},
     this.excludedRouteTypes = const <int>{},
     this.detouredRoutes = const <int>{},
+    this.unavailable,
   });
 
   PlanRequest withWalkCap(double cap) => PlanRequest(
@@ -51,6 +52,7 @@ class PlanRequest {
         suspendedStops: suspendedStops,
         excludedRouteTypes: excludedRouteTypes,
         detouredRoutes: detouredRoutes,
+        unavailable: unavailable,
       );
 
   final double originLat;
@@ -72,6 +74,12 @@ class PlanRequest {
   /// GTFS `route_type`s the user switched off in Settings (§11.7).
   final Set<int> excludedRouteTypes;
   final Set<int> detouredRoutes;
+
+  /// Realtime: a run cancelled, or not stopping at a position, on the day of
+  /// the request. Null when planning another day or nothing is disrupted.
+  final bool Function(int trip, int stopPosition)? unavailable;
+
+  bool isUnavailable(int trip, int pos) => unavailable?.call(trip, pos) ?? false;
 }
 
 class _Label {
@@ -125,6 +133,10 @@ const arriveByBoardBufferSeconds = 120;
 /// a later-sorted trip leave an intermediate stop first. The trip lookup scans
 /// this many neighbours around the binary-search hit to catch it.
 const _overtakeScan = 4;
+
+/// Later runs tried, per active run and stop, when realtime says a run skips
+/// that stop.
+const _skipRetries = 3;
 
 bool _addToBag(List<_Label> bag, _Label candidate) {
   for (final l in bag) {
@@ -300,8 +312,30 @@ class Planner {
           final stop = ix.patternStopAt(pattern, pos);
           final suspended = req.suspendedStops.contains(stop);
 
+          // A run that skips this stop (realtime) cannot set anyone down
+          // here; whoever boarded it could have taken the next run instead,
+          // so that run joins the active set from the same boarding.
+          if (!suspended && req.unavailable != null) {
+            for (var i = 0; i < active.length; i++) {
+              var a = active[i];
+              for (var hop = 0;
+                  hop < _skipRetries &&
+                      a.offset == 0 &&
+                      req.isUnavailable(a.trip, pos);
+                  hop++) {
+                final next = _earliestTrip(pattern, a.boardPos,
+                    ix.depOf(a.trip, a.boardPos) + a.offset + 1, todayIdx, req);
+                if (next == null) break;
+                final (trip, offset, departure) = next;
+                a = _Active(trip, offset, a.label, a.boardPos, departure);
+                active.add(a);
+              }
+            }
+          }
           for (final a in active) {
             if (suspended) continue;
+            // Skips this stop (realtime, today's runs only).
+            if (a.offset == 0 && req.isUnavailable(a.trip, pos)) continue;
             final arrival = ix.arrOf(a.trip, pos) + a.offset;
             final label = _Label(
               arrival: arrival,
@@ -325,7 +359,7 @@ class Planner {
           for (final label in bags[round - 1][stop]) {
             final ready = label.arrival +
                 (label.ride ? req.minTransferSeconds : 0);
-            final found = _earliestTrip(pattern, pos, ready, todayIdx);
+            final found = _earliestTrip(pattern, pos, ready, todayIdx, req);
             if (found == null) continue;
             final (trip, offset, departure) = found;
             var dominated = false;
@@ -433,7 +467,7 @@ class Planner {
   /// service day (trips past 24:00), today, and - once [minTime] itself is past
   /// midnight - the next service day.
   (int, int, int)? _earliestTrip(
-      int pattern, int pos, int minTime, int todayIdx) {
+      int pattern, int pos, int minTime, int todayIdx, [PlanRequest? req]) {
     (int, int, int)? best;
     for (final (dayIdx, offset) in [
       (todayIdx - 1, -secondsPerDay),
@@ -460,6 +494,7 @@ class Planner {
         final dep = ix.depOf(trip, pos);
         if (dep < want) continue;
         if (!ix.serviceRunsOn(ix.tripService[trip], dayIdx)) continue;
+        if (offset == 0 && (req?.isUnavailable(trip, pos) ?? false)) continue;
         final eff = dep + offset;
         if (best == null || eff < best.$3) best = (trip, offset, eff);
         if (stopAt == count) stopAt = math.min(count, i + 1 + _overtakeScan);
@@ -582,8 +617,17 @@ class Planner {
         }
       }
       if (alightPos < 0) continue;
-      final found = _earliestTrip(pattern, boardPos, readyTime, todayIdx);
-      if (found == null) continue;
+      // Realtime disruptions describe today's runs (day offset 0) only.
+      bool skips((int, int, int) f) =>
+          f.$2 == 0 && req.isUnavailable(f.$1, alightPos);
+      var found = _earliestTrip(pattern, boardPos, readyTime, todayIdx, req);
+      // A run that will not stop at the alight stop: the next one may.
+      for (var hop = 0;
+          found != null && hop < _skipRetries && skips(found);
+          hop++) {
+        found = _earliestTrip(pattern, boardPos, found.$3 + 1, todayIdx, req);
+      }
+      if (found == null || skips(found)) continue;
       final (trip, offset, departure) = found;
       if (departure > windowEnd) continue;
       final route = ix.patternRoute[pattern];

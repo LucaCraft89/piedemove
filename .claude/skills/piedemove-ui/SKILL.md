@@ -369,3 +369,7 @@ for approval of look, palette and line style before phase 6.
   Filtri sliders update while dragging and replan on release via `replanSoon()`
   (300 ms); settings saves are coalesced (`settingsSaveDelay`).
 - Home watches only the stale-feed count of `realtimeProvider`.
+- `entityNav.push` ignores the entity already on top (refs have `==`).
+  Focus is still only cleared by X / Cancella (locked, phase 2).
+- A picked time more than 30 min in the past means tomorrow.
+- Saved places, favourites and settings: writes await the first load.

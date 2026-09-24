@@ -36,6 +36,16 @@ const _interval = {
 
 const _maxBackoff = Duration(minutes: 5);
 
+/// A realtime request that has not answered in this long is a failed poll.
+const rtFetchTimeout = Duration(seconds: 15);
+
+/// Data older than this, with every poll since failing, is dropped rather than
+/// shown as live: vehicles move, delays change.
+const _maxAge = {
+  RtFeedKind.vehicles: Duration(minutes: 3),
+  RtFeedKind.tripUpdates: Duration(minutes: 10),
+};
+
 class FeedHealth {
   const FeedHealth({this.lastSuccess, this.lastError, this.status, this.bytes});
 
@@ -106,7 +116,9 @@ class RealtimeState {
 typedef FeedFetch = Future<Uint8List> Function(String url);
 
 Future<Uint8List> _httpFetch(String url) async {
-  final response = await http.get(Uri.parse(url));
+  // Without a timeout a stalled socket never reaches `finally`, and that feed
+  // stops polling for the rest of the session.
+  final response = await http.get(Uri.parse(url)).timeout(rtFetchTimeout);
   if (response.statusCode != 200) {
     throw http.ClientException('HTTP ${response.statusCode}', Uri.parse(url));
   }
@@ -163,6 +175,17 @@ class RealtimeController extends StateNotifier<RealtimeState>
     } catch (e) {
       if (!mounted) return;
       final previous = state.health[kind] ?? const FeedHealth();
+      final maxAge = _maxAge[kind];
+      final expired = maxAge != null &&
+          previous.lastSuccess != null &&
+          DateTime.now().difference(previous.lastSuccess!) > maxAge;
+      if (expired) {
+        state = switch (kind) {
+          RtFeedKind.vehicles => state.copyWith(vehicles: const {}),
+          RtFeedKind.tripUpdates => state.copyWith(tripUpdates: const {}),
+          RtFeedKind.alerts => state,
+        };
+      }
       state = state.copyWith(health: {
         ...state.health,
         kind: FeedHealth(
@@ -221,9 +244,10 @@ final realtimeProvider =
 /// forward to later stops until the next one, so the lookup walks back from the
 /// asked position to the most recent stop the feed mentioned.
 ///
-/// GTT keys its updates by `stop_sequence`, 1-based and contiguous, so position
-/// `p` is sequence `p + 1`; entries that give an absolute `time` instead of a
-/// delay are turned into one against the scheduled second of that stop.
+/// GTT keys its updates by `stop_sequence`; the index keeps each pattern
+/// position's own sequence ([TransitIndex.stopSequenceAt], gaps and all).
+/// Entries that give an absolute `time` instead of a delay are turned into
+/// one against the scheduled second of that stop.
 DelayLookup buildDelayLookup(TransitIndex ix, RealtimeState rt) {
   return (trip, position) {
     final update = rt.tripUpdates[ix.tripIds[trip]];
@@ -233,9 +257,10 @@ DelayLookup buildDelayLookup(TransitIndex ix, RealtimeState rt) {
     for (var p = position; p >= 0; p--) {
       final byStop = update.byStopId[ix.stopIds[ix.patternStopAt(pattern, p)]];
       if (byStop != null) return byStop;
-      final delay = update.delayBySequence[p + 1];
+      final seq = ix.stopSequenceAt(pattern, p);
+      final delay = update.delayBySequence[seq];
       if (delay != null) return delay;
-      final time = update.timeBySequence[p + 1];
+      final time = update.timeBySequence[seq];
       if (time != null && startOfDay != null) {
         final scheduled = serviceDayTime(startOfDay, ix.depOf(trip, p));
         return time - scheduled.millisecondsSinceEpoch ~/ 1000;
@@ -254,6 +279,38 @@ DateTime? _startOfDay(String? yyyymmdd) {
   if (year == null || month == null || day == null) return null;
   return DateTime(year, month, day);
 }
+
+/// Runs the trip-update feed says are not coming, or will not stop at a
+/// position, on the service day they report (today, when the feed omits it).
+UnavailableLookup buildUnavailableLookup(
+    TransitIndex ix, RealtimeState rt, DateTime today) {
+  final day = '${today.year.toString().padLeft(4, '0')}'
+      '${today.month.toString().padLeft(2, '0')}'
+      '${today.day.toString().padLeft(2, '0')}';
+  return (trip, position) {
+    final u = rt.tripUpdates[ix.tripIds[trip]];
+    if (u == null || (u.startDate != null && u.startDate != day)) return false;
+    if (u.canceled) return true;
+    final pattern = ix.tripPattern[trip];
+    if (u.skippedSequences.contains(ix.stopSequenceAt(pattern, position))) {
+      return true;
+    }
+    if (u.skippedStopIds.isEmpty) return false;
+    final stop = ix.patternStopAt(pattern, position);
+    return u.skippedStopIds.contains(ix.stopIds[stop]);
+  };
+}
+
+/// Null until the index is ready or when nothing is cancelled or skipped.
+final unavailableLookupProvider = Provider<UnavailableLookup?>((ref) {
+  final ix = ref.watch(transitIndexProvider).valueOrNull;
+  if (ix == null) return null;
+  final rt = ref.watch(realtimeProvider);
+  final any = rt.tripUpdates.values.any((u) =>
+      u.canceled || u.skippedSequences.isNotEmpty || u.skippedStopIds.isNotEmpty);
+  if (!any) return null;
+  return buildUnavailableLookup(ix, rt, DateTime.now());
+});
 
 /// Null until the index is ready; callers fall back to scheduled times.
 final delayLookupProvider = Provider<DelayLookup?>((ref) {

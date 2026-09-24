@@ -14,6 +14,10 @@ import 'raptor.dart' show secondsPerDay;
 /// has no live data. Wired to the trip-update store in phase 3.
 typedef DelayLookup = int? Function(int trip, int stopPosition);
 
+/// True when realtime says a run will not serve a stop position (cancelled,
+/// or that stop skipped).
+typedef UnavailableLookup = bool Function(int trip, int stopPosition);
+
 class Departure {
   const Departure({
     required this.stop,
@@ -59,6 +63,7 @@ List<Departure> nextDepartures(
   DateTime when,
   int n, {
   DelayLookup? delays,
+  UnavailableLookup? unavailable,
   int horizonSeconds = 3 * 3600,
 }) {
   final date = DateTime(when.year, when.month, when.day);
@@ -92,6 +97,10 @@ List<Departure> nextDepartures(
         if (scheduled < from - lateLookbackSeconds) continue;
         if (scheduled > from + horizonSeconds) break;
         if (!ix.serviceRunsOn(ix.tripService[trip], dayIdx)) continue;
+        // Realtime cancellations are for today's runs only.
+        if (dayIdx == todayIdx && (unavailable?.call(trip, pos) ?? false)) {
+          continue;
+        }
         final delay = delays?.call(trip, pos);
         if (scheduled + (delay ?? 0) < from) continue;
         out.add(Departure(

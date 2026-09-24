@@ -176,3 +176,13 @@ Feed facts as built on 2026-09-19 (`feed_version` 20260919):
   streamed to `<path>.part`, renamed on success, 60 s stall timeout between
   chunks (not a total cap - the regional zip is 200+ MB). `tool/build_index`
   uses it too.
+- Index format **v3**: `patternSeq` (GTFS stop_sequence per pattern position)
+  after `patternStop`; use `ix.stopSequenceAt(p, pos)` for anything realtime
+  keyed by sequence (delays, skipped stops, vehicle position) - never `pos+1`.
+  A v2 cache reads as missing and is rebuilt on the phone.
+- GTFS-RT: `TripDescriptor.schedule_relationship` CANCELED (4 = 3) and
+  `StopTimeUpdate.schedule_relationship` SKIPPED (5 = 1) are decoded;
+  `unavailableLookupProvider` feeds departures and the planner (today's runs
+  only). Every alert `active_period` counts. Realtime fetches time out after
+  15 s; vehicles older than 3 min / delays older than 10 min with every poll
+  failing since are dropped, not shown as live.

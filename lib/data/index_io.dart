@@ -11,7 +11,8 @@ import 'dart:typed_data';
 
 import 'transit_index.dart';
 
-const indexFormatVersion = 2;
+/// 3: `patternSeq` (GTFS stop_sequence per pattern position) after patternStop.
+const indexFormatVersion = 3;
 const _magic = 0x504D5631; // "PMV1"
 
 class IndexFormatException implements Exception {
@@ -153,6 +154,7 @@ Uint8List encodeIndex(TransitIndex ix) {
   w.i8(ix.patternDir);
   w.i32(ix.patternStopOffset);
   w.i32(ix.patternStop);
+  w.i32(ix.patternSeq);
   w.i32(ix.patternTripOffset);
   w.i32(ix.patternTrip);
   w.strings(ix.tripIds);
@@ -194,6 +196,7 @@ TransitIndex decodeIndex(Uint8List data) {
     patternDir: r.i8(),
     patternStopOffset: r.i32(),
     patternStop: r.i32(),
+    patternSeq: r.i32(),
     patternTripOffset: r.i32(),
     patternTrip: r.i32(),
     tripIds: r.strings(),

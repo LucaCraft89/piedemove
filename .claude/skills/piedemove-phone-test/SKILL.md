@@ -108,3 +108,14 @@ Grant/revoke: `adb shell pm grant|revoke <pkg> android.permission.ACCESS_FINE_LO
 - Night runs return no service: set "Parti alle" 12:xx.
 - Walk legs have no off-route banner by design (riding only); the strip always carries an inline Ricalcola.
 - 6b verified live (mock): strip 380 -> 230 m with the fix advanced 150 m, next-maneuver line, travelled part faded / ahead bright joined at the dot, Ricalcola from a fix 200 m off reroutes the leg from the dot (450 m, new first maneuver) without replanning. Not verified: ride-leg off-route banner, no-fix Ricalcola fallback.
+
+## Live trip audit fixes (2026-09)
+
+- Reaching the alight stop (60 m) now vibrates "scendi ora" when the per-stop
+  count had not; Ricalcola keeps `cueSeq` counting.
+- Fixes worse than `livePoorAccuracy` with no matched vehicle hold progress
+  (estimated) - they never advance or end a leg.
+- `projectAhead` only matches `liveProjectAheadMetres` (400 m) ahead.
+- The no-fix schedule estimate subtracts the run's reported delay.
+- A dead GPS stream (live trip and the position dot) is re-opened after 5 s;
+  a second `start()` stops the first trip; dispose releases the wakelock.

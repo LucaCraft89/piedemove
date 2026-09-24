@@ -65,6 +65,7 @@ class _StopBodyState extends ConsumerState<StopBody> {
       now,
       20,
       delays: ref.watch(delayLookupProvider),
+      unavailable: ref.watch(unavailableLookupProvider),
     );
     final alerts = ref
         .watch(realtimeProvider)

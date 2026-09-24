@@ -64,6 +64,9 @@ class Place {
       );
 }
 
+/// A place search that has not answered in this long fails (chip shown).
+const photonTimeout = Duration(seconds: 8);
+
 class PhotonClient {
   PhotonClient({http.Client? client, this.limit = 8})
       : _http = client ?? http.Client();
@@ -77,7 +80,11 @@ class PhotonClient {
   Future<List<Place>> search(String query, {double? lat, double? lon}) async {
     final q = query.trim();
     if (q.length < 3) return const [];
-    final key = q.toLowerCase();
+    // The bias changes the ranking: round it (~1 km) into the key so moving
+    // across town refreshes results without defeating the cache.
+    final key = lat == null || lon == null
+        ? q.toLowerCase()
+        : '${q.toLowerCase()}@${lat.toStringAsFixed(2)},${lon.toStringAsFixed(2)}';
     final hit = _cache[key];
     if (hit != null) return hit;
 
@@ -91,7 +98,9 @@ class PhotonClient {
       if (lat != null && lon != null) ...{'lat': '$lat', 'lon': '$lon'},
     });
     // Photon answers 403 without an identifying User-Agent (fair use).
-    final res = await _http.get(uri, headers: const {'User-Agent': userAgent});
+    final res = await _http
+        .get(uri, headers: const {'User-Agent': userAgent})
+        .timeout(photonTimeout);
     if (res.statusCode != 200) {
       throw http.ClientException('photon ${res.statusCode}', uri);
     }

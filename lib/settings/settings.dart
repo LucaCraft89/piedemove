@@ -131,8 +131,10 @@ const settingsSaveDelay = Duration(milliseconds: 400);
 
 class SettingsController extends StateNotifier<PmSettings> {
   SettingsController() : super(const PmSettings()) {
-    _load();
+    _loaded = _load().catchError((Object _) {}); // a failed read never blocks saving
   }
+
+  late final Future<void> _loaded;
 
   /// Set by the first user edit: a slow first load must not overwrite it.
   var _edited = false;
@@ -159,6 +161,7 @@ class SettingsController extends StateNotifier<PmSettings> {
   }
 
   Future<void> _save() async {
+    await _loaded;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_key, jsonEncode(state.toJson()));
   }
