@@ -94,11 +94,35 @@ patch/`.rej` runs).
 - Unit tests: projection monotonic, cutoff, advance, split. Replay test with recorded track.
 - Gate: step 7 (real walk if possible, else mock-location replay; say which).
 
-## Phase 7: final verify + cleanup
-- Run all 8 checklist items from the original request, one screenshot each.
+## Phase 5c: keep walk graph fresh (after 5b, needs user OK to publish)
+- Scheduled GitHub Actions workflow: runs `tool/build_walk.dart`, hashes, replaces fixed release
+  tag `walk-graph-latest` (graph + manifest.json) only if changed; sanity check fails the run on
+  big size/connectivity swings; keep-alive step; manual "run now". Optionally also rebuild line assets.
+- Publishing is outward-facing: agent prepares the workflow, user approves before first release.
+
+## Phase 7: map styles and contrast (new)  skill: piedemove-ui, piedemove-lines
+Problem: basemap contrast is poor; only app-wide light/dark exists.
+- Audit first: current basemap source/style, how theme switches it, what overlays (lines, walk,
+  stops, vehicles, dot) sit on.
+- Independent **map style setting**, separate from app theme: Auto (follows app), Light, Dark,
+  Colour (coloured, clearly visible roads), High contrast. Stored in settings, applied live
+  (style reload must re-add every layer; reuse the phase 4 re-add pattern).
+- Basemap: vector tiles from OpenFreeMap (free, no key, prod-usable) styled by our own bundled
+  style JSON per variant, not a third-party style we can't tune. Road hierarchy by colour and
+  width (motorway/primary/secondary/minor/pedestrian), water/parks/buildings muted so transit
+  overlays dominate, labels legible with halos. Attribution (OSM, OpenFreeMap, OpenMapTiles) kept.
+- Overlay palettes validated against each style: line colours, walk dotted, stop dots, vehicles,
+  position dot must meet a contrast ratio (>= 3:1 vs local basemap) in every style; script/test
+  computes it from the style + palette tokens, no eyeballing only.
+- Named tokens in `lib/ui/map/map_style.dart` / style assets, no per-line colours. Offline: style
+  JSON bundled; tiles online with cache; tile failure = chip, overlays still work.
+- Gate: each style at z12/14/16 screenshot, transit lines readable in all, theme x style matrix works.
+
+## Phase 8: final verify + cleanup
+- Run all 8 checklist items from the original request, one screenshot each, in at least two map styles.
 - Gap test zero, analyze, tests. Update skills touched. Tag.
 - List old fix files for user to approve deletion; do not delete unasked.
 
 ## Order/deps
-0 -> 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7. Phase 2 owns focus layers that 3 and 5 draw into.
+0 -> 1 (1b, 1c) -> 2 (2b) -> 3 -> 4 -> 5 (5b) -> 5c -> 6 -> 7 -> 8. Phase 2 owns focus layers that 3 and 5 draw into.
 Phase 4 feeds 6. Phase 3 dot constants used by 5.

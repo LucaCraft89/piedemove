@@ -25,4 +25,4 @@ Earlier fix agents left 17 tracked files empty (PLAN.md, raptor, ambient, trip_s
 plan -> small diffs -> analyze -> test -> build -> `adb devices` -> install -> one 720px screenshot per check, looked at
 -> `graphify update .` -> update the touched skill -> commit + tag. Report verified-live vs replay/code-only.
 
-Phases: 0 repair tree, 1 gaps, 2 focus, 3 ridden+dot sizes, 4 position dot, 5 walk paths, 6 live walk progress, 7 final verify.
+Phases: 0 repair tree, 1 gaps (1b smooth, 1c pipeline rewrite), 2 focus (2b), 3 ridden+dot sizes, 4 position dot, 5 walk paths (5b real pedestrian router, 5c graph freshness workflow), 6 live walk progress, 7 map styles+contrast, 8 final verify.
