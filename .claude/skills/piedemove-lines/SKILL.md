@@ -202,3 +202,30 @@ z14/z16, a suburban stretch, a metro line.
 
 Root cause of missing walks: `walkFeatures` never received the origin (the access leg has `fromStop == -1`, so it was skipped) and the destination came from `selectedPlaceProvider` (the search pin, null when the destination was picked in the planner), so egress was skipped too. Both ends now come from the trip query via `walkLegEnds(ix, leg, origin:, destination:)` (`line_features.dart`), shared by drawing and by `_fetchWalkPaths`. Layers `pm-walk-casing` (white, dotted, same absolute spacing via `walkDash`) + `pm-walk-lines` (3-tier colour), constants `walk*` in `map_style.dart`, above focus lines, below focus stop dots and the position dot. `walkPath` caches solved paths on disk (`<support>/walk/`) and in memory; failures are never cached (retry when back online) and set the chip "Percorsi a piedi approssimati"; legs stay straight dotted with the "≈" figure. Tests: `test/walk_legs_test.dart`.
 Verified on phone 2026-09-24: transfer (snapped, bent path), egress, offline fallback (wifi+data off: straight dotted + chip). Access-from-position not seen separately (position was on the first stop).
+
+## Following GTT without an app update (2026-09)
+
+- `lines.bin` format 2 stores `patternSignature(ix, p)` = short name | route
+  type | stop ids in order, per pattern. Pattern **numbers** change with every
+  GTT export; never key geometry by them across feeds.
+- `rebaseLines(source, ix)` (`lib/geo/lines_rebase.dart`) re-keys geometry onto
+  the phone's index; a pattern with no match (new/rerouted line, regional,
+  no file) becomes `stopChordPattern`: stops joined straight, every hop
+  `hopApprox`, `synthetic = true`, drawn with `approx = 1` (dotted). Format 1
+  is trusted by number for its own feed only.
+- `.github/workflows/lines.yml` (daily, dispatch, `workflow_call`): GTT index ->
+  feed changed vs `lines-latest/manifest.json`? -> Geofabrik extract cut to
+  `tool/lines_bbox.dart` -> osmium OPL with node locations -> `build_lines.dart
+  --opl` (same graph code as Overpass tiles, via `oplWaysToOverpassGeom`) ->
+  gates `lines_report --fail` + `gap_detector` -> `tool/lines_manifest.dart` ->
+  publish lines.bin.gz, ambient.json.gz, connectors.json.gz, manifest last.
+- App: `LinesUpdater` (`lib/geo/lines_update.dart`), <= 1/day in the
+  foreground from `ambientLinesProvider`: downloads a set built from another
+  feed into `<support>/lines/set-*`, checks size + sha256 + decodes, then
+  switches `current.json` atomically; old sets pruned. Providers read the
+  current set first, then the assets; the map swaps the ambient source in
+  place (`_ambientDrawn`).
+- ci.yml: a `[release]` (or `[lines]`) push runs the lines workflow; the release
+  job bundles `lines-latest` into the APK when its format matches.
+- Schedules only run from the default branch: the daily rebuild starts once
+  `lines.yml` is on `main`.

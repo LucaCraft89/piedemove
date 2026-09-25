@@ -160,6 +160,25 @@ class _MapViewState extends ConsumerState<MapView> {
 
   bool _linesAdded = false;
   bool _linesBusy = false;
+
+  /// The ambient network the lines source holds (identity), so a newer one
+  /// from a lines update is swapped in without a style reload.
+  Map<String, dynamic>? _ambientDrawn;
+
+  /// Same for the connectors source and the focus geometry's network.
+  Map<String, dynamic>? _connectorsDrawn;
+  LineNetwork? _netDrawn;
+
+  Future<void> _updateConnectors(Map<String, dynamic> connectors) async {
+    final controller = _controller;
+    if (controller == null || identical(connectors, _connectorsDrawn)) return;
+    try {
+      await controller.setGeoJsonSource(_connectorsSource, connectors);
+      _connectorsDrawn = connectors;
+    } catch (e) {
+      debugPrint('pm: connectors update failed: $e');
+    }
+  }
   bool _entrancesAdded = false;
   bool _meAdded = false;
   Position? _meDrawn;
@@ -214,7 +233,11 @@ class _MapViewState extends ConsumerState<MapView> {
     }
 
     final ambient = ref.watch(ambientLinesProvider).valueOrNull;
-    if (_styleReady && ambient != null && !_linesAdded) {
+    // First add, or a newer network (a lines update landed): _addLines swaps
+    // the data in place once the layers exist.
+    if (_styleReady &&
+        ambient != null &&
+        (!_linesAdded || !identical(ambient, _ambientDrawn))) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _addLines(ambient));
     }
 
@@ -234,9 +257,25 @@ class _MapViewState extends ConsumerState<MapView> {
     }
     // The pattern geometry asset is only loaded once something is focused.
     final net = focus == null ? null : ref.watch(lineNetworkProvider).valueOrNull;
+    // A lines update replaces the network: the focus drawn from the old one
+    // is redrawn from the new one.
+    if (net != null && !identical(net, _netDrawn)) {
+      _netDrawn = net;
+      _focusDrawn = false;
+    }
     if (_styleReady && _linesAdded && (focus != _focus || !_focusDrawn)) {
       WidgetsBinding.instance
           .addPostFrameCallback((_) => _applyFocus(focus, net, ambient));
+    }
+
+    // Connectors likewise: a new set swaps them in place.
+    final connectors = ref.watch(stopConnectorsProvider).valueOrNull;
+    if (_styleReady &&
+        _connectorsDrawn != null &&
+        connectors != null &&
+        !identical(connectors, _connectorsDrawn)) {
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _updateConnectors(connectors));
     }
 
     final picked = ref.watch(linePickerProvider);
@@ -282,6 +321,8 @@ class _MapViewState extends ConsumerState<MapView> {
         _vehiclesAdded = false;
         _vehiclesBusy = false;
         _linesAdded = false;
+        _ambientDrawn = null;
+        _connectorsDrawn = null;
         _linesBusy = false;
         _entrancesAdded = false;
         _meAdded = false;
@@ -339,8 +380,10 @@ class _MapViewState extends ConsumerState<MapView> {
 
     if (_linesBusy) return; // an add is in flight
     if (_linesAdded) {
+      if (identical(ambient, _ambientDrawn)) return;
       try {
         await controller.setGeoJsonSource(_linesSource, ambient);
+        _ambientDrawn = ambient;
         return;
       } catch (_) {
         _linesAdded = false;
@@ -451,6 +494,7 @@ class _MapViewState extends ConsumerState<MapView> {
     if (gen != _styleGen) return;
     _linesBusy = false;
     _linesAdded = true;
+    _ambientDrawn = ambient;
     status.clear('lines');
 
     // Focus lines: own source and layers, added once per style and only ever
@@ -560,6 +604,7 @@ class _MapViewState extends ConsumerState<MapView> {
         _connectorsSource,
         GeojsonSourceProperties(data: connectors),
       );
+      _connectorsDrawn = connectors;
       await controller.addLineLayer(
         _connectorsSource,
         'pm-stop-connectors',

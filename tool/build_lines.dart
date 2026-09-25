@@ -2,6 +2,11 @@
 /// `build/lines.bin` and the phone assets.
 ///
 ///     dart tool/build_lines.dart [--force-osm] [--reverse] [--no-assets]
+///                                [--opl roads.opl] [--zip gtt.zip]
+///
+/// With `--opl` the roads come from an osmium OPL dump with node locations
+/// (`osmium add-locations-to-ways` + `osmium cat -f opl`, as the `lines` CI
+/// workflow makes from the Geofabrik extract) instead of Overpass tiles.
 ///
 /// Regenerates every shipped line asset from the GTFS zip and the OSM tile
 /// cache (fetching what is missing or older than 30 days). Nothing here is
@@ -20,6 +25,7 @@ import 'package:piedemove/geo/line_build.dart';
 import 'package:piedemove/geo/lines_io.dart';
 import 'package:piedemove/geo/map_match.dart';
 import 'package:piedemove/geo/osm_fetch.dart';
+import 'package:piedemove/geo/osm_opl.dart';
 import 'package:piedemove/geo/road_graph.dart';
 
 const indexPath = 'build/index.bin';
@@ -28,7 +34,8 @@ const linesPath = 'build/lines.bin';
 Future<void> main(List<String> args) async {
   final started = DateTime.now();
   final zipArg = args.indexOf('--zip');
-  final zipPath = zipArg >= 0 ? args[zipArg + 1] : 'build/gtt_gtfs.zip';
+  final zipPath =
+      zipArg >= 0 && zipArg + 1 < args.length ? args[zipArg + 1] : 'build/gtt_gtfs.zip';
 
   final ix = await readIndexFile(indexPath);
   if (ix == null) {
@@ -44,26 +51,53 @@ Future<void> main(List<String> args) async {
   zip.close();
   stdout.writeln('shapes ${shapes.length}');
 
-  // Two fetchers (Overpass allows two slots per IP) halve the wall time: run
-  // a second process with --reverse, it skips whatever the first has cached.
-  final tiles = tilesForIndex(ix, shapeIds: shapeIds, shapes: shapes);
-  if (args.contains('--reverse')) tiles.setAll(0, tiles.reversed.toList());
-  stdout.writeln('overpass: ${tiles.length} tiles');
-  final files = await fetchOsmTiles(
-    tiles,
-    cacheDir: Directory('build/osm'),
-    force: args.contains('--force-osm'),
-    log: (m) => stdout.writeln('  $m'),
-  );
-  stdout.writeln('tiles usable ${files.length}/${tiles.length}');
+  // OSM input: an osmium OPL dump (CI, from a Geofabrik extract) or Overpass
+  // tiles (desktop). Both end as the same `out geom` JSON the graph reads.
+  final oplArg = args.indexOf('--opl');
+  final List<File> files;
+  final File? railFile;
+  if (oplArg >= 0 && oplArg + 1 < args.length) {
+    final opl = File(args[oplArg + 1]).readAsLinesSync();
+    stdout.writeln('opl: ${opl.length} lines from ${args[oplArg + 1]}');
+    Directory('build/osm').createSync(recursive: true);
+    File dump(String name, bool Function(Map<String, String>) keep) =>
+        File('build/osm/$name.json.gz')
+          ..writeAsBytesSync(gzip.encode(
+              utf8.encode(jsonEncode(oplWaysToOverpassGeom(opl, keep)))));
+    files = [dump('opl_roads', isRoadOrTramWay)];
+    railFile = railBounds(ix) == null ? null : dump('opl_rail', isRailWay);
+    // No located road at all means a wrong dump (e.g. OPL written without
+    // locations_on_ways): stop here rather than build an all-dotted network.
+    final roads = parseOsmJson(
+        utf8.decode(gzip.decode(files.first.readAsBytesSync())));
+    if (roads.isEmpty) {
+      stderr.writeln('no located road ways in ${args[oplArg + 1]}: '
+          'write it with `osmium cat -f opl,locations_on_ways=true`');
+      exit(1);
+    }
+    stdout.writeln('opl: ${roads.length} road and tram ways');
+  } else {
+    // Two fetchers (Overpass allows two slots per IP) halve the wall time: run
+    // a second process with --reverse, it skips whatever the first has cached.
+    final tiles = tilesForIndex(ix, shapeIds: shapeIds, shapes: shapes);
+    if (args.contains('--reverse')) tiles.setAll(0, tiles.reversed.toList());
+    stdout.writeln('overpass: ${tiles.length} tiles');
+    files = await fetchOsmTiles(
+      tiles,
+      cacheDir: Directory('build/osm'),
+      force: args.contains('--force-osm'),
+      log: (m) => stdout.writeln('  $m'),
+    );
+    stdout.writeln('tiles usable ${files.length}/${tiles.length}');
 
-  final rb = railBounds(ix);
-  final railFile = rb == null
-      ? null
-      : await fetchRailWays(rb.$1, rb.$2, rb.$3, rb.$4,
-          cacheDir: Directory('build/osm'),
-          force: args.contains('--force-osm'),
-          log: (m) => stdout.writeln('  $m'));
+    final rb = railBounds(ix);
+    railFile = rb == null
+        ? null
+        : await fetchRailWays(rb.$1, rb.$2, rb.$3, rb.$4,
+            cacheDir: Directory('build/osm'),
+            force: args.contains('--force-osm'),
+            log: (m) => stdout.writeln('  $m'));
+  }
   final Map<GraphMode, RoadGraph> graphs = buildGraphs(files,
           corridor: corridorCells(ix, shapeIds, shapes),
           railFile: railFile,
