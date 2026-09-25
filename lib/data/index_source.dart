@@ -22,6 +22,10 @@ const maxIndexAge = Duration(days: 7);
 /// A static-feed download that sends nothing for this long is abandoned.
 const feedStallTimeout = Duration(seconds: 60);
 
+/// How long a static feed may take to start answering. The regional server
+/// builds its zip on request and says nothing for over a minute.
+const feedHeaderTimeout = Duration(minutes: 10);
+
 enum IndexStage { cached, downloading, building, ready }
 
 typedef StageSink = void Function(IndexStage stage);
@@ -53,14 +57,14 @@ class IndexStore {
       onStage?.call(IndexStage.downloading);
       dir.createSync(recursive: true);
       await downloadToFile(Feeds.gttStaticGtfs, zipPath,
-          timeout: feedStallTimeout);
+          timeout: feedStallTimeout, headerTimeout: feedHeaderTimeout);
 
       // Scheduled-only regional buses (phase 9). Best effort: the planner has
       // to work when this feed is down, so a failure just means GTT only.
       String? regional;
       try {
         await downloadToFile(Feeds.piemonteBusGtfs, regionalZipPath,
-            timeout: feedStallTimeout);
+            timeout: feedStallTimeout, headerTimeout: feedHeaderTimeout);
         regional = regionalZipPath;
       } catch (_) {
         regional = null;

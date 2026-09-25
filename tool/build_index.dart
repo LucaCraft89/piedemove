@@ -15,21 +15,25 @@ import 'package:piedemove/data/gtfs_zip.dart';
 import 'package:piedemove/data/index_build.dart';
 import 'package:piedemove/data/index_io.dart';
 import 'package:piedemove/data/index_merge.dart';
+import 'package:piedemove/data/index_source.dart'
+    show feedHeaderTimeout, feedStallTimeout;
 import 'package:piedemove/data/transit_index.dart';
 
 const indexPath = 'build/index.bin';
 const zipPath = 'build/gtt_gtfs.zip';
 const regionalZipPath = 'build/piemonte_bus.zip';
 
-Future<File> _download(String url, String path, {bool force = false}) async {
+/// Downloads unless cached; null on failure (the caller decides if it is fatal).
+Future<File?> _download(String url, String path, {bool force = false}) async {
   final file = File(path);
   if (force || !file.existsSync()) {
     stdout.writeln('downloading $url ...');
     try {
-      await downloadToFile(url, path, timeout: const Duration(seconds: 60));
+      await downloadToFile(url, path,
+          timeout: feedStallTimeout, headerTimeout: feedHeaderTimeout);
     } catch (e) {
       stderr.writeln('download failed: $e');
-      exit(1);
+      return null;
     }
   }
   return file;
@@ -42,6 +46,7 @@ Future<void> main(List<String> args) async {
 
   Directory('build').createSync(recursive: true);
   final zipFile = await _download(Feeds.gttStaticGtfs, zip, force: force);
+  if (zipFile == null) exit(1);
   stdout.writeln('zip ${(zipFile.lengthSync() / 1e6).toStringAsFixed(1)} MB');
 
   final started = DateTime.now();
@@ -56,9 +61,15 @@ Future<void> main(List<String> args) async {
   source.close();
 
   var merged = index;
-  if (!args.contains('--no-regional')) {
-    final regionalZip =
-        await _download(Feeds.piemonteBusGtfs, regionalZipPath, force: force);
+  // Best effort, like the app: a regional outage costs the regional buses,
+  // never the GTT index.
+  final regionalZip = args.contains('--no-regional')
+      ? null
+      : await _download(Feeds.piemonteBusGtfs, regionalZipPath, force: force);
+  if (regionalZip == null && !args.contains('--no-regional')) {
+    stderr.writeln('regional feed unavailable: GTT only');
+  }
+  if (regionalZip != null) {
     stdout.writeln(
         'regional zip ${(regionalZip.lengthSync() / 1e6).toStringAsFixed(1)} MB');
     final regionalSource = GtfsZip(regionalZip.path, Directory('build'));
