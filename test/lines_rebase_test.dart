@@ -4,6 +4,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:piedemove/data/index_io.dart';
 import 'package:piedemove/data/transit_index.dart';
 import 'package:piedemove/geo/lines_io.dart';
 import 'package:piedemove/geo/lines_rebase.dart';
@@ -137,4 +138,18 @@ void main() {
     final props = (lines['features'] as List).single['properties'] as Map;
     expect(props['approx'], 1);
   });
+
+  test('a format 2 file whose signatures do not match its patterns is rejected',
+      () {
+    final w = BinWriter()
+      ..int32(0x504D4C31) // "PML1"
+      ..int32(linesFormatVersion);
+    w.strings(['feed']);
+    w
+      ..int32(0)
+      ..int32(1); // one pattern announced...
+    w.strings(const []); // ...no signature for it
+    expect(decodeLines(w.take()), isNull);
+  });
 }
+

@@ -98,6 +98,8 @@ LineNetwork? decodeLines(Uint8List data, {String? feedVersion}) {
   final approximate = r.int32() != 0;
   final count = r.int32();
   final signatures = version >= 2 ? r.strings() : null;
+  // A truncated or hand-made file: one signature per pattern, or nothing.
+  if (signatures != null && signatures.length != count) return null;
   final patterns = <SnappedPattern>[];
   for (var i = 0; i < count; i++) {
     final id = r.int32();
