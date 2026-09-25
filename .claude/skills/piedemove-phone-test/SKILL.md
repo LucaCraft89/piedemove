@@ -130,3 +130,13 @@ the `check` job built (run-as copy into `files/index.bin`), runs
 detail). Artifact `emulator-screenshots` holds the PNGs, `itest.log` and
 `logcat.txt`; a `FATAL EXCEPTION`/ANR in logcat fails the job. It is an
 emulator: GPS, live trip and real-ride checks still need the phone.
+
+## CI emulator limits (SwiftShader)
+
+The CI emulator draws **no symbol layer**: no basemap street names, no bubble
+counts, no sprite icons (pies, vehicles). The layers are placed
+(`PM_RENDERED <layer> <n> <mode mix>` in `itest.log` comes from
+`queryRenderedFeaturesInRect`), just not painted. So CI confirms that a symbol
+layer exists and holds the right features; what it looks like needs the phone.
+Circles and lines do render, and `E Mbgl ... Error setting property` in
+logcat.txt catches rejected expressions.

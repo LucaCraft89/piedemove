@@ -1,4 +1,4 @@
-/// Search (§11.3): one box, sectioned results — places, stops, lines, vehicles.
+/// Search (§11.3): one box, sectioned results — stops, lines, vehicles, places.
 ///
 /// Places come from Photon (debounced, stale requests dropped); stops, lines
 /// and vehicles are local, so the box keeps working with every feed down.
@@ -123,7 +123,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         ix == null || _query.isEmpty ? const <int>[] : searchRoutes(ix, _query);
     final vehicles = _query.isEmpty
         ? const []
-        : searchVehicles(ref.watch(realtimeProvider).vehicles.values, _query);
+        : searchVehicles(
+            ref.watch(realtimeProvider.select((r) => r.vehicles)).values,
+            _query);
     final saved = ref.watch(savedPlacesProvider);
     final recents = ref.watch(recentPlacesProvider);
     final empty = _query.isEmpty;
@@ -180,14 +182,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             if (recents.isNotEmpty) const _Section('Recenti'),
             for (final p in recents) _placeTile(p),
           ] else ...[
-            if (_placesFailed)
-              const ListTile(
-                leading: Icon(Icons.cloud_off),
-                title: Text('Ricerca luoghi non disponibile'),
-                subtitle: Text('Fermate, linee e veicoli funzionano comunque.'),
-              ),
-            if (_places.isNotEmpty) const _Section('Luoghi'),
-            for (final p in _places) _placeTile(p),
+            // Local results first, places last: places land ~300 ms after
+            // each keystroke, and above the stops they pushed the row under a
+            // finger already on its way down to it.
             if (!linesFirst) ...stopTiles,
             if (routes.isNotEmpty && !widget.pick) const _Section('Linee'),
             if (!widget.pick)
@@ -218,6 +215,14 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                   openEntity(context, ref, VehicleRef(v.id));
                 },
               ),
+            if (_placesFailed)
+              const ListTile(
+                leading: Icon(Icons.cloud_off),
+                title: Text('Ricerca luoghi non disponibile'),
+                subtitle: Text('Fermate, linee e veicoli funzionano comunque.'),
+              ),
+            if (_places.isNotEmpty) const _Section('Luoghi'),
+            for (final p in _places) _placeTile(p),
             if (_places.isEmpty &&
                 stops.isEmpty &&
                 routes.isEmpty &&

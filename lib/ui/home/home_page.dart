@@ -89,6 +89,10 @@ class _HomePageState extends ConsumerState<HomePage> {
         !trip.sheetHidden && (trip.planning || trip.result != null);
 
     return Scaffold(
+      // Only the search page raises the keyboard, but insets are app-wide:
+      // resizing here re-laid-out the map's platform view on every frame of
+      // the keyboard animation, under the search page and back.
+      resizeToAvoidBottomInset: false,
       body: Stack(
         children: [
           MapView(
@@ -135,7 +139,7 @@ class _HomePageState extends ConsumerState<HomePage> {
           Positioned(
             right: Gap.screen,
             // Just above a sheet resting at peek.
-            bottom: MediaQuery.of(context).size.height * sheetPeek + Gap.screen,
+            bottom: MediaQuery.sizeOf(context).height * sheetPeek + Gap.screen,
             child: FloatingActionButton.small(
               heroTag: 'pm-locate',
               tooltip: 'La mia posizione',

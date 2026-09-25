@@ -16,6 +16,7 @@ import 'package:piedemove/main.dart' as app;
 import 'package:piedemove/places/photon.dart';
 import 'package:piedemove/ui/home/home_page.dart';
 import 'package:piedemove/ui/map/map_focus.dart';
+import 'package:piedemove/ui/map/map_view.dart' show mapControllerProvider;
 import 'package:piedemove/ui/trip/trip_plan.dart';
 
 /// Pumps frames for [d] of real time (the map and isolates keep running).
@@ -50,6 +51,30 @@ Future<void> step(WidgetTester t, String name) async {
   // ignore: avoid_print
   print('PM_STEP $name');
   await hold(t, const Duration(seconds: 4)); // the script captures now
+}
+
+/// How many features of [layer] are on screen: a layer added without error
+/// can still draw nothing (sprite images dropped), which no screenshot of a
+/// fallback underneath would tell.
+Future<void> logRendered(ProviderContainer c, String layer) async {
+  final map = c.read(mapControllerProvider);
+  if (map == null) return;
+  try {
+    final hits = await map.queryRenderedFeaturesInRect(
+        const Rect.fromLTWH(0, 0, 4000, 4000), [layer], null);
+    // Which mode mixes the bubbles hold: a mixed one must draw as a pie.
+    final mixes = <String, int>{};
+    for (final h in hits) {
+      final p = (h as Map)['properties'] as Map? ?? const {};
+      final key = [for (final f in ['b', 't', 'm', 'f']) '$f${p[f]}'].join();
+      mixes[key] = (mixes[key] ?? 0) + 1;
+    }
+    // ignore: avoid_print
+    print('PM_RENDERED $layer ${hits.length} $mixes');
+  } catch (e) {
+    // ignore: avoid_print
+    print('PM_RENDERED $layer failed: $e');
+  }
 }
 
 void main() {
@@ -131,6 +156,8 @@ void main() {
     expect(result.failed, isFalse);
     expect(result.balanced, isNotEmpty, reason: 'no journey for the golden trip');
     await step(t, '05-trip-results');
+    await logRendered(container, 'pm-stop-clusters');
+    await logRendered(container, 'pm-stop-cluster-pies');
 
     plan.select(0);
     await step(t, '06-trip-detail');

@@ -397,13 +397,7 @@ class _LegChain extends StatelessWidget {
           ],
         ));
       } else {
-        children.add(Wrap(
-          spacing: 4,
-          children: [
-            for (final o in leg.options.take(6))
-              LineBadge(shortName: o.routeShortName, routeType: o.routeType),
-          ],
-        ));
+        children.add(LineGroupBadge(lines: _optionLines(leg)));
       }
     }
     return Wrap(
@@ -600,23 +594,18 @@ class _RideStepState extends ConsumerState<_RideStep> {
         const Divider(height: Gap.element),
         Row(
           children: [
-            Wrap(
-              spacing: 4,
-              children: [
-                for (final o in leg.options.take(6))
-                  InkWell(
-                    onTap: () => openEntity(
-                      context,
-                      ref,
-                      LineRef(ix.patternRoute[o.pattern],
-                          direction: ix.patternDir[o.pattern]),
-                    ),
-                    child: LineBadge(
-                      shortName: o.routeShortName,
-                      routeType: o.routeType,
-                    ),
-                  ),
-              ],
+            // One badge for every line that makes this ride; it opens the
+            // first one, the others are listed below with their own times.
+            InkWell(
+              onTap: chosen == null
+                  ? null
+                  : () => openEntity(
+                        context,
+                        ref,
+                        LineRef(ix.patternRoute[chosen.pattern],
+                            direction: ix.patternDir[chosen.pattern]),
+                      ),
+              child: LineGroupBadge(lines: _optionLines(leg)),
             ),
             const SizedBox(width: Gap.element),
             Expanded(
@@ -690,16 +679,28 @@ class _RideStepState extends ConsumerState<_RideStep> {
         if (leg.options.length > 1) ...[
           const SheetSection('Altre linee per questa tratta'),
           for (final o in leg.options.skip(1).take(6))
-            Row(
-              children: [
-                LineBadge(shortName: o.routeShortName, routeType: o.routeType),
-                const SizedBox(width: Gap.element),
-                Text(hhmm(journey.timeOf(o.departure))),
-                if (o.detoured) ...[
-                  const SizedBox(width: Gap.element),
-                  const Expanded(child: _DetourBanner()),
-                ],
-              ],
+            InkWell(
+              onTap: () => openEntity(
+                context,
+                ref,
+                LineRef(ix.patternRoute[o.pattern],
+                    direction: ix.patternDir[o.pattern]),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    LineBadge(
+                        shortName: o.routeShortName, routeType: o.routeType),
+                    const SizedBox(width: Gap.element),
+                    Text(hhmm(journey.timeOf(o.departure))),
+                    if (o.detoured) ...[
+                      const SizedBox(width: Gap.element),
+                      const Expanded(child: _DetourBanner()),
+                    ],
+                  ],
+                ),
+              ),
             ),
         ],
       ],
@@ -805,3 +806,7 @@ int? rideDelaySeconds(WidgetRef ref, Leg leg, RideOption? option) {
   }
   return null;
 }
+
+/// A ride leg's lines for [LineGroupBadge], best option first.
+List<(String, int)> _optionLines(Leg leg) =>
+    [for (final o in leg.options) (o.routeShortName, o.routeType)];
