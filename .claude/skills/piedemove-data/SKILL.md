@@ -101,6 +101,10 @@ What GTT actually sends (checked 2026-09-19, not what the spec suggests):
   `trip_id`, no `stop_id`, no `current_stop_sequence`**. So a vehicle links to a
   *line*, never to a run: no next stop, no itinerary, no delay for it. Position,
   bearing and `current_status` are present. Poll 20 s.
+  Direction therefore comes from the **bearing**: a journey focus shows only
+  vehicles within 300 m of a ridden pattern and heading within 90 deg of it
+  there (`vehiclesForJourney` / `headingMatchesPattern`); no bearing = kept.
+  Line focus still shows both directions (both are drawn).
 - **Trip updates** (~68 KB, ~385 trips, all known to the index): keyed by
   **`stop_sequence`, 1-based and contiguous, with no `stop_id`**, a rolling
   window of ~7 stops ahead. Two thirds give `delay`, one third an absolute

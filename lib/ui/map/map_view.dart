@@ -234,10 +234,15 @@ class _MapViewState extends ConsumerState<MapView> {
       _vehiclesFor = vehiclesFor;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final ix = ref.read(transitIndexProvider).valueOrNull;
-        _updateVehicles(showVehicles
-            ? vehiclesForRoutes(
-                ix, vehicles.values, ix == null ? null : focusRoutes(ix, focusNow))
-            : const []);
+        _updateVehicles(!showVehicles
+            ? const []
+            // A trip shows only vehicles heading its way: both directions
+            // of a line made "where is my bus" unreadable (rider report).
+            : ix != null && focusNow is JourneyFocus
+                ? vehiclesForJourney(ix, ref.read(lineNetworkProvider).valueOrNull,
+                    vehicles.values, focusNow.journey)
+                : vehiclesForRoutes(ix, vehicles.values,
+                    ix == null ? null : focusRoutes(ix, focusNow)));
       });
     }
 
