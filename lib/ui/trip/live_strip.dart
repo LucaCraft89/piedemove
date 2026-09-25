@@ -4,14 +4,20 @@
 /// It never recalculates by itself — off route only raises the banner.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:piedemove/data/providers.dart';
 import 'package:piedemove/geo/walk_router.dart';
 import 'package:piedemove/location/live_trip.dart';
 import 'package:piedemove/places/photon.dart';
+import 'package:piedemove/realtime/store.dart' show delayLookupProvider;
 import 'package:piedemove/routing/journey.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
+import 'package:piedemove/ui/trip/live_stats.dart';
+import 'package:piedemove/ui/trip/trip_format.dart';
 import 'package:piedemove/ui/trip/trip_plan.dart';
 
 /// `Scendi a Peschiera tra 3 fermate`, `A piedi: Trapani tra 120 m`.
@@ -155,6 +161,7 @@ class LiveStrip extends ConsumerWidget {
                               'posizione stimata',
                               style: theme.textTheme.bodySmall,
                             ),
+                          _LiveStatsLines(live: live),
                         ],
                       ),
                     ),
@@ -227,3 +234,79 @@ class _RecalculateBanner extends StatelessWidget {
     );
   }
 }
+
+/// When the next vehicle comes (or the ride reaches the stop), then the whole
+/// trip: arrival, time left, distance left. Ticks on its own so a countdown
+/// moves without a new fix (a phone in a pocket on a bus gets few).
+class _LiveStatsLines extends ConsumerStatefulWidget {
+  const _LiveStatsLines({required this.live});
+
+  final LiveTripState live;
+
+  @override
+  ConsumerState<_LiveStatsLines> createState() => _LiveStatsLinesState();
+}
+
+class _LiveStatsLinesState extends ConsumerState<_LiveStatsLines> {
+  Timer? _tick;
+
+  @override
+  void initState() {
+    super.initState();
+    _tick = Timer.periodic(
+        const Duration(seconds: 15), (_) => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ix = ref.watch(transitIndexProvider).valueOrNull;
+    if (ix == null) return const SizedBox.shrink();
+    final delays = ref.watch(delayLookupProvider);
+    final live = widget.live;
+    final stats = liveStats(
+      live,
+      delayOf: (i, {atAlight = false}) =>
+          legDelay(ix, delays, live.journey.legs[i], atAlight: atAlight),
+    );
+    final now = DateTime.now();
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodyMedium
+        ?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+
+    String when(DateTime at, int? delay) => [
+          'alle ${hhmm(at)}',
+          untilLabel(at, now),
+          delayLabel(delay) ?? 'programmato',
+        ].join(' · ');
+
+    final next = stats.nextDeparture == null
+        ? null
+        : '${stats.nextLine == null ? 'Il mezzo' : 'Il ${stats.nextLine}'} '
+            'passa ${when(stats.nextDeparture!, stats.nextDelay)}';
+    final alight = stats.alightAt == null
+        ? null
+        : 'Arrivo in fermata ${when(stats.alightAt!, stats.alightDelay)}';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (next ?? alight case final line?)
+          Text(line, style: theme.textTheme.bodyMedium),
+        Text(
+          'Destinazione ${hhmm(stats.arrival)} · '
+          '${untilLabel(stats.arrival, now)} · '
+          '${metresLabel(stats.metresLeft)}'
+          '${stats.arrivalDelayKnown ? '' : ' · orario programmato'}',
+          style: muted,
+        ),
+      ],
+    );
+  }
+}
+

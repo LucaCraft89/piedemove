@@ -109,6 +109,15 @@ Grant/revoke: `adb shell pm grant|revoke <pkg> android.permission.ACCESS_FINE_LO
 - Walk legs have no off-route banner by design (riding only); the strip always carries an inline Ricalcola.
 - 6b verified live (mock): strip 380 -> 230 m with the fix advanced 150 m, next-maneuver line, travelled part faded / ahead bright joined at the dot, Ricalcola from a fix 200 m off reroutes the leg from the dot (450 m, new first maneuver) without replanning. Not verified: ride-leg off-route banner, no-fix Ricalcola fallback.
 
+## Live strip numbers (post beta 5, rider request)
+
+Under the instruction: walking to a ride, "Il 10 passa alle 18:07 · tra
+4 min · +2 min|in orario|programmato"; riding, "Arrivo in fermata alle ... ";
+then always "Destinazione 18:41 · tra 23 min · 3.2 km" (+ "orario
+programmato" without a live delay on the last ride). `lib/ui/trip/
+live_stats.dart` (pure, `test/live_stats_test.dart`); the strip ticks every
+15 s so countdowns move without fixes. Not yet seen on a real ride.
+
 ## Live trip audit fixes (2026-09)
 
 - Reaching the alight stop (60 m) now vibrates "scendi ora" when the per-stop
