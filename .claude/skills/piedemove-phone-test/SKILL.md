@@ -139,6 +139,16 @@ screen (`_meAt`), jumps past `meGlideMaxMetres` (300 m) or on first draw; a
 new fix cancels the running glide at once (`_meGlideGen` bumped at entry,
 only when the fix changed - a bump on every rebuild left the dot short).
 
+## Cue vibration (rider report: "works but too weak")
+
+`HapticFeedback.vibrate` is a UI tap (short, weak, muted by the touch-feedback
+setting). Cues now go through `lib/location/haptics.dart` -> method channel
+`piedemove/vibrate` in `MainActivity.kt`: `VibrationEffect.createWaveform`
+at amplitude 255 with **alarm usage** (API 33 `VibrationAttributes`, older
+`AudioAttributes`); `VIBRATE` permission in the manifest. Patterns: one stop
+left 500-250-500 ms; get off 900-300-900-300-1200 ms. The tap stays as the
+fallback. Do-not-disturb can still silence it.
+
 ## Live trip audit fixes (2026-09)
 
 - Reaching the alight stop (60 m) now vibrates "scendi ora" when the per-stop

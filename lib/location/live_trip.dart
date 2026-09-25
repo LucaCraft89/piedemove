@@ -13,7 +13,6 @@ library;
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
@@ -30,6 +29,7 @@ import 'package:piedemove/realtime/gtfs_rt.dart';
 import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/routing/journey.dart';
 import 'package:piedemove/settings/settings.dart';
+import 'package:piedemove/location/haptics.dart';
 import 'package:piedemove/ui/trip/trip_plan.dart';
 
 /// Distances the rules turn on (§12), all metres.
@@ -921,7 +921,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     state = next;
     if (next.cue != null && next.cueSeq != _lastCueSeq) {
       _lastCueSeq = next.cueSeq;
-      unawaited(HapticFeedback.vibrate());
+      unawaited(vibrateCue(next.cue!));
     }
     if (next.finished) stop();
   }
