@@ -40,25 +40,47 @@ Color shadeColor(Color mode, int shade) {
       .toColor();
 }
 
-/// Visible only where its tier's zoom floor is reached.
-List<Object> get tierOpacity => [
-      'case',
-      ['==', ['get', 'tier'], 0], 1.0,
-      ['==', ['get', 'tier'], 1], ['step', ['zoom'], 0.0, tier1MinZoom, 1.0],
-      ['step', ['zoom'], 0.0, tier2MinZoom, 1.0],
+/// Visible only where its tier's zoom floor is reached, times [factor].
+///
+/// The zoom `step` must be the top-level expression: MapLibre rejects a zoom
+/// step nested in a `case` or `*`, and a rejected property silently falls
+/// back to its default (every tier drawn at full opacity at every zoom).
+List<Object> tierOpacity({double factor = 1}) => [
+      'step',
+      ['zoom'],
+      ['case', ['==', ['get', 'tier'], 0], factor, 0.0],
+      tier1MinZoom,
+      ['case', ['<=', ['get', 'tier'], 1], factor, 0.0],
+      tier2MinZoom,
+      factor,
     ];
 
-/// `base(zoom) * min(1 + 0.4 * (n - 1), 3)` — the cap is the whole point.
+/// `base(zoom) * min(1 + 0.4 * (n - 1), 3)` — the cap is the whole point —
+/// plus [extra] (a casing or a picked highlight).
 ///
 /// Rail modes are drawn [railWidthFactor] wider than bus. The ambient source
 /// lists tram first and bus over it, so on a street they share the bus stroke
 /// sits inside the tram stroke and both stay visible without moving either
-/// line off the street.
-List<Object> get ambientWidth => [
-      '*',
-      ['interpolate', ['linear'], ['zoom'], for (final (z, w) in ambientBaseWidths) ...[z, w]],
-      ['min', ['+', 1, ['*', 0.4, ['-', ['get', 'n'], 1]]], 3],
-      ['match', ['get', 'mode'], 'bus', 1.0, railWidthFactor],
+/// line off the street. The zoom interpolation is the top-level expression
+/// (see [tierOpacity]): nested in `*` it was rejected and every line drew at
+/// the 1 px default.
+List<Object> ambientWidth({double extra = 0}) => [
+      'interpolate',
+      ['linear'],
+      ['zoom'],
+      for (final (z, w) in ambientBaseWidths) ...[
+        z,
+        [
+          '+',
+          extra,
+          [
+            '*',
+            w,
+            ['min', ['+', 1, ['*', 0.4, ['-', ['get', 'n'], 1]]], 3],
+            ['match', ['get', 'mode'], 'bus', 1.0, railWidthFactor],
+          ],
+        ],
+      ],
     ];
 
 /// Focus stroke for one `kind` (ridden|context). The zoom interpolation is the

@@ -50,6 +50,13 @@ affects routing. Copy nothing from `../piemove-maps`. High-effort work.
     it). Node-id reverse, or position within 0.5 m **and** bearing > 150 deg.
 15. Dotted stretches must be keyed by **all their points**: endpoints + count
     collided across different shapes and dropped geometry.
+17. MapLibre accepts `["zoom"]` only as the input of **one top-level**
+    `step`/`interpolate`. Nested (`["*", interpolate(zoom), n]`, a zoom step
+    inside `case`) it is rejected at runtime, logged only as `E Mbgl ...
+    Error setting property`, and the property silently takes its default:
+    every ambient line drew 1 px, opaque, all tiers at all zooms, until
+    beta 3. Put the arithmetic inside each stop (`ambientWidth(extra:)`,
+    `tierOpacity(factor:)`); `test/map_expressions_test.dart` pins the rule.
 16. No smoothing, no bus/tram shift: OSM geometry equals the basemap. Where bus
     and tram share a street, tram is drawn first and wider, bus over it.
 

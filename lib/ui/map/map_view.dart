@@ -414,8 +414,8 @@ class _MapViewState extends ConsumerState<MapView> {
         'pm-line-casing',
         LineLayerProperties(
           lineColor: _hex(surface),
-          lineWidth: ['+', ambientWidth, ambientCasingExtra],
-          lineOpacity: ['*', tierOpacity, ambientCasingOpacity],
+          lineWidth: ambientWidth(extra: ambientCasingExtra),
+          lineOpacity: tierOpacity(factor: ambientCasingOpacity),
           lineCap: 'round',
           lineJoin: 'round',
         ),
@@ -429,8 +429,8 @@ class _MapViewState extends ConsumerState<MapView> {
         LineLayerProperties(
           lineColor: ambientColor(tokens.modes),
           // A journey's context line stays thin; everything else is ambient.
-          lineWidth: ambientWidth,
-          lineOpacity: tierOpacity,
+          lineWidth: ambientWidth(),
+          lineOpacity: tierOpacity(),
           lineCap: 'round',
           lineJoin: 'round',
         ),
@@ -445,7 +445,7 @@ class _MapViewState extends ConsumerState<MapView> {
         LineLayerProperties(
           lineColor: ambientColor(tokens.modes),
           lineWidth: approxLineWidth,
-          lineOpacity: ['*', tierOpacity, approxLineOpacity],
+          lineOpacity: tierOpacity(factor: approxLineOpacity),
           lineCap: 'round',
           lineJoin: 'round',
           lineDasharray: approxLineDash,
@@ -460,7 +460,7 @@ class _MapViewState extends ConsumerState<MapView> {
         'pm-line-picked',
         LineLayerProperties(
           lineColor: ambientColor(tokens.modes),
-          lineWidth: ['+', ambientWidth, pickedExtra],
+          lineWidth: ambientWidth(extra: pickedExtra),
           lineOpacity: pickedOpacity,
           lineCap: 'round',
         ),
