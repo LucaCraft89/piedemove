@@ -1080,6 +1080,11 @@ class _MapViewState extends ConsumerState<MapView> {
 
     _stopsAdded = true;
     _stopsBusy = true;
+    // Pie images first, before the source they draw (see cluster_pies.dart).
+    final piesOk = await layer('gruppi per modo', () async {
+      await addClusterPies(controller, tokens.modes, surface, pixelRatio);
+    });
+    if (gen != _styleGen) return;
     final sourceOk = await layer('fermate', () async {
       await controller.addSource(
         _stopsSource,
@@ -1167,9 +1172,8 @@ class _MapViewState extends ConsumerState<MapView> {
 
     // Equal slices, one per mode in the bubble, over the circle; a failure
     // leaves the one-colour circle.
-    if (anchored) {
+    if (anchored && piesOk) {
       await layer('gruppi per modo', () async {
-        await addClusterPies(controller, tokens.modes, surface, pixelRatio);
         await controller.addSymbolLayer(
           _stopsSource,
           'pm-stop-cluster-pies',

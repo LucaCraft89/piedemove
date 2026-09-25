@@ -3,6 +3,9 @@
 /// A style image per mode combination (15 of them), picked per bubble from the
 /// `b`/`t`/`m`/`f` flags the source aggregates with `max`. Drawn over the
 /// single-colour circle, which stays as the fallback if the images fail.
+/// The images are registered before the clustered source exists: added in the
+/// frame of a source update, maplibre-native Android may drop them from the
+/// icon atlas (maplibre-native#4326), and the pies silently never showed.
 library;
 
 import 'dart:math' as math;
@@ -24,11 +27,19 @@ const _flags = ['b', 't', 'm', 'f'];
 
 String clusterPieName(int b, int t, int m, int f) => 'pm-pie-$b$t$m$f';
 
-/// `pm-pie-<b><t><m><f>` for the bubble under evaluation.
+/// `pm-pie-<b><t><m><f>` for the bubble under evaluation: a plain `case`
+/// over the flags (no `to-string` on the aggregated numbers).
 List<Object> clusterPieImage() => [
-      'concat',
-      'pm-pie-',
-      for (final f in _flags) ['to-string', ['get', f]],
+      'case',
+      for (var bits = 1; bits < 16; bits++) ...[
+        [
+          'all',
+          for (final (i, f) in _flags.indexed)
+            ['==', ['get', f], bits >> i & 1],
+        ],
+        clusterPieName(bits & 1, bits >> 1 & 1, bits >> 2 & 1, bits >> 3 & 1),
+      ],
+      clusterPieName(1, 0, 0, 0),
     ];
 
 /// The slice colours for a flag combination, in drawing order (clockwise
