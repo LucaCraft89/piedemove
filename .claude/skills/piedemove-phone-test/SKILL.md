@@ -118,6 +118,19 @@ programmato" without a live delay on the last ride). `lib/ui/trip/
 live_stats.dart` (pure, `test/live_stats_test.dart`); the strip ticks every
 15 s so countdowns move without fixes. Not yet seen on a real ride.
 
+## Boarding on the road (beta 5 report: "never detected")
+
+Two causes: (1) the rule needed ONE fix both within 40 m of the stop and
+faster than walking - the rider waits still, then the bus leaves the circle
+in ~5 s, usually between fixes and before the phone reports speed; (2) the
+live stream used plain `LocationSettings` = Android's ~5 s default interval.
+Now: `AndroidSettings(bestForNavigation, intervalDuration: 1 s)`; speed
+falls back to `derivedSpeed` between fixes; being within 60 m of the stop
+latches `reachedBoardStop`, and a good fix on the ride's path >= 60 m past
+the stop boards (after the latch, or at vehicle speed without it), with
+progress placed by that fix. Replays in `test/live_trip_test.dart`
+("boarding on the road"). Needs a real ride to confirm.
+
 ## Live trip audit fixes (2026-09)
 
 - Reaching the alight stop (60 m) now vibrates "scendi ora" when the per-stop
