@@ -189,7 +189,11 @@ Split each active leg's geometry at the rider's progress into two features
 from the last progress index, within a 60 m cutoff; beyond it keep the last
 progress and show "position uncertain". Legs before the current one are fully
 travelled. Travelled = mode colour desaturated at ~40% opacity; ahead = full
-colour. Walk legs split the same way.
+colour. Walk legs split the same way. **Opacity alone was not enough** (rider
+report on the road, beta 5): travelled is now neutral grey
+(`travelledColorLight/Dark`), half width (`travelledWidthFactor`, inside
+`focusWidth`'s stops so zoom stays top-level) at 0.75 opacity; walks turn
+grey too (same width, the dash is tied to it).
 
 ## 9.12 Validation
 

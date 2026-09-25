@@ -1,6 +1,8 @@
 /// Style numbers for the map layers, in one place (FIX_MASTER ground rule 3).
 library;
 
+import 'dart:ui' show Color;
+
 /// Unsnapped hops: thin dotted, marked approximate (§9.3). Round caps turn the
 /// dash pattern into dots.
 /// Tram, metro and funicular strokes are this much wider than a bus stroke.
@@ -30,7 +32,15 @@ const riddenToContextMin = 2.0;
 /// White casing added to a stroke, per side pair: ridden reads over the basemap.
 const riddenCasingExtra = 2.0, contextCasingExtra = 1.0;
 const kindRidden = 'ridden', kindContext = 'context';
-const travelledOpacity = 0.4;
+/// Ground already covered on a live trip (§9.11): opacity alone read as the
+/// same line (rider report, beta 5), so it also turns neutral grey and thin.
+/// Ahead keeps full mode colour and width.
+const travelledOpacity = 0.75;
+const travelledWidthFactor = 0.5;
+const travelledColorLight = Color(0xFF9E9E9E), travelledColorDark = Color(0xFF6E6E6E);
+
+/// `1` on a feature already travelled.
+const isTravelled = ['==', ['get', 'travelled'], 1];
 
 /// Sheet snap fractions: peek is the resting position, so the map stays usable.
 const sheetPeek = 0.15, sheetHalf = 0.5, sheetFull = 0.92;

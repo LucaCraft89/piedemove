@@ -382,6 +382,7 @@ class _MapViewState extends ConsumerState<MapView> {
         : PmTokens.lightTokens;
     final surface = _haloColor;
     final onSurface = _textColor;
+    final travelled = _mapDark ? travelledColorDark : travelledColorLight;
     final below = _stopAnchor ? 'pm-stop-clusters' : null;
     final empty = <String, dynamic>{'type': 'FeatureCollection', 'features': []};
     final gen = _styleGen;
@@ -545,13 +546,13 @@ class _MapViewState extends ConsumerState<MapView> {
           _focusLinesSource,
           'pm-focus-$kind-lines',
           LineLayerProperties(
-            lineColor: ambientColor(tokens.modes),
-            lineWidth: focusWidth(kind),
-            lineOpacity: [
+            lineColor: [
               'case',
-              ['==', ['get', 'travelled'], 1], travelledOpacity,
-              1.0,
+              isTravelled, _hex(travelled),
+              ambientColor(tokens.modes),
             ],
+            lineWidth: focusWidth(kind),
+            lineOpacity: ['case', isTravelled, travelledOpacity, 1.0],
             lineCap: 'round',
             lineJoin: 'round',
           ),
@@ -654,12 +655,8 @@ class _MapViewState extends ConsumerState<MapView> {
         _walkSource,
         'pm-walk-lines',
         LineLayerProperties(
-          lineColor: walkColor(tokens.walk),
-          lineOpacity: [
-            'case',
-            ['==', ['get', 'travelled'], 1], travelledOpacity,
-            1.0,
-          ],
+          lineColor: ['case', isTravelled, _hex(travelled), walkColor(tokens.walk)],
+          lineOpacity: ['case', isTravelled, travelledOpacity, 1.0],
           lineWidth: walkWidth,
           lineCap: 'round',
           lineDasharray: walkDash(walkWidth),
