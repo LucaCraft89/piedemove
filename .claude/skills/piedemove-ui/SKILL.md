@@ -373,3 +373,6 @@ for approval of look, palette and line style before phase 6.
   Focus is still only cleared by X / Cancella (locked, phase 2).
 - A picked time more than 30 min in the past means tomorrow.
 - Saved places, favourites and settings: writes await the first load.
+- "Linee" chip opens `lib/ui/sheets/lines_browser.dart`: every served route
+  grouped Metro/Tram/Bus/Funicolare/Altre/Regionali (`groupLines`, badge order
+  via `compareRouteNames`), filter via `searchRoutes`, tap = `openEntity(LineRef)`.

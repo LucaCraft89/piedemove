@@ -24,6 +24,7 @@ import 'package:piedemove/ui/search/search_page.dart';
 import 'package:piedemove/ui/settings/settings_page.dart';
 import 'package:piedemove/ui/sheets/nearby_sheet.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
+import 'package:piedemove/ui/sheets/lines_browser.dart';
 import 'package:piedemove/ui/trip/live_strip.dart';
 import 'package:piedemove/ui/trip/trip_plan.dart';
 import 'package:piedemove/ui/trip/trip_sheet.dart';
@@ -465,11 +466,10 @@ class _PillRow extends ConsumerWidget {
             onPressed: () => showFilters(context),
           ),
           const SizedBox(width: 8),
-          // Linee arrives with the line network in phase 6.
-          const ActionChip(
-            avatar: Icon(Icons.timeline, size: 16),
-            label: Text('Linee'),
-            onPressed: null,
+          ActionChip(
+            avatar: const Icon(Icons.timeline, size: 16),
+            label: const Text('Linee'),
+            onPressed: () => openLinesBrowser(context),
           ),
           const SizedBox(width: 8),
           ActionChip(
