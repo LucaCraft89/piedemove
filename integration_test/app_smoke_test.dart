@@ -62,8 +62,15 @@ Future<void> logRendered(ProviderContainer c, String layer) async {
   try {
     final hits = await map.queryRenderedFeaturesInRect(
         const Rect.fromLTWH(0, 0, 4000, 4000), [layer], null);
+    // Which mode mixes the bubbles hold: a mixed one must draw as a pie.
+    final mixes = <String, int>{};
+    for (final h in hits) {
+      final p = (h as Map)['properties'] as Map? ?? const {};
+      final key = [for (final f in ['b', 't', 'm', 'f']) '$f${p[f]}'].join();
+      mixes[key] = (mixes[key] ?? 0) + 1;
+    }
     // ignore: avoid_print
-    print('PM_RENDERED $layer ${hits.length}');
+    print('PM_RENDERED $layer ${hits.length} $mixes');
   } catch (e) {
     // ignore: avoid_print
     print('PM_RENDERED $layer failed: $e');
