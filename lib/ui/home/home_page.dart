@@ -17,6 +17,7 @@ import 'package:piedemove/location/live_trip.dart';
 import 'package:piedemove/places/photon.dart';
 import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/ui/map/map_focus.dart';
+import 'package:piedemove/ui/map/map_style.dart';
 import 'package:piedemove/ui/map/map_view.dart';
 import 'package:piedemove/ui/nav/entity.dart';
 import 'package:piedemove/ui/sheets/alert_sheet.dart';
@@ -133,7 +134,8 @@ class _HomePageState extends ConsumerState<HomePage> {
           ),
           Positioned(
             right: Gap.screen,
-            bottom: MediaQuery.of(context).size.height * 0.15 + Gap.screen,
+            // Just above a sheet resting at peek.
+            bottom: MediaQuery.of(context).size.height * sheetPeek + Gap.screen,
             child: FloatingActionButton.small(
               heroTag: 'pm-locate',
               tooltip: 'La mia posizione',
@@ -501,11 +503,17 @@ class _Chip extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
           onTap: onTap,
+          child: ConstrainedBox(
+          // A chip you can tap is a full 48 dp target; a status line stays slim.
+          constraints: BoxConstraints(
+              minHeight: onTap == null ? 0 : kMinInteractiveDimension),
           child: Padding(
           padding:
               const EdgeInsets.symmetric(horizontal: Gap.element, vertical: 6),
           child: Row(
             mainAxisSize: MainAxisSize.min,
+            // Centred in the taller tap target.
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               if (progress) ...[
                 const SizedBox(
@@ -519,6 +527,7 @@ class _Chip extends StatelessWidget {
                   style: TextStyle(color: scheme.onSecondaryContainer)),
             ],
           ),
+        ),
         ),
         ),
       ),

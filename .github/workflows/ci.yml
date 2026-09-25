@@ -1,0 +1,106 @@
+# Every push and PR: analyze, unit tests (the golden case against a freshly
+# built index, never skipped), then the app on an Android emulator with a
+# screenshot tour. Screenshots, logcat and the test log are uploaded.
+name: ci
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TZ: Europe/Rome # DST tests bite in the app's own zone
+      PIEDEMOVE_REQUIRE_INDEX: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+
+      # GTFS zips cached per day: the feed is regenerated daily.
+      - id: day
+        run: echo "d=$(date +%F)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            build/gtt_gtfs.zip
+            build/piemonte_bus.zip
+          key: gtfs-${{ steps.day.outputs.d }}
+      - name: Build the timetable index
+        run: |
+          for i in 1 2 3; do dart tool/build_index.dart && break; sleep $((i * 20)); done
+          test -s build/index.bin
+
+      - run: flutter test
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: index
+          path: build/index.bin
+          retention-days: 3
+
+  emulator:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      # The project asks Gradle for 8 GB; the emulator shares this runner.
+      - name: Cap the Gradle heap
+        run: |
+          mkdir -p ~/.gradle
+          echo 'org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g' >> ~/.gradle/gradle.properties
+      - name: Build the debug APK
+        run: flutter build apk --debug
+      - uses: actions/download-artifact@v4
+        with:
+          name: index
+          path: build
+      - name: Smoke tour on an emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash tool/ci/emulator_smoke.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: emulator-screenshots
+          path: |
+            build/ci/shots/
+            build/ci/itest.log
+            build/ci/logcat.txt
+          retention-days: 14

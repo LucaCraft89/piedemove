@@ -67,14 +67,29 @@ class _LinePicker extends ConsumerWidget {
                 runSpacing: 8,
                 children: [
                   for (final (name, route) in routes)
-                    InkWell(
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        openEntity(context, ref, LineRef(route));
-                      },
-                      child: LineBadge(
-                        shortName: name,
-                        routeType: ix?.routeTypes[route] ?? 3,
+                    Semantics(
+                      button: true,
+                      label: 'Linea $name',
+                      excludeSemantics: true,
+                      child: InkWell(
+                        onTap: () {
+                          Navigator.of(context).pop();
+                          openEntity(context, ref, LineRef(route));
+                        },
+                        // Badges are small; the tap target is not.
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(
+                            minWidth: kMinInteractiveDimension,
+                            minHeight: kMinInteractiveDimension,
+                          ),
+                          child: Center(
+                            widthFactor: 1,
+                            child: LineBadge(
+                              shortName: name,
+                              routeType: ix?.routeTypes[route] ?? 3,
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                 ],

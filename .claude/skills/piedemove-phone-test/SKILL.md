@@ -119,3 +119,14 @@ Grant/revoke: `adb shell pm grant|revoke <pkg> android.permission.ACCESS_FINE_LO
 - The no-fix schedule estimate subtracts the run's reported delay.
 - A dead GPS stream (live trip and the position dot) is re-opened after 5 s;
   a second `start()` stops the first trip; dispose releases the wakelock.
+
+## Emulator smoke tour in CI (no phone needed)
+
+`.github/workflows/ci.yml` job `emulator` (after `check`): debug APK, API 34
+x86_64 emulator (KVM), `tool/ci/emulator_smoke.sh` installs, seeds the index
+the `check` job built (run-as copy into `files/index.bin`), runs
+`integration_test/app_smoke_test.dart`, and `adb screencap`s every
+`PM_STEP <name>` (home, Linee, line on map, search, golden trip results and
+detail). Artifact `emulator-screenshots` holds the PNGs, `itest.log` and
+`logcat.txt`; a `FATAL EXCEPTION`/ANR in logcat fails the job. It is an
+emulator: GPS, live trip and real-ride checks still need the phone.
