@@ -5,6 +5,7 @@ import 'package:piedemove/data/transit_index.dart';
 import 'package:piedemove/location/live_trip.dart';
 import 'package:piedemove/routing/journey.dart';
 import 'package:piedemove/ui/trip/live_stats.dart';
+import 'package:piedemove/ui/trip/live_strip.dart' show waitingLabel;
 
 import 'support/synthetic.dart';
 
@@ -103,5 +104,13 @@ void main() {
     expect(delayLabel(20), 'in orario');
     expect(delayLabel(180), '+3 min');
     expect(delayLabel(-60), '-1 min');
+  });
+
+  test('at the boarding stop the strip says which bus to wait for', () {
+    final walking = _state();
+    expect(waitingLabel(walking, _ix), isNull, reason: 'not at the stop yet');
+    final waiting = walking.copyWith(reachedBoardStop: true);
+    expect(waitingLabel(waiting, _ix), 'Aspetta il 2 per Fermata 3');
+    expect(waitingLabel(_state(leg: 1), _ix), isNull, reason: 'aboard');
   });
 }
