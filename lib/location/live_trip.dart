@@ -154,6 +154,8 @@ class LiveTripState {
     this.cue,
     this.cueSeq = 0,
     this.reachedBoardStop = false,
+    this.boardWaitAlong = -1,
+    this.legStartedAt,
   });
 
   final LiveRoute route;
@@ -192,6 +194,16 @@ class LiveTripState {
   /// ([liveBoardLatchRadius]). Reset on every leg change.
   final bool reachedBoardStop;
 
+  /// Walking to a ride, once at the stop: the least metres along the ride's
+  /// path the rider has been seen at (where they wait). Boarding is measured
+  /// from here, not from the stop: a transfer pole a few metres behind the
+  /// alight pole put the rider "60 m past it" on GPS noise alone. -1 = none.
+  final double boardWaitAlong;
+
+  /// When the current leg began (the fix that switched to it). On a ride it
+  /// picks the run actually boarded, which may not be the planned one.
+  final DateTime? legStartedAt;
+
   LiveLeg get leg => route.legs[legIndex.clamp(0, route.legs.length - 1)];
   bool get riding => leg.kind == LegKind.ride;
   bool get isLastLeg => legIndex >= route.legs.length - 1;
@@ -210,6 +222,8 @@ class LiveTripState {
     LiveCue? cue,
     int? cueSeq,
     bool? reachedBoardStop,
+    double? boardWaitAlong,
+    DateTime? legStartedAt,
     bool clearOffRouteSince = false,
     bool clearCue = false,
   }) => LiveTripState(
@@ -230,6 +244,8 @@ class LiveTripState {
     cue: clearCue ? null : (cue ?? this.cue),
     cueSeq: cueSeq ?? this.cueSeq,
     reachedBoardStop: reachedBoardStop ?? this.reachedBoardStop,
+    boardWaitAlong: boardWaitAlong ?? this.boardWaitAlong,
+    legStartedAt: legStartedAt ?? this.legStartedAt,
   );
 }
 
@@ -464,23 +480,45 @@ LiveTripState advanceLive(
   final movingLikeAVehicle = fix.speed > walkSpeed * 1.6;
 
   if (boarding) {
+    final ride = state.route.legs[state.legIndex + 1];
+    final onRide = projectAhead(ride, lat, lon, 0, maxAhead: ride.metres);
     if (straightToEnd <= liveBoardLatchRadius && !state.reachedBoardStop) {
       state = state.copyWith(reachedBoardStop: true);
     }
-    // On the ride's path past the stop: aboard, whatever the speed says -
-    // after being at the stop, or clearly moving like a vehicle.
-    final ride = state.route.legs[state.legIndex + 1];
-    final onRide = projectAhead(ride, lat, lon, 0, maxAhead: ride.metres);
+    // Where the rider waits, on the ride's path (least seen while at stop).
+    if (state.reachedBoardStop &&
+        straightToEnd <= liveBoardLatchRadius &&
+        onRide.distance <= liveOnRouteCutoff &&
+        (state.boardWaitAlong < 0 || onRide.along < state.boardWaitAlong)) {
+      state = state.copyWith(boardWaitAlong: onRide.along);
+    }
+    // Aboard: on the ride's path, 60 m past the stop *and* past where the
+    // rider waited, not at walking pace. A known speed must look like a
+    // vehicle; an unknown one is accepted only after being at the stop.
     // A good fix (not the vehicle stand-in); "estimated" is no guard here:
     // past the stop the rider is off the walk leg, which is what sets it.
+    final speedOk =
+        fix.speed < 0 ? state.reachedBoardStop : movingLikeAVehicle;
     if (fix.accuracy <= livePoorAccuracy &&
         onRide.distance <= liveOnRouteCutoff &&
         onRide.along >= liveBoardedAlong &&
-        (state.reachedBoardStop || movingLikeAVehicle)) {
+        onRide.along >= math.max(0.0, state.boardWaitAlong) + liveBoardedAlong &&
+        speedOk) {
       // Straight onto the ride, progress placed by this same fix.
       return advanceLive(nextLeg(state), fix,
           vehicleLat: vehicleLat, vehicleLon: vehicleLon, walkSpeed: walkSpeed);
     }
+  }
+
+  // Near the alight stop but still moving like a vehicle: the rider is still
+  // aboard. Say "get off" now, switch to the walk once they are off - an
+  // early switch put the rider onto the next ride while still on this one.
+  if (leg.kind == LegKind.ride &&
+      straightToEnd <= liveAlightRadius &&
+      movingLikeAVehicle) {
+    return s.stopsRemaining > 0 && state.stopsRemaining > 0
+        ? _cue(state.copyWith(stopsRemaining: 0), LiveCue.alightNow)
+        : state.copyWith(stopsRemaining: 0);
   }
 
   final advance = switch (leg.kind) {
@@ -645,7 +683,7 @@ LiveTripState? rerouteWalkLeg(
 }
 
 /// Marks the current leg done. Also the manual "Sono salito" / "Sono sceso".
-LiveTripState nextLeg(LiveTripState s) {
+LiveTripState nextLeg(LiveTripState s, {DateTime? at}) {
   if (s.isLastLeg) {
     return s.copyWith(finished: true, metresToEnd: 0, stopsRemaining: 0);
   }
@@ -661,6 +699,8 @@ LiveTripState nextLeg(LiveTripState s) {
     clearOffRouteSince: true,
     clearCue: true,
     reachedBoardStop: false,
+    boardWaitAlong: -1,
+    legStartedAt: at ?? s.lastFix,
   );
 }
 
@@ -785,7 +825,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   void manualAdvance() {
     final s = state;
     if (s == null) return;
-    final next = nextLeg(s);
+    final next = nextLeg(s, at: DateTime.now());
     state = next;
     if (next.finished) stop();
   }
