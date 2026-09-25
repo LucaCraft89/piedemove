@@ -109,6 +109,19 @@ Grant/revoke: `adb shell pm grant|revoke <pkg> android.permission.ACCESS_FINE_LO
 - Walk legs have no off-route banner by design (riding only); the strip always carries an inline Ricalcola.
 - 6b verified live (mock): strip 380 -> 230 m with the fix advanced 150 m, next-maneuver line, travelled part faded / ahead bright joined at the dot, Ricalcola from a fix 200 m off reroutes the leg from the dot (450 m, new first maneuver) without replanning. Not verified: ride-leg off-route banner, no-fix Ricalcola fallback.
 
+## Live strip, at a glance (beta 6 report: "timing not live, hard to read")
+
+Times now follow **live departures at the boarding stop** for the ride's
+option patterns (`nextDepartures` + delays): the next bus and the one after,
+rolling over when one passes - the planned run was often gone or outside
+GTT's ~7-stop update window, so it sat on "programmato". On board the run
+is `boardedRun`: the one whose expected departure was nearest
+`legStartedAt` (set by `nextLeg`, within 15 min), else the planned one.
+Layout: big bold instruction + one detail line; a hero tile (minutes to the
+bus / stops left / metres left, time and delay under it, delay coloured);
+three stat tiles (arrival, time left, distance left). Ticks every 10 s.
+`test/live_stats_test.dart`, `test/live_strip_widget_test.dart` (360 dp).
+
 ## Live strip numbers (post beta 5, rider request)
 
 Under the instruction: walking to a ride, "Il 10 passa alle 18:07 · tra

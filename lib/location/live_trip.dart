@@ -155,6 +155,7 @@ class LiveTripState {
     this.cueSeq = 0,
     this.reachedBoardStop = false,
     this.boardWaitAlong = -1,
+    this.legStartedAt,
   });
 
   final LiveRoute route;
@@ -199,6 +200,10 @@ class LiveTripState {
   /// alight pole put the rider "60 m past it" on GPS noise alone. -1 = none.
   final double boardWaitAlong;
 
+  /// When the current leg began (the fix that switched to it). On a ride it
+  /// picks the run actually boarded, which may not be the planned one.
+  final DateTime? legStartedAt;
+
   LiveLeg get leg => route.legs[legIndex.clamp(0, route.legs.length - 1)];
   bool get riding => leg.kind == LegKind.ride;
   bool get isLastLeg => legIndex >= route.legs.length - 1;
@@ -218,6 +223,7 @@ class LiveTripState {
     int? cueSeq,
     bool? reachedBoardStop,
     double? boardWaitAlong,
+    DateTime? legStartedAt,
     bool clearOffRouteSince = false,
     bool clearCue = false,
   }) => LiveTripState(
@@ -239,6 +245,7 @@ class LiveTripState {
     cueSeq: cueSeq ?? this.cueSeq,
     reachedBoardStop: reachedBoardStop ?? this.reachedBoardStop,
     boardWaitAlong: boardWaitAlong ?? this.boardWaitAlong,
+    legStartedAt: legStartedAt ?? this.legStartedAt,
   );
 }
 
@@ -676,7 +683,7 @@ LiveTripState? rerouteWalkLeg(
 }
 
 /// Marks the current leg done. Also the manual "Sono salito" / "Sono sceso".
-LiveTripState nextLeg(LiveTripState s) {
+LiveTripState nextLeg(LiveTripState s, {DateTime? at}) {
   if (s.isLastLeg) {
     return s.copyWith(finished: true, metresToEnd: 0, stopsRemaining: 0);
   }
@@ -693,6 +700,7 @@ LiveTripState nextLeg(LiveTripState s) {
     clearCue: true,
     reachedBoardStop: false,
     boardWaitAlong: -1,
+    legStartedAt: at ?? s.lastFix,
   );
 }
 
@@ -817,7 +825,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   void manualAdvance() {
     final s = state;
     if (s == null) return;
-    final next = nextLeg(s);
+    final next = nextLeg(s, at: DateTime.now());
     state = next;
     if (next.finished) stop();
   }
