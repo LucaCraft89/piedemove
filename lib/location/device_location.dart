@@ -108,6 +108,7 @@ class LocationController extends StateNotifier<LocState>
       );
     } catch (e) {
       debugPrint('pm: location stream unavailable: $e');
+      _lost(); // no stream at all: re-check and retry like a dead one
     }
   }
 

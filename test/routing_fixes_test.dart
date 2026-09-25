@@ -189,6 +189,26 @@ void main() {
       expect(next.where((d) => d.scheduled == 8 * _h), isEmpty);
     });
 
+    test('an overtaking run inside the horizon is not cut off', () {
+      // Sorted at A, trip 0 comes first but reaches B after the horizon;
+      // trip 1 overtakes it and leaves B within minutes.
+      final ix = syntheticIndex(
+        stops: [
+          ('A', 'ALFA', 45.0, 7.6),
+          ('B', 'BRAVO', 45.01, 7.6),
+          ('C', 'CHARLIE', 45.02, 7.6),
+        ],
+        patterns: [
+          ('7', 3, ['A', 'B', 'C'], [
+            [6 * _h, 10 * _h, 10 * _h + 5 * _m],
+            [6 * _h + 1 * _m, 6 * _h + 10 * _m, 6 * _h + 20 * _m],
+          ]),
+        ],
+      );
+      final next = nextDepartures(ix, 1, at(6, 5), 5);
+      expect(next.map((d) => d.trip), [1]);
+    });
+
     test('a late-evening horizon reaches tomorrow morning', () {
       final next = nextDepartures(ix, 0, at(23, 30), 5);
       expect(next.map((d) => d.scheduled), contains(24 * _h + 1 * _h + 30 * _m));

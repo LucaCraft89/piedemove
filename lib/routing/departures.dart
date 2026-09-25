@@ -88,14 +88,15 @@ List<Departure> nextDepartures(
       if (from + horizonSeconds >= secondsPerDay) (todayIdx + 1, secondsPerDay),
     ]) {
       if (dayIdx < 0 || dayIdx >= ix.serviceDayCount) continue;
-      var added = 0;
+      // Trips are sorted at the pattern's first stop, not here: an
+      // overtaking run can come later in the list, so scan them all.
       for (var t = 0; t < ix.patternTripCount(pattern); t++) {
         final trip = ix.patternTripAt(pattern, t);
         final scheduled = ix.depOf(trip, pos) + offset;
         // Scheduled time can be past while the bus is still coming: a late
         // run stays listed until its expected time, an early one leaves then.
         if (scheduled < from - lateLookbackSeconds) continue;
-        if (scheduled > from + horizonSeconds) break;
+        if (scheduled > from + horizonSeconds) continue;
         if (!ix.serviceRunsOn(ix.tripService[trip], dayIdx)) continue;
         // Realtime cancellations are for today's runs only.
         if (dayIdx == todayIdx && (unavailable?.call(trip, pos) ?? false)) {
@@ -114,7 +115,6 @@ List<Departure> nextDepartures(
           delaySeconds: delay,
           date: date,
         ));
-        if (++added >= n) break;
       }
     }
   }

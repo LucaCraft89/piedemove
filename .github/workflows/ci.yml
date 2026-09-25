@@ -68,7 +68,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21' # maplibre_gl compiles with source level 21
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -126,7 +126,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21' # maplibre_gl compiles with source level 21
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -136,15 +136,22 @@ jobs:
         run: |
           mkdir -p ~/.gradle
           echo 'org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g' >> ~/.gradle/gradle.properties
-      # With the PM_* secrets set, the release key signs; without, the build
-      # falls back to the debug key (see android/app/build.gradle.kts).
+      # With the PM_* secrets set, the release key signs. Without them the
+      # build would fall back to the debug key, which later key-signed updates
+      # cannot replace: refuse, unless the release commit says
+      # "[debug-signed]" to accept that on purpose (a beta for testers).
       - name: Release keystore
+        env:
+          HEAD_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           if [ -n "$PM_KEYSTORE_BASE64" ]; then
             echo "$PM_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
             echo "PM_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          elif printf '%s' "$HEAD_MESSAGE" | grep -qF '[debug-signed]'; then
+            echo "::warning::no release keystore: signing with the debug key, as the commit asked"
           else
-            echo "::warning::no release keystore secret: the APK is signed with the debug key"
+            echo "::error::no release keystore secret (PM_KEYSTORE_BASE64 ...); add it, or say [debug-signed] in the release commit"
+            exit 1
           fi
       - run: flutter build apk --release
       - name: Publish the prerelease

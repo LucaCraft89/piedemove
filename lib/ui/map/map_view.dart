@@ -551,6 +551,7 @@ class _MapViewState extends ConsumerState<MapView> {
       }
     }
 
+    if (gen != _styleGen) return; // a newer style owns the map now
     // Everything below is optional dressing: its own try/catch each.
     try {
       final connectors =
@@ -576,6 +577,7 @@ class _MapViewState extends ConsumerState<MapView> {
       debugPrint('pm: layer raccordi failed: $e');
     }
 
+    if (gen != _styleGen) return; // a newer style owns the map now
     try {
       await controller.addSource(
         _walkSource,
@@ -614,6 +616,7 @@ class _MapViewState extends ConsumerState<MapView> {
       debugPrint('pm: layer piedi failed: $e');
     }
 
+    if (gen != _styleGen) return; // a newer style owns the map now
     try {
       await controller.addSource(
         _focusStopsSource,
@@ -754,6 +757,9 @@ class _MapViewState extends ConsumerState<MapView> {
     final wasFitted = _fitted;
     _fitted = focus;
     final empty = <String, dynamic>{'type': 'FeatureCollection', 'features': []};
+    // A style reload mid-draw re-applies the focus on the new style itself
+    // (_focusDrawn is reset there); this run must stop writing.
+    final gen = _styleGen;
 
     try {
       // Ambient layers are hidden, never re-sourced: their data and tiering
@@ -762,6 +768,7 @@ class _MapViewState extends ConsumerState<MapView> {
       for (final layer in _ambientLayers) {
         await controller.setLayerVisibility(layer, !focused);
       }
+      if (gen != _styleGen) return;
       if (focus is! JourneyFocus) _noteApproximateWalks(null);
       switch (focus) {
         case null:
@@ -1097,7 +1104,7 @@ class _MapViewState extends ConsumerState<MapView> {
     });
     if (gen == _styleGen) _stopAnchor = anchored;
 
-    await layer('pali', () async {
+    final poles = await layer('pali', () async {
       // Invisible, larger circle first: a >= 44 px tap target (§14).
       await controller.addCircleLayer(
         _stopsSource,
@@ -1127,7 +1134,7 @@ class _MapViewState extends ConsumerState<MapView> {
       );
     });
 
-    await layer('nomi fermata', () async {
+    final names = await layer('nomi fermata', () async {
       await controller.addSymbolLayer(
         _stopsSource,
         'pm-stop-labels',
@@ -1149,7 +1156,12 @@ class _MapViewState extends ConsumerState<MapView> {
         enableInteraction: false,
       );
     });
-    if (gen == _styleGen) _stopsBusy = false;
+    if (gen == _styleGen) {
+      // A group that failed is retried on a later build: the source and the
+      // groups already there answer "already exists", which counts as done.
+      _stopsAdded = anchored && poles && names;
+      _stopsBusy = false;
+    }
     unawaited(_raiseMe());
   }
 
