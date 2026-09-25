@@ -91,7 +91,8 @@ void main() {
     await hold(t, const Duration(seconds: 1));
     await t.enterText(find.byType(TextField), '68');
     await step(t, '04-search');
-    await t.pageBack();
+    // The Android system back, as a user leaves search.
+    await t.binding.handlePopRoute();
     await hold(t, const Duration(seconds: 1));
 
     // The golden trip, on the next weekday at 18:00.
