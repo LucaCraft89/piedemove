@@ -54,4 +54,22 @@ class StopClusters {
     }
     return StopClusters(clusterOf, members, names);
   }
+
+  /// The poles of the stop a [Place] with `stop: true` names: the cluster of
+  /// the nearest stop with that clean [name] within [clusterRadiusMetres] of
+  /// the point. Empty when nothing matches (renamed or removed stop): the
+  /// planner then treats the place as a plain point.
+  List<int> groupAt(TransitIndex ix, String name, double lat, double lon) {
+    var best = -1;
+    var bestD = clusterRadiusMetres;
+    for (var s = 0; s < ix.stopCount; s++) {
+      if (cleanStopName(ix.stopNames[s]) != name) continue;
+      final d = haversineMetres(lat, lon, ix.stopLat[s], ix.stopLon[s]);
+      if (d <= bestD) {
+        best = s;
+        bestD = d;
+      }
+    }
+    return best < 0 ? const [] : members[clusterOfStop[best]];
+  }
 }

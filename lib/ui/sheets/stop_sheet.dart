@@ -84,6 +84,17 @@ class _StopBodyState extends ConsumerState<StopBody> {
     final shown = _filter == null
         ? departures
         : [for (final d in departures) if (d.routeShortName == _filter) d];
+    // The same stop's other poles (usually the other direction, across the
+    // street): search lists a stop once, so they are one tap from here.
+    final clusters = ref.watch(stopClustersProvider);
+    final siblings = clusters == null
+        ? const <int>[]
+        : [
+            for (final m in clusters.members[clusters.clusterOfStop[stop]])
+              if (m != stop &&
+                  ix.stopPatternOffset[m] != ix.stopPatternOffset[m + 1])
+                m,
+          ];
 
     return ListView(
       controller: widget.controller,
@@ -130,6 +141,28 @@ class _StopBodyState extends ConsumerState<StopBody> {
               ),
               child: DepartureRow(departure: d, now: now),
             ),
+        if (siblings.isNotEmpty) ...[
+          const SheetSection('Stessa fermata, altri pali'),
+          for (final m in siblings)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              minTileHeight: Gap.row,
+              leading: const Icon(Icons.signpost_outlined),
+              title: Text('Fermata ${ix.stopCodes[m]}'),
+              subtitle: Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: [
+                  for (final r in ix.routesAt(m).take(8))
+                    LineBadge(
+                      shortName: ix.routeShortNames[r],
+                      routeType: ix.routeTypes[r],
+                    ),
+                ],
+              ),
+              onTap: () => openEntity(context, ref, StopRef(m)),
+            ),
+        ],
         if (entrances.isNotEmpty) ...[
           const SheetSection('Ingressi della metro'),
           for (final (name, metres) in entrances)

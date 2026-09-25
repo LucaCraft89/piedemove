@@ -25,12 +25,14 @@ import 'journey.dart';
   (double, double)? origin,
   (double, double)? destination,
 }) {
+  (double, double) at(int s) => (ix.stopLat[s], ix.stopLon[s]);
+  // A trip to or from a stop starts or ends at the pole it uses.
   final a = leg.fromStop >= 0
-      ? (ix.stopLat[leg.fromStop], ix.stopLon[leg.fromStop])
-      : origin;
+      ? at(leg.fromStop)
+      : (leg.placeStop >= 0 ? at(leg.placeStop) : origin);
   final b = leg.toStop >= 0
-      ? (ix.stopLat[leg.toStop], ix.stopLon[leg.toStop])
-      : destination;
+      ? at(leg.toStop)
+      : (leg.placeStop >= 0 ? at(leg.placeStop) : destination);
   return a == null || b == null ? null : (a, b);
 }
 

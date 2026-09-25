@@ -43,6 +43,7 @@ class Leg {
     this.options = const [],
     this.readyTime = 0,
     this.route,
+    this.placeStop = -1,
   });
 
   final LegKind kind;
@@ -65,6 +66,12 @@ class Leg {
   /// covered both ends. Null = [walkMetres] is an estimate, shown with "≈".
   final WalkRoute? route;
 
+  /// First/last walk legs of a trip to or from a **stop** (all its poles, see
+  /// `PlanRequest.originStops`): the pole standing in for the place end
+  /// (`fromStop`/`toStop` -1), so the walk starts or ends on the side the
+  /// journey uses, not at the group's centre. -1 for an ordinary place.
+  final int placeStop;
+
   Leg withWalk({
     required double walkMetres,
     required int arrival,
@@ -81,6 +88,7 @@ class Leg {
         options: options,
         readyTime: readyTime,
         route: route,
+        placeStop: placeStop,
       );
 
   bool get detoured => options.any((o) => o.detoured);

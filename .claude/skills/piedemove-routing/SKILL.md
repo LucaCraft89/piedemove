@@ -199,3 +199,16 @@ Full detail in `docs/walk_routing.md`. Short version:
   crossing way tagged so costs as unmarked. Updater stores no ETag for an
   incompatible manifest and drops it when the downloaded graph is gone; the
   format check runs in an isolate.
+
+## Stop endpoints (beta 5)
+
+A stop picked in search is `Place(stop: true)`: its clean name plus one
+pole's point. `planRequestFor(originStops:, destStops:)` gets every pole of
+the group from `StopClusters.groupAt` (nearest same-name stop within 150 m,
+then its cluster; by name and place, so saved stops survive renumbering).
+`_ends` seeds each pole at 0 m and measures other stops from the **nearest
+pole**, recorded per stop; `_buildJourney` puts that pole on the access /
+egress leg as `Leg.placeStop` (the -1 end keeps meaning "the place").
+`walkLegEnds`, the live route and the Partenza/Arrivo markers use it. So a
+trip from PIAZZA boards on whichever side its line leaves from, at 0 m, and a
+trip to a stop arrives at any pole. Tests: `test/stop_groups_test.dart`.

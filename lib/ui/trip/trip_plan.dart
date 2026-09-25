@@ -9,6 +9,9 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:piedemove/data/clustering.dart';
+import 'package:piedemove/data/providers.dart' show stopClustersProvider;
+import 'package:piedemove/data/transit_index.dart';
 import 'package:piedemove/places/photon.dart';
 import 'package:piedemove/realtime/store.dart' show unavailableLookupProvider;
 import 'package:piedemove/routing/departures.dart' show UnavailableLookup;
@@ -133,6 +136,8 @@ PlanRequest planRequestFor({
   required Set<int> suspendedStops,
   required Set<int> detouredRoutes,
   UnavailableLookup? unavailable,
+  List<int> originStops = const [],
+  List<int> destStops = const [],
 }) {
   final from = query.from!;
   final to = query.to!;
@@ -157,7 +162,17 @@ PlanRequest planRequestFor({
     excludedRouteTypes: settings.excludedModes,
     // Realtime cancellations describe today's runs only.
     unavailable: today ? unavailable : null,
+    originStops: originStops,
+    destStops: destStops,
   );
+}
+
+/// Every pole of [place] when it is a stop picked in search, else none.
+List<int> stopPoles(TransitIndex? ix, StopClusters? clusters, Place? place) {
+  if (ix == null || clusters == null || place == null || !place.stop) {
+    return const [];
+  }
+  return clusters.groupAt(ix, place.name, place.lat, place.lon);
 }
 
 /// Pause after the last filter change before [TripPlanController.replanSoon]
@@ -247,6 +262,8 @@ class TripPlanController extends StateNotifier<TripState> {
       suspendedStops: _ref.read(suspendedStopsProvider),
       detouredRoutes: _ref.read(detouredRoutesProvider),
       unavailable: _ref.read(unavailableLookupProvider),
+      originStops: stopPoles(planner.ix, _ref.read(stopClustersProvider), query.from),
+      destStops: stopPoles(planner.ix, _ref.read(stopClustersProvider), query.to),
     );
     TripResult result;
     try {

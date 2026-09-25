@@ -4,6 +4,7 @@
 /// the search box keeps working with every feed down.
 library;
 
+import 'package:piedemove/data/clustering.dart';
 import 'package:piedemove/data/transit_index.dart';
 import 'package:piedemove/geo/distance.dart';
 import 'package:piedemove/realtime/gtfs_rt.dart';
@@ -62,6 +63,40 @@ List<int> searchStops(
   }
   hits.sort((a, b) => a.$2.compareTo(b.$2));
   return [for (final h in hits.take(limit)) h.$1];
+}
+
+/// Stop groups (one per stop, all its poles - usually one per direction)
+/// matching [query], nearest first, each as its served poles with the one
+/// nearest the user first. A search lists a stop once, like a map app;
+/// the planner then chooses the side per journey.
+List<List<int>> searchStopGroups(
+  TransitIndex ix,
+  StopClusters clusters,
+  String query, {
+  double? lat,
+  double? lon,
+  int limit = 12,
+}) {
+  final hits = searchStops(ix, query, lat: lat, lon: lon, limit: ix.stopCount);
+  final seen = <int>{};
+  final out = <List<int>>[];
+  for (final s in hits) {
+    final c = clusters.clusterOfStop[s];
+    if (!seen.add(c)) continue;
+    // Members that no line serves are noise here too.
+    final served = [
+      for (final m in clusters.members[c])
+        if (ix.stopPatternOffset[m] != ix.stopPatternOffset[m + 1]) m,
+    ];
+    served.sort((a, b) {
+      if (lat == null || lon == null) return a.compareTo(b);
+      return haversineMetres(lat, lon, ix.stopLat[a], ix.stopLon[a])
+          .compareTo(haversineMetres(lat, lon, ix.stopLat[b], ix.stopLon[b]));
+    });
+    out.add(served);
+    if (out.length == limit) break;
+  }
+  return out;
 }
 
 /// A line number typed on its own: "68", "4", "10B", "58/".
