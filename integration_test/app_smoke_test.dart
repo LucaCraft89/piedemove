@@ -70,8 +70,9 @@ void main() {
                 matching: find.byType(Scrollable))
             .first);
     await t.tap(linee);
-    await hold(t, const Duration(seconds: 1));
-    expect(find.text('Metro'), findsWidgets);
+    expect(await pumpUntil(t, () => find.text('Metro').evaluate().isNotEmpty,
+            timeout: const Duration(seconds: 15)),
+        isTrue, reason: 'Linee page did not open');
     await step(t, '02-lines');
 
     await t.enterText(find.byType(TextField), '4');
@@ -88,7 +89,10 @@ void main() {
                 matching: find.byType(Scrollable))
             .first);
     await t.tap(find.widgetWithText(ActionChip, 'Cerca'));
-    await hold(t, const Duration(seconds: 1));
+    // The search route animates in; on a busy emulator 1 s was not always it.
+    expect(await pumpUntil(t, () => find.byType(TextField).evaluate().isNotEmpty,
+            timeout: const Duration(seconds: 15)),
+        isTrue, reason: 'search page did not open');
     await t.enterText(find.byType(TextField), '68');
     await step(t, '04-search');
     // The Android system back, as a user leaves search.

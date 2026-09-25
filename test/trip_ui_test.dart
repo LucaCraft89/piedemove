@@ -141,6 +141,15 @@ void main() {
           'partito');
     });
 
+    test('a far departure reads as hours, or as a day and time', () {
+      final now = DateTime(2026, 9, 25, 1, 10); // a Friday
+      expect(leavesInLabel(DateTime(2026, 9, 25, 3, 15), now),
+          'parte tra 2 h 5 min');
+      expect(leavesInLabel(DateTime(2026, 9, 25, 4, 10), now), 'parte tra 3 h');
+      // Monday 18:00, not "parte tra 5330 min".
+      expect(leavesInLabel(DateTime(2026, 9, 28, 18, 0), now), 'parte lun 18:00');
+    });
+
     test('a connection under two minutes is flagged, a comfortable one is not',
         () {
       final tight = Journey([

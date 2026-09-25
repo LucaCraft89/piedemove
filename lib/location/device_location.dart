@@ -36,9 +36,9 @@ class LocState {
 /// its own stream for the dot.
 final locationProvider =
     StateNotifierProvider<LocationController, LocState>((ref) {
-  final c = LocationController();
-  ref.onDispose(c.dispose);
-  return c;
+  // StateNotifierProvider disposes its notifier itself; registering
+  // c.dispose here too ran it twice and threw when the app scope closed.
+  return LocationController();
 });
 
 /// Last known position, null while unknown or denied.
