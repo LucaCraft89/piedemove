@@ -18,7 +18,8 @@ adb install -r build/app/outputs/flutter-apk/app-debug.apk
 if [ -f build/index.bin ]; then
   adb push build/index.bin /data/local/tmp/index.bin
   adb shell chmod 644 /data/local/tmp/index.bin
-  adb shell run-as "$PKG" sh -c 'mkdir -p files && cp /data/local/tmp/index.bin files/index.bin' \
+  # One string: adb shell re-splits its arguments on the device.
+  adb shell "run-as $PKG sh -c 'mkdir -p files && cp /data/local/tmp/index.bin files/index.bin'" \
     && echo "seeded index.bin" || echo "could not seed index.bin: the app will build it"
 fi
 

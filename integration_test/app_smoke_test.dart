@@ -61,7 +61,15 @@ void main() {
     expect(ready, isTrue, reason: 'timetable index never loaded');
     await step(t, '01-home');
 
-    await t.tap(find.widgetWithText(ActionChip, 'Linee'));
+    // The chip row scrolls sideways; on a phone "Linee" starts off screen.
+    final linee = find.widgetWithText(ActionChip, 'Linee');
+    await t.scrollUntilVisible(linee, 120,
+        scrollable: find
+            .ancestor(
+                of: find.widgetWithText(ActionChip, 'Cerca'),
+                matching: find.byType(Scrollable))
+            .first);
+    await t.tap(linee);
     await hold(t, const Duration(seconds: 1));
     expect(find.text('Metro'), findsWidgets);
     await step(t, '02-lines');
@@ -73,6 +81,12 @@ void main() {
     container.read(focusProvider.notifier).close();
     await hold(t, const Duration(seconds: 1));
 
+    await t.scrollUntilVisible(find.widgetWithText(ActionChip, 'Cerca'), -120,
+        scrollable: find
+            .ancestor(
+                of: find.widgetWithText(ActionChip, 'Filtri'),
+                matching: find.byType(Scrollable))
+            .first);
     await t.tap(find.widgetWithText(ActionChip, 'Cerca'));
     await hold(t, const Duration(seconds: 1));
     await t.enterText(find.byType(TextField), '68');

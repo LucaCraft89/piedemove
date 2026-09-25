@@ -436,7 +436,7 @@ class _PillRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final vehiclesOn = ref.watch(vehiclesVisibleProvider);
-    final alerts = ref.watch(realtimeProvider).alerts.length;
+    final alerts = ref.watch(realtimeProvider.select((r) => r.alerts.length));
     return SizedBox(
       height: 36,
       child: ListView(

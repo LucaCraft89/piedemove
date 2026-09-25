@@ -58,6 +58,8 @@ jobs:
     needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 75
+    permissions:
+      contents: write # the ci-shots branch below
     steps:
       - uses: actions/checkout@v4
       - name: Enable KVM
@@ -95,6 +97,23 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: bash tool/ci/emulator_smoke.sh
+      # Also as one orphan commit on `ci-shots`, readable with a plain git fetch
+      # where artifact storage is not reachable. Overwritten on every push run.
+      - name: Publish screenshots to the ci-shots branch
+        if: always() && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ -d build/ci/shots ] || exit 0
+          out=$(mktemp -d)
+          cp -r build/ci/shots "$out/"
+          cp build/ci/itest.log build/ci/logcat.txt "$out/" 2>/dev/null || true
+          cd "$out"
+          git init -q -b ci-shots
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com add -A
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com \
+            commit -q -m "emulator screenshots for $GITHUB_SHA (run $GITHUB_RUN_ID)"
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:ci-shots
       - uses: actions/upload-artifact@v4
         if: always()
         with:
