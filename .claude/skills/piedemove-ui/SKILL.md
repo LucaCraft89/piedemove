@@ -391,6 +391,10 @@ for approval of look, palette and line style before phase 6.
 - Ride legs show **one** `LineGroupBadge` (segment per mode, "10 · 16", cap 6
   then "+N"); the detail's "Altre linee" rows are tappable to the line.
 - `entityNav.push` ignores the entity already on top (refs have `==`).
+- Closing the last sheet (X, back, `FocusController.close`) returns to the
+  **running live trip, else the trip open in the planner's detail**
+  (`_tripFocus`); only with neither does the focus clear. A stop or line
+  looked at mid-trip lost the trip before (rider report, beta 5).
   Focus is still only cleared by X / Cancella (locked, phase 2).
 - A picked time more than 30 min in the past means tomorrow.
 - Saved places, favourites and settings: writes await the first load.
