@@ -13,6 +13,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 
 import 'package:piedemove/data/providers.dart';
+import 'package:piedemove/geo/distance.dart';
 import 'package:piedemove/geo/line_providers.dart';
 import 'package:piedemove/places/photon.dart';
 import 'package:piedemove/places/saved.dart';
@@ -186,6 +187,15 @@ class _MapViewState extends ConsumerState<MapView> {
   /// Dot operations run one at a time: add, move and raise must not interleave.
   Future<void> _meChain = Future.value();
 
+  /// Where the dot is drawn right now (a glide step, or the fix itself).
+  (double, double)? _meAt;
+
+  /// The last fix handed to the chain (drawn or about to be).
+  Position? _meQueued;
+
+  /// Bumped per fix: a glide still running for an older fix stops.
+  int _meGlideGen = 0;
+
   /// The place currently pinned by search, as last drawn.
   Place? _pinned;
 
@@ -340,6 +350,7 @@ class _MapViewState extends ConsumerState<MapView> {
         _linesBusy = false;
         _entrancesAdded = false;
         _meAdded = false;
+        _meAt = null;
         _focusDrawn = false;
         _pinned = null;
         _addLines(ref.read(ambientLinesProvider).valueOrNull);
@@ -1264,20 +1275,44 @@ class _MapViewState extends ConsumerState<MapView> {
   /// The search pin (§11.3): one circle annotation, cleared and redrawn.
   /// Position dot: first call after a style load adds source + layers (top of
   /// the stack); later calls only move the data. Own try/catch, own chip.
-  Future<void> _updateMe(Position? p) =>
-      _meChain = _meChain.then((_) => _updateMeNow(p));
+  Future<void> _updateMe(Position? p) {
+    // Every map rebuild calls this; only a new fix may stop a glide, and it
+    // must do so now, not when its turn in the chain comes.
+    if (_meAdded && identical(p, _meQueued)) return _meChain;
+    _meQueued = p;
+    final glide = ++_meGlideGen;
+    return _meChain = _meChain.then((_) => _updateMeNow(p, glide));
+  }
 
-  Future<void> _updateMeNow(Position? p) async {
+  Future<void> _updateMeNow(Position? p, int glide) async {
     final c = _controller;
     if (c == null || !_styleReady) return;
     if (_meAdded && identical(p, _meDrawn)) return;
+    // Where the dot is on screen (mid-glide, if one was cut short).
+    final from = _meAt ??
+        (_meDrawn == null ? null : (_meDrawn!.latitude, _meDrawn!.longitude));
     _meDrawn = p;
     try {
       if (!_meAdded) {
         _meAdded = true;
         await addMeLayers(c, p);
+        _meAt = p == null ? null : (p.latitude, p.longitude);
+      } else if (from != null &&
+          p != null &&
+          haversineMetres(from.$1, from.$2, p.latitude, p.longitude) <=
+              meGlideMaxMetres) {
+        // Glide there; a newer fix (or style) cancels the rest of the steps.
+        final step = meGlide ~/ meGlideSteps;
+        for (final at
+            in meGlidePoints(from.$1, from.$2, p.latitude, p.longitude)) {
+          if (glide != _meGlideGen || !_meAdded) return;
+          await c.setGeoJsonSource(meSource, meFeatures(p, at: at));
+          _meAt = at;
+          await Future<void>.delayed(step);
+        }
       } else {
         await c.setGeoJsonSource(meSource, meFeatures(p));
+        _meAt = p == null ? null : (p.latitude, p.longitude);
       }
       if (mounted) ref.read(mapStatusProvider.notifier).clear('me');
     } catch (e) {

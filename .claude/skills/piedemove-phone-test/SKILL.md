@@ -131,6 +131,14 @@ the stop boards (after the latch, or at vehicle speed without it), with
 progress placed by that fix. Replays in `test/live_trip_test.dart`
 ("boarding on the road"). Needs a real ride to confirm.
 
+## Position dot glide (rider report: "updates too slow")
+
+The dot stream was already 1 Hz; it jumped once per fix. `_updateMe` now
+glides it in `meGlideSteps` (6) over `meGlide` (600 ms) from where it is on
+screen (`_meAt`), jumps past `meGlideMaxMetres` (300 m) or on first draw; a
+new fix cancels the running glide at once (`_meGlideGen` bumped at entry,
+only when the fix changed - a bump on every rebuild left the dot short).
+
 ## Live trip audit fixes (2026-09)
 
 - Reaching the alight stop (60 m) now vibrates "scendi ora" when the per-stop
