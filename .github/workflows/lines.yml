@@ -85,7 +85,10 @@ jobs:
           osmium extract --bbox "$bbox" --overwrite build/nord-ovest.osm.pbf -o build/gtt-area.osm.pbf
           osmium tags-filter --overwrite build/gtt-area.osm.pbf w/highway w/railway -o build/gtt-ways.osm.pbf
           osmium add-locations-to-ways --overwrite build/gtt-ways.osm.pbf -o build/gtt-ways-loc.osm.pbf
-          osmium cat --overwrite build/gtt-ways-loc.osm.pbf -t way -f opl -o build/lines.opl
+          # locations_on_ways: without it OPL writes bare node ids and every way
+          # would arrive without coordinates.
+          osmium cat --overwrite build/gtt-ways-loc.osm.pbf -t way \
+            -f opl,locations_on_ways=true -o build/lines.opl
           wc -l build/lines.opl
 
       - name: Build line geometry

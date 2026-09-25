@@ -66,6 +66,16 @@ Future<void> main(List<String> args) async {
               utf8.encode(jsonEncode(oplWaysToOverpassGeom(opl, keep)))));
     files = [dump('opl_roads', isRoadOrTramWay)];
     railFile = railBounds(ix) == null ? null : dump('opl_rail', isRailWay);
+    // No located road at all means a wrong dump (e.g. OPL written without
+    // locations_on_ways): stop here rather than build an all-dotted network.
+    final roads = parseOsmJson(
+        utf8.decode(gzip.decode(files.first.readAsBytesSync())));
+    if (roads.isEmpty) {
+      stderr.writeln('no located road ways in ${args[oplArg + 1]}: '
+          'write it with `osmium cat -f opl,locations_on_ways=true`');
+      exit(1);
+    }
+    stdout.writeln('opl: ${roads.length} road and tram ways');
   } else {
     // Two fetchers (Overpass allows two slots per IP) halve the wall time: run
     // a second process with --reverse, it skips whatever the first has cached.

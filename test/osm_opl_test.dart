@@ -31,4 +31,21 @@ void main() {
     final ways = parseOsmJson(jsonEncode(oplWaysToOverpassGeom(opl, isRailWay)));
     expect(ways.map((w) => w.id), [12]);
   });
+
+  test('real osmium output (locations_on_ways) parses; bare ids do not', () {
+    // Verbatim from osmium 1.16 `cat -f opl,locations_on_ways=true`.
+    const located = [
+      r'w10 v2 dV c0 t2026-09-01T00:00:00Z i0 u Thighway=residential,name=Via%20%Roma%2c%%20%1 Nn1x7.6y45,n2x7.601y45.0005,n3x7.602y45.001',
+      r'w11 v1 dV c0 t2026-09-01T00:00:00Z i0 u Trailway=subway Nn3x7.602y45.001,n1x7.6y45',
+    ];
+    final roads = parseOsmJson(jsonEncode(oplWaysToOverpassGeom(located, isRoadOrTramWay)));
+    expect(roads.single.tags['name'], 'Via Roma, 1');
+    expect(roads.single.lat, [45.0, 45.0005, 45.001]);
+    expect(parseOsmJson(jsonEncode(oplWaysToOverpassGeom(located, isRailWay))), hasLength(1));
+    // The same ways written without locations_on_ways: nothing usable.
+    const bare = [
+      r'w10 v2 dV c0 t2026-09-01T00:00:00Z i0 u Thighway=residential Nn1,n2,n3',
+    ];
+    expect(oplWaysToOverpassGeom(bare, isRoadOrTramWay)['elements'], isEmpty);
+  });
 }
