@@ -378,11 +378,15 @@ Map<String, dynamic> journeyFocusStops(
     }
   }
   final legs = journey.legs;
+  // A trip to or from a stop starts/ends at the pole it uses.
+  (double, double)? pole(Leg l, (double, double)? place) => l.placeStop >= 0
+      ? (ix.stopLat[l.placeStop], ix.stopLon[l.placeStop])
+      : place;
   if (legs.isNotEmpty && legs.first.kind == LegKind.walk && legs.first.fromStop < 0) {
-    point(-1, origin, 'Partenza');
+    point(-1, pole(legs.first, origin), 'Partenza');
   }
   if (legs.isNotEmpty && legs.last.kind == LegKind.walk && legs.last.toStop < 0) {
-    point(-2, destination, 'Arrivo');
+    point(-2, pole(legs.last, destination), 'Arrivo');
   }
   return out;
 }

@@ -34,6 +34,8 @@ class PlanRequest {
     this.excludedRouteTypes = const <int>{},
     this.detouredRoutes = const <int>{},
     this.unavailable,
+    this.originStops = const [],
+    this.destStops = const [],
   });
 
   PlanRequest withWalkCap(double cap) => PlanRequest(
@@ -53,6 +55,8 @@ class PlanRequest {
         excludedRouteTypes: excludedRouteTypes,
         detouredRoutes: detouredRoutes,
         unavailable: unavailable,
+        originStops: originStops,
+        destStops: destStops,
       );
 
   final double originLat;
@@ -80,7 +84,20 @@ class PlanRequest {
   final bool Function(int trip, int stopPosition)? unavailable;
 
   bool isUnavailable(int trip, int pos) => unavailable?.call(trip, pos) ?? false;
+
+  /// When the origin is a **stop** (picked as such in search): all its poles,
+  /// usually one per direction across the street. Each is "here" at 0 m, and
+  /// walks to other stops are measured from the nearest pole, so the search
+  /// picks the side each journey needs. Empty: the origin is a plain point.
+  final List<int> originStops;
+
+  /// Same for the destination: arriving at any pole is arriving.
+  final List<int> destStops;
 }
+
+/// Stops reachable on foot from an endpoint, with metres, and for a stop
+/// endpoint the pole each was measured from ([PlanRequest.originStops]).
+typedef _Ends = (List<(int, double)> reach, Map<int, int> pole);
 
 class _Label {
   _Label({
@@ -262,14 +279,10 @@ class Planner {
   /// non-dominated journey, unfiltered.
   List<Journey> _search(PlanRequest req, DateTime date, int departAt) {
     final todayIdx = ix.dayIndexOf(date);
-    final access = footpaths.grid
-        .near(req.originLat, req.originLon, req.walkCapMetres)
-        .where((e) => !req.suspendedStops.contains(e.$1))
-        .toList();
-    final egress = footpaths.grid
-        .near(req.destLat, req.destLon, req.walkCapMetres)
-        .where((e) => !req.suspendedStops.contains(e.$1))
-        .toList();
+    final (access, originPole) =
+        _ends(req.originLat, req.originLon, req.originStops, req);
+    final (egress, destPole) =
+        _ends(req.destLat, req.destLon, req.destStops, req);
     if (access.isEmpty || egress.isEmpty) return const [];
 
     final rounds = req.maxTransfers + 1;
@@ -409,7 +422,42 @@ class Planner {
       }
       finals.addAll(roundFinals);
     }
-    return [for (final l in finals) _buildJourney(l, date, req)];
+    return [
+      for (final l in finals)
+        _buildJourney(l, date, req, originPole: originPole, destPole: destPole),
+    ];
+  }
+
+  _Ends _ends(double lat, double lon, List<int> poles, PlanRequest req) {
+    bool open(int s) => !req.suspendedStops.contains(s);
+    if (poles.isEmpty) {
+      return (
+        [
+          for (final e in footpaths.grid.near(lat, lon, req.walkCapMetres))
+            if (open(e.$1)) e,
+        ],
+        const <int, int>{},
+      );
+    }
+    // Nearest pole wins; a pole is at 0 m from itself.
+    final best = <int, (double, int)>{};
+    for (final p in poles) {
+      best[p] = (0, p);
+    }
+    for (final p in poles) {
+      for (final (s, d)
+          in footpaths.grid.near(ix.stopLat[p], ix.stopLon[p], req.walkCapMetres)) {
+        final cur = best[s];
+        if (cur == null || d < cur.$1) best[s] = (d, p);
+      }
+    }
+    return (
+      [
+        for (final e in best.entries)
+          if (open(e.key)) (e.key, e.value.$1),
+      ],
+      {for (final e in best.entries) e.key: e.value.$2},
+    );
   }
 
   Set<int> _relaxFootpaths(
@@ -503,7 +551,8 @@ class Planner {
     return best;
   }
 
-  Journey _buildJourney(_Label finalLabel, DateTime date, PlanRequest req) {
+  Journey _buildJourney(_Label finalLabel, DateTime date, PlanRequest req,
+      {Map<int, int> originPole = const {}, Map<int, int> destPole = const {}}) {
     final chain = <_Label>[];
     for (_Label? l = finalLabel; l != null; l = l.prev) {
       chain.add(l);
@@ -575,6 +624,7 @@ class Planner {
             departure: seed.arrival - secs,
             arrival: seed.arrival,
             walkMetres: seed.walk,
+            placeStop: originPole[seed.stop] ?? -1,
           ));
     }
     if (legs.isNotEmpty && legs.last.kind == LegKind.walk) {
@@ -586,6 +636,7 @@ class Planner {
         departure: f.departure,
         arrival: f.arrival,
         walkMetres: f.walkMetres,
+        placeStop: destPole[f.fromStop] ?? -1,
       );
     }
     return Journey(legs, date);

@@ -292,14 +292,19 @@ LiveRoute buildLiveRoute(
     if (lat.length < 2) {
       // Walk legs, and any ride leg whose geometry could not be resolved.
       approximate = true;
+      // Same ends as walkLegEnds: a stop trip starts/ends at its pole.
       final a = leg.fromStop >= 0
           ? (ix.stopLat[leg.fromStop], ix.stopLon[leg.fromStop])
-          : (originLat == null || originLon == null
-                ? null
-                : (originLat, originLon));
+          : leg.placeStop >= 0
+              ? (ix.stopLat[leg.placeStop], ix.stopLon[leg.placeStop])
+              : (originLat == null || originLon == null
+                  ? null
+                  : (originLat, originLon));
       final b = leg.toStop >= 0
           ? (ix.stopLat[leg.toStop], ix.stopLon[leg.toStop])
-          : (destLat == null || destLon == null ? null : (destLat, destLon));
+          : leg.placeStop >= 0
+              ? (ix.stopLat[leg.placeStop], ix.stopLon[leg.placeStop])
+              : (destLat == null || destLon == null ? null : (destLat, destLon));
       lat
         ..clear()
         ..addAll([a?.$1 ?? b?.$1 ?? 0, b?.$1 ?? a?.$1 ?? 0]);

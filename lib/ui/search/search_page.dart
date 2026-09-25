@@ -21,6 +21,7 @@ import 'package:piedemove/places/search_index.dart';
 import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/ui/map/map_view.dart';
 import 'package:piedemove/ui/nav/entity.dart';
+import 'package:piedemove/ui/sheets/line_picker.dart' show compareRouteNames;
 import 'package:piedemove/ui/theme/tokens.dart';
 import 'package:piedemove/ui/widgets/line_badge.dart';
 
@@ -116,9 +117,13 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   Widget build(BuildContext context) {
     final ix = ref.watch(transitIndexProvider).valueOrNull;
     final me = ref.watch(myPositionProvider);
-    final stops = ix == null || _query.isEmpty
-        ? const <int>[]
-        : searchStops(ix, _query, lat: me?.latitude, lon: me?.longitude);
+    final clusters = ref.watch(stopClustersProvider);
+    // One row per stop, not per pole: the poles across the street are the
+    // same stop to a rider, and the planner picks the side per journey.
+    final stops = ix == null || clusters == null || _query.isEmpty
+        ? const <List<int>>[]
+        : searchStopGroups(ix, clusters, _query,
+            lat: me?.latitude, lon: me?.longitude);
     final routes =
         ix == null || _query.isEmpty ? const <int>[] : searchRoutes(ix, _query);
     final vehicles = _query.isEmpty
@@ -252,12 +257,17 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     );
   }
 
-  Widget _stopTile(TransitIndex ix, int stop, Position? me) {
+  /// One stop: every pole of the group ([poles], nearest to the user first).
+  Widget _stopTile(TransitIndex ix, List<int> poles, Position? me) {
+    final stop = poles.first;
     final metres = me == null
         ? null
         : haversineMetres(me.latitude, me.longitude, ix.stopLat[stop],
             ix.stopLon[stop]);
-    final routes = ix.routesAt(stop);
+    final routes = <int>{for (final p in poles) ...ix.routesAt(p)}.toList()
+      ..sort((a, b) =>
+          compareRouteNames(ix.routeShortNames[a], ix.routeShortNames[b]));
+    final codes = [for (final p in poles) ix.stopCodes[p]];
     return ListTile(
       leading: const Icon(Icons.signpost_outlined),
       title: Text(cleanStopName(ix.stopNames[stop])),
@@ -265,7 +275,8 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         children: [
           // GTFS gives no street address for a GTT pole: the code is the
           // on-street identifier, so it stands in for one.
-          Text('Fermata ${ix.stopCodes[stop]}'
+          Text('${codes.length == 1 ? 'Fermata' : 'Fermate'} '
+              '${codes.join(' · ')}'
               '${metres == null ? '' : ' · ${metres.round()} m'}  '),
           Expanded(
             child: Wrap(
@@ -284,11 +295,14 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       isThreeLine: routes.length > 3,
       onTap: () {
         if (widget.pick) {
+          // The whole stop: the planner uses every pole (Place.stop).
           _pick(Place(
             name: cleanStopName(ix.stopNames[stop]),
-            address: 'Fermata ${ix.stopCodes[stop]}',
+            address: '${codes.length == 1 ? 'Fermata' : 'Fermate'} '
+                '${codes.join(' · ')}',
             lat: ix.stopLat[stop],
             lon: ix.stopLon[stop],
+            stop: true,
           ));
           return;
         }

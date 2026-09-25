@@ -20,6 +20,7 @@ class Place {
     required this.address,
     required this.lat,
     required this.lon,
+    this.stop = false,
   });
 
   final String name;
@@ -28,6 +29,12 @@ class Place {
   final String address;
   final double lat;
   final double lon;
+
+  /// A transit stop picked in search: [name] is its clean name and the point
+  /// one of its poles. The planner resolves it to every pole of the group
+  /// (`StopClusters.groupAt`), by name and place rather than by stop index,
+  /// so a saved stop survives GTT renumbering its stops.
+  final bool stop;
 
   /// A Photon GeoJSON feature. Returns null when it carries no point.
   static Place? fromFeature(Map<String, dynamic> feature) {
@@ -53,14 +60,20 @@ class Place {
     );
   }
 
-  Map<String, dynamic> toJson() =>
-      {'n': name, 'a': address, 'lat': lat, 'lon': lon};
+  Map<String, dynamic> toJson() => {
+        'n': name,
+        'a': address,
+        'lat': lat,
+        'lon': lon,
+        if (stop) 's': 1,
+      };
 
   static Place fromJson(Map<String, dynamic> j) => Place(
         name: j['n'] as String? ?? '',
         address: j['a'] as String? ?? '',
         lat: (j['lat'] as num).toDouble(),
         lon: (j['lon'] as num).toDouble(),
+        stop: j['s'] == 1,
       );
 }
 

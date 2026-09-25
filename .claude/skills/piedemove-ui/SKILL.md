@@ -45,6 +45,11 @@ chip appears when any feed is stale.
 One box, sectioned results: stops, lines, vehicles, then places **last** —
 Photon answers ~300 ms after a keystroke, and inserted above the stops it
 shoved the row under a finger already moving to it (user report, beta 3).
+Stops are listed **once per stop** (`searchStopGroups`: one row per
+`StopClusters` group, poles nearest-first, codes "Fermate 123 · 456", union of
+lines). Browsing opens the nearest pole's sheet, which lists the other poles
+under "Stessa fermata, altri pali"; picking for the planner gives
+`Place(stop: true)` and the router picks the side (routing skill).
 
 - **Places**: Photon. Debounce 300 ms, min 3 chars, cancel stale requests, cache,
   bias to the user's location, bound to Piemonte. Sorted by distance from the
