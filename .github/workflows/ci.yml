@@ -104,3 +104,61 @@ jobs:
             build/ci/itest.log
             build/ci/logcat.txt
           retention-days: 14
+
+  # A push whose head commit message contains "[release]" publishes a GitHub
+  # prerelease, but only after check and the emulator tour passed. Tag and
+  # notes come from pubspec's version and docs/release-notes/v<version>.md.
+  release:
+    needs: [check, emulator]
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[release]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PM_KEYSTORE_BASE64: ${{ secrets.PM_KEYSTORE_BASE64 }}
+      PM_KEYSTORE_PASSWORD: ${{ secrets.PM_KEYSTORE_PASSWORD }}
+      PM_KEY_ALIAS: ${{ secrets.PM_KEY_ALIAS }}
+      PM_KEY_PASSWORD: ${{ secrets.PM_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Cap the Gradle heap
+        run: |
+          mkdir -p ~/.gradle
+          echo 'org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g' >> ~/.gradle/gradle.properties
+      # With the PM_* secrets set, the release key signs; without, the build
+      # falls back to the debug key (see android/app/build.gradle.kts).
+      - name: Release keystore
+        run: |
+          if [ -n "$PM_KEYSTORE_BASE64" ]; then
+            echo "$PM_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "PM_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          else
+            echo "::warning::no release keystore secret: the APK is signed with the debug key"
+          fi
+      - run: flutter build apk --release
+      - name: Publish the prerelease
+        run: |
+          v=$(sed -n 's/^version: *\([^+]*\).*/\1/p' pubspec.yaml)
+          notes="docs/release-notes/v$v.md"
+          test -s "$notes"
+          apk="piedemove-$v.apk"
+          cp build/app/outputs/flutter-apk/app-release.apk "$apk"
+          sha256sum "$apk" > "$apk.sha256"
+          if gh release view "v$v" >/dev/null 2>&1; then
+            echo "::error::release v$v already exists: bump the version in pubspec.yaml"
+            exit 1
+          fi
+          gh release create "v$v" "$apk" "$apk.sha256" \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "PiedeMove ${v//-/ }" --notes-file "$notes"
