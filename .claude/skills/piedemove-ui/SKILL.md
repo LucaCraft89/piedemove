@@ -50,6 +50,10 @@ Stops are listed **once per stop** (`searchStopGroups`: one row per
 lines). Browsing opens the nearest pole's sheet, which lists the other poles
 under "Stessa fermata, altri pali"; picking for the planner gives
 `Place(stop: true)` and the router picks the side (routing skill).
+Place rows: icon from `Place.kind` (Photon `type` street/house, else
+`osm_key:osm_value`; `lib/places/place_icon.dart`), distance from the rider
+first in the subtitle (only from a real fix), sorted nearest-first from the
+rider, else from the map centre (`_reference`), which also biases Photon.
 
 - **Places**: Photon. Debounce 300 ms, min 3 chars, cancel stale requests, cache,
   bias to the user's location, bound to Piemonte. Sorted by distance from the

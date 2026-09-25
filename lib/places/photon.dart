@@ -21,6 +21,7 @@ class Place {
     required this.lat,
     required this.lon,
     this.stop = false,
+    this.kind = '',
   });
 
   final String name;
@@ -35,6 +36,11 @@ class Place {
   /// (`StopClusters.groupAt`), by name and place rather than by stop index,
   /// so a saved stop survives GTT renumbering its stops.
   final bool stop;
+
+  /// What the place is, from Photon: `street`, `house` (an address) or
+  /// `<osm_key>:<osm_value>` (`amenity:pharmacy`, `shop:supermarket`), for
+  /// the result icon. Empty when unknown (saved before this existed).
+  final String kind;
 
   /// A Photon GeoJSON feature. Returns null when it carries no point.
   static Place? fromFeature(Map<String, dynamic> feature) {
@@ -52,11 +58,15 @@ class Place {
         (street == null ? null : [street, ?number].join(' ')) ??
         city ??
         '?';
+    final type = p['type'] as String?;
     return Place(
       name: name,
       address: line,
       lat: (coords[1] as num).toDouble(),
       lon: (coords[0] as num).toDouble(),
+      kind: type == 'street' || type == 'house'
+          ? type!
+          : '${p['osm_key'] ?? ''}:${p['osm_value'] ?? ''}',
     );
   }
 
@@ -66,6 +76,7 @@ class Place {
         'lat': lat,
         'lon': lon,
         if (stop) 's': 1,
+        if (kind.isNotEmpty) 'k': kind,
       };
 
   static Place fromJson(Map<String, dynamic> j) => Place(
@@ -74,6 +85,7 @@ class Place {
         lat: (j['lat'] as num).toDouble(),
         lon: (j['lon'] as num).toDouble(),
         stop: j['s'] == 1,
+        kind: j['k'] as String? ?? '',
       );
 }
 
