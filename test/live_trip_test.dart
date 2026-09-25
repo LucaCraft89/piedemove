@@ -93,10 +93,16 @@ void main() {
       s = advanceLive(s, _fix(_lat, _lon0 + 2 * _step, speed: 6));
       expect(s.cue, LiveCue.oneStopLeft);
       final seq = s.cueSeq;
+      // At the stop, still moving: "get off" now, but the rider is aboard.
       s = advanceLive(s, _fix(_lat, _lon0 + 3 * _step, speed: 6));
-      expect(s.finished, isTrue);
       expect(s.cue, LiveCue.alightNow);
       expect(s.cueSeq, greaterThan(seq));
+      expect(s.finished, isFalse);
+      // Stopped: off the vehicle, the journey is done - no second cue.
+      final seq2 = s.cueSeq;
+      s = advanceLive(s, _fix(_lat, _lon0 + 3 * _step, speed: 0.3));
+      expect(s.finished, isTrue);
+      expect(s.cueSeq, seq2);
     });
 
     test('a poor fix with no vehicle neither moves progress nor ends the ride',
@@ -148,9 +154,65 @@ void main() {
     expect(s.stopsRemaining, 1);
     expect(s.cue, LiveCue.oneStopLeft);
 
-    // At the alight stop: the last cue fires, then the journey is done.
+    // At the alight stop: the last cue fires; the journey ends once stopped.
     s = advanceLive(s, _fix(_lat, _lon0 + 3 * _step, speed: 6));
+    expect(s.cue, LiveCue.alightNow);
+    s = advanceLive(s, _fix(_lat, _lon0 + 3 * _step, speed: 0));
     expect(s.finished, isTrue);
+  });
+
+  test('a change on the same street: off the first bus, then onto the next',
+      () {
+    // Line 2 east A -> B; get off at B; walk back 30 m to T; line 9 from T
+    // east along the same street. The early switch plus GPS noise used to
+    // "board" line 9 while the rider was still on (or just off) line 2.
+    final ix = syntheticIndex(
+      stops: [
+        ('A', 'A', _lat, 7.650),
+        ('B', 'B', _lat, 7.660),
+        ('T', 'T', _lat, 7.6596), // ~31 m before B
+        ('F', 'F', _lat, 7.680),
+      ],
+      patterns: [
+        ('2', RouteType.bus, ['A', 'B'], [[0, 300]]),
+        ('9', RouteType.bus, ['T', 'F'], [[600, 900]]),
+      ],
+    );
+    RideOption opt(String n, int p, int dep, int arr) => RideOption(
+        routeShortName: n, routeType: RouteType.bus, pattern: p, trip: p,
+        departure: dep, arrival: arr);
+    final journey = Journey([
+      Leg(kind: LegKind.ride, fromStop: 0, toStop: 1, departure: 0,
+          arrival: 300, options: [opt('2', 0, 0, 300)]),
+      const Leg(kind: LegKind.walk, fromStop: 1, toStop: 2, departure: 300,
+          arrival: 330, walkMetres: 31),
+      Leg(kind: LegKind.ride, fromStop: 2, toStop: 3, departure: 600,
+          arrival: 900, options: [opt('9', 1, 600, 900)]),
+    ], DateTime(2026, 9, 19));
+    final route = buildLiveRoute(ix, null, journey);
+    var s = LiveTripState(
+      route: route,
+      journey: journey,
+      metresToEnd: route.legs.first.metres,
+      stopsRemaining: route.legs.first.stopVertex.length,
+    );
+    // Aboard line 2, 40 m before B at bus speed: still riding, told to get off.
+    s = advanceLive(s, _fix(_lat, 7.6595, speed: 7));
+    expect(s.legIndex, 0);
+    expect(s.cue, LiveCue.alightNow);
+    // Stopped at B: off. Now the 31 m walk back to T.
+    s = advanceLive(s, _fix(_lat, 7.660, speed: 0));
+    expect(s.legIndex, 1);
+    // Standing at B, GPS noise 40 m further along line 9's street, walking
+    // pace: still walking - and never boarded by noise.
+    s = advanceLive(s, _fix(_lat, 7.6605, speed: 0.8));
+    s = advanceLive(s, _fix(_lat, 7.6601, speed: 0.2));
+    expect(s.legIndex, 1);
+    // Line 9 comes; the rider is on it, 120 m past where they waited.
+    s = advanceLive(s, _fix(_lat, 7.6615, speed: 8));
+    s = advanceLive(s, _fix(_lat, 7.6625, speed: 8));
+    expect(s.legIndex, 2);
+    expect(s.riding, isTrue);
   });
 
   test('walking up to the stop does not board without vehicle speed', () {

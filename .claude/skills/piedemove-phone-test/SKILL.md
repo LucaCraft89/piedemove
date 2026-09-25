@@ -139,6 +139,18 @@ screen (`_meAt`), jumps past `meGlideMaxMetres` (300 m) or on first draw; a
 new fix cancels the running glide at once (`_meGlideGen` bumped at entry,
 only when the fix changed - a bump on every rebuild left the dot short).
 
+## Changes between rides (beta 6 report: "says I boarded the next bus")
+
+The ride leg switched to the transfer walk 60 m before the alight stop while
+the bus still moved, and the next ride's boarding latch was already set (the
+transfer pole is near), so a fix 60 m along the next line's street - last
+metres aboard, or GPS noise at a pole a few metres behind - "boarded" it.
+Now: near the alight stop at vehicle speed only cues "scendi ora" (once) and
+stays on the ride; the switch waits for a non-vehicle speed. Path boarding
+needs 60 m past the stop **and** past `boardWaitAlong` (least along seen
+while at the stop) and a vehicle speed (unknown speed only after the latch).
+Replay: `test/live_trip_test.dart` "a change on the same street".
+
 ## Cue vibration (rider report: "works but too weak")
 
 `HapticFeedback.vibrate` is a UI tap (short, weak, muted by the touch-feedback
