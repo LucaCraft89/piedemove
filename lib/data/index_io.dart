@@ -11,7 +11,8 @@ import 'dart:typed_data';
 
 import 'transit_index.dart';
 
-const indexFormatVersion = 2;
+/// 3: `patternSeq` (GTFS stop_sequence per pattern position) after patternStop.
+const indexFormatVersion = 3;
 const _magic = 0x504D5631; // "PMV1"
 
 class IndexFormatException implements Exception {
@@ -153,6 +154,7 @@ Uint8List encodeIndex(TransitIndex ix) {
   w.i8(ix.patternDir);
   w.i32(ix.patternStopOffset);
   w.i32(ix.patternStop);
+  w.i32(ix.patternSeq);
   w.i32(ix.patternTripOffset);
   w.i32(ix.patternTrip);
   w.strings(ix.tripIds);
@@ -194,6 +196,7 @@ TransitIndex decodeIndex(Uint8List data) {
     patternDir: r.i8(),
     patternStopOffset: r.i32(),
     patternStop: r.i32(),
+    patternSeq: r.i32(),
     patternTripOffset: r.i32(),
     patternTrip: r.i32(),
     tripIds: r.strings(),
@@ -209,18 +212,29 @@ TransitIndex decodeIndex(Uint8List data) {
   );
 }
 
+/// Writes next to [path] and renames over it: a crash mid-write leaves the old
+/// index (or none), never a truncated one with a fresh timestamp.
 Future<void> writeIndexFile(TransitIndex ix, String path) async {
-  await File(path).writeAsBytes(encodeIndex(ix), flush: true);
+  final tmp = File('$path.tmp');
+  await tmp.writeAsBytes(encodeIndex(ix), flush: true);
+  await tmp.rename(path);
 }
 
-/// Returns null when the file is missing or written by another format version,
-/// so the caller can rebuild instead of crashing.
+/// Returns null when the file is missing, from another format version, or
+/// unreadable (truncated, corrupt), so the caller rebuilds instead of
+/// crashing. An unreadable file is deleted so it cannot pass as fresh again.
 Future<TransitIndex?> readIndexFile(String path) async {
   final f = File(path);
   if (!f.existsSync()) return null;
   try {
     return decodeIndex(await f.readAsBytes());
   } on IndexFormatException {
+    return null;
+  } catch (_) {
+    // RangeError / FormatException / ArgumentError from a torn file.
+    try {
+      f.deleteSync();
+    } catch (_) {}
     return null;
   }
 }

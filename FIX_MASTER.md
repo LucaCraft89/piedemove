@@ -119,6 +119,15 @@ Open items: (a) access walk now counts toward the 800 m cap: Politecnico->Bardon
 Next: 6a (pure progress engine over locationProvider + WalkRouter.reroute + maneuver list, unit tests, replay test), 6b (strip UI, travelled/ahead fade, phone),
 then 5c (needs user OK to publish), 7a/7b, 8. Agent rules: medium effort, token ceiling, progress log in build/progress/<phase>.log, wip commits, adb install -r only.
 
+### STATE (2026-09-25, audit round, branch claude/repo-audit-android-test-tc2765)
+Per git since the block above: 6a, 6b, 5c (workflow), 7a (+7a1, 7a2) and a fix(9) release commit landed.
+Audit round (backup: branch `backup/pre-audit-2026-09-24` = main before it): routing (pruning, arrive-by,
+DST, next day, per-feed options), stability (latest plan wins, back button, atomic index, streamed feeds,
+keyed map status, walk graph), live trip / realtime (alight cue, poor fixes, cancellations, skipped stops,
+index v3 with stop_sequence), Linee browser, release signing via key.properties/env, CI (`ci.yml`:
+analyze + tests with required golden, then an emulator smoke tour with screenshots). Still open: (b), (d),
+(e) above; phase 7b contrast test; phase 8. Emulator shots are CI artifacts, not a real phone check.
+
 ## Phase 5c: keep walk graph fresh (after 5b, needs user OK to publish)
 - Scheduled GitHub Actions workflow: runs `tool/build_walk.dart`, hashes, replaces fixed release
   tag `walk-graph-latest` (graph + manifest.json) only if changed; sanity check fails the run on

@@ -319,4 +319,49 @@ void main() {
           throwsA(isA<WalkFormatException>().having((e) => e.incompatible, 'incompatible', true)));
     });
   });
+
+  group('audit fixes', () {
+    test('the A* factor never exceeds any real edge factor', () {
+      final all = [
+        ...pathFactors,
+        ...streetFactors,
+        for (final row in sideFactors) ...row,
+        stepsFactor,
+        1.0, // crossing edges: length at factor 1 plus a fixed price
+      ];
+      for (final f in all) {
+        expect(minWalkFactor, lessThanOrEqualTo(f * coveredFactor + 1e-9));
+      }
+    });
+
+    test('a long edge through many cells is one snap candidate, not several', () {
+      final b = _B();
+      // A 600 m sidewalk and, 8 m north, the opposite one.
+      final a0 = b.node(0, 0), a1 = b.node(600, 0);
+      final c0 = b.node(0, 8), c1 = b.node(600, 8);
+      b.edge(a0, a1, WalkFlags.make(WalkKind.path, sub: 1));
+      b.edge(c0, c1, WalkFlags.make(WalkKind.path, sub: 1));
+      final snaps = WalkRouter(b.build()).snapAll(latOf(3), lonOf(300));
+      final edges = snaps.map((s) => s.edge).toList();
+      expect(edges.toSet().length, edges.length);
+      expect(edges.toSet(), {0, 1});
+    });
+
+    test('start and end on the same graph point still give a route', () {
+      final b = _B();
+      final n0 = b.node(0, 0), n1 = b.node(100, 0);
+      b.edge(n0, n1, WalkFlags.make(WalkKind.path));
+      final r = WalkRouter(b.build()).route(latOf(0), lonOf(50), latOf(0), lonOf(50));
+      expect(r, isNotNull);
+      expect(r!.metres, lessThan(1));
+    });
+
+    test('crossing=no is not a crossing', () {
+      expect(nodeCrossing({'highway': 'crossing', 'crossing': 'no'}), -1);
+      expect(nodeCrossing({'crossing': 'no'}), -1);
+      final way = classifyWay({'highway': 'footway', 'footway': 'crossing', 'crossing': 'no'});
+      expect(way!.sub, WalkCrossing.unmarked);
+    });
+  });
 }
+

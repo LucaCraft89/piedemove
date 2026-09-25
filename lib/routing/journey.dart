@@ -113,6 +113,11 @@ class Journey {
   bool get scheduledOnly => legs.any((l) => l.scheduledOnly);
 
   DateTime timeOf(int secondsFromMidnight) =>
-      DateTime(date.year, date.month, date.day)
-          .add(Duration(seconds: secondsFromMidnight));
+      serviceDayTime(date, secondsFromMidnight);
 }
+
+/// Wall-clock time of a service-day second (may exceed 86400 or be negative).
+/// Built from calendar fields, not midnight plus a duration, so the two days a
+/// year the clock changes still read 08:00 as 08:00.
+DateTime serviceDayTime(DateTime date, int seconds) =>
+    DateTime(date.year, date.month, date.day, 0, 0, seconds);

@@ -46,6 +46,7 @@ List<int> searchStops(
   int limit = 12,
 }) {
   final q = fold(query.trim());
+  if (q.isEmpty) return const [];
   final hits = <(int, double)>[];
   for (var s = 0; s < ix.stopCount; s++) {
     // Stops no line serves are noise in a result list.
@@ -70,6 +71,7 @@ bool looksLikeLineNumber(String query) =>
 /// Route indices matching [query], by number or name.
 List<int> searchRoutes(TransitIndex ix, String query, {int limit = 12}) {
   final q = fold(query.trim());
+  if (q.isEmpty) return const [];
   final hits = <int>[];
   for (var r = 0; r < ix.routeCount; r++) {
     final short = fold(ix.routeShortNames[r]);

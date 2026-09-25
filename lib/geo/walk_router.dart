@@ -197,6 +197,9 @@ class WalkRouter {
     final r0 = (qLat.floor() - _minLat) ~/ _cellLat;
     final c0 = (qLon.floor() - _minLon) ~/ _cellLon;
     final found = <WalkSnap>[];
+    // An edge is listed in every cell it crosses: project it once, or one long
+    // sidewalk fills every candidate slot and pushes out the opposite one.
+    final seen = <int>{};
     final maxRing = 1 + (maxMetres / 55).ceil();
     for (var radius = 1; radius <= maxRing; radius++) {
       // ring `radius` only (inner rings were searched already)
@@ -214,6 +217,7 @@ class WalkRouter {
           final cell = r * _cols + c;
           for (var i = _cellStart[cell]; i < _cellStart[cell + 1]; i++) {
             final e = _cellEdge[i];
+            if (!seen.add(e)) continue;
             if (graph.componentEdges[graph.component[graph.edgeA[e]]] <
                 _minComponent) {
               continue;
@@ -316,6 +320,14 @@ class WalkRouter {
           [toLon, toLat],
         ], -1, null),
     ];
+    // Both ends on the same graph point with no body: still a route (0 m),
+    // never an empty polyline for _assemble to index into.
+    if (pieces.isEmpty) {
+      pieces.add(_Piece([
+        [fromLon, fromLat],
+        [toLon, toLat],
+      ], -1, null));
+    }
     return _assemble(pieces);
   }
 

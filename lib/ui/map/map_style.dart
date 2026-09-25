@@ -61,3 +61,24 @@ const meColor = '#1A73E8';
 const walkWidth = 5.0, walkCasingExtra = 3.0;
 const walkDotSpacingPx = 9.0;
 List<double> walkDash(double width) => [0.5 / width, (walkDotSpacingPx - 0.5) / width];
+
+// -- ambient + focus line dressing (audit 2026-09: no literals in layer code)
+/// Casing under ambient lines: this much wider, at this share of the tier.
+const ambientCasingExtra = 2.0, ambientCasingOpacity = 0.8;
+
+/// Focus-line casing opacity.
+const focusCasingOpacity = 0.8;
+
+/// Picker candidates (§9.8): this much wider than ambient, this opaque.
+const pickedExtra = 4.0, pickedOpacity = 0.9;
+
+/// One-way arrows along lines (§9.6).
+const arrowGlyph = '›';
+const arrowTextSize = 16.0, arrowHaloWidth = 1.0, arrowSpacing = 90.0;
+
+/// Dashed stop-to-road connectors.
+const connectorOpacity = 0.5, connectorWidth = 1.2;
+const connectorDash = <double>[2.0, 2.0];
+
+/// White dotted casing under walking legs.
+const walkCasingColor = '#FFFFFF', walkCasingOpacity = 0.9;

@@ -47,6 +47,26 @@ String? maneuverLabel(LiveTripState s) {
   return '$what${st == null || st.isEmpty ? '' : ' su $st'} tra $n m';
 }
 
+/// Asks before a running trip ends; true when the user confirms.
+Future<bool> confirmEndTrip(BuildContext context) async =>
+    await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Terminare il viaggio?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annulla'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Termina'),
+          ),
+        ],
+      ),
+    ) ==
+    true;
+
 class LiveStrip extends ConsumerWidget {
   const LiveStrip({super.key});
 
@@ -61,7 +81,14 @@ class LiveStrip extends ConsumerWidget {
         !live.isLastLeg &&
         live.route.legs[live.legIndex + 1].kind == LegKind.ride;
 
-    return Align(
+    // Back during a ride would close the app mid-trip: ask, then end it.
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        if (await confirmEndTrip(context)) controller.stop();
+      },
+      child: Align(
       alignment: Alignment.bottomCenter,
       child: Material(
         elevation: 8,
@@ -165,6 +192,7 @@ class LiveStrip extends ConsumerWidget {
             ),
           ),
         ),
+      ),
       ),
     );
   }

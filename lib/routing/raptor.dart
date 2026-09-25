@@ -33,6 +33,7 @@ class PlanRequest {
     this.suspendedStops = const <int>{},
     this.excludedRouteTypes = const <int>{},
     this.detouredRoutes = const <int>{},
+    this.unavailable,
   });
 
   PlanRequest withWalkCap(double cap) => PlanRequest(
@@ -51,6 +52,7 @@ class PlanRequest {
         suspendedStops: suspendedStops,
         excludedRouteTypes: excludedRouteTypes,
         detouredRoutes: detouredRoutes,
+        unavailable: unavailable,
       );
 
   final double originLat;
@@ -72,6 +74,12 @@ class PlanRequest {
   /// GTFS `route_type`s the user switched off in Settings (§11.7).
   final Set<int> excludedRouteTypes;
   final Set<int> detouredRoutes;
+
+  /// Realtime: a run cancelled, or not stopping at a position, on the day of
+  /// the request. Null when planning another day or nothing is disrupted.
+  final bool Function(int trip, int stopPosition)? unavailable;
+
+  bool isUnavailable(int trip, int pos) => unavailable?.call(trip, pos) ?? false;
 }
 
 class _Label {
@@ -111,6 +119,25 @@ class _Active {
 
 const _bagCap = 8;
 
+/// Arrive-by searches start this long before `deadline - window`, so a long
+/// journey that must leave early is still inside the first pass.
+const arriveByLookbackSeconds = 3600;
+
+/// Upper bound on arrive-by forward passes (each is one full search).
+const arriveByMaxPasses = 8;
+
+/// Arrive-by: the access walk is timed to reach the first stop this early.
+const arriveByBoardBufferSeconds = 120;
+
+/// Trips of a pattern are sorted by first-stop departure; overtaking can make
+/// a later-sorted trip leave an intermediate stop first. The trip lookup scans
+/// this many neighbours around the binary-search hit to catch it.
+const _overtakeScan = 4;
+
+/// Later runs tried, per active run and stop, when realtime says a run skips
+/// that stop.
+const _skipRetries = 3;
+
 bool _addToBag(List<_Label> bag, _Label candidate) {
   for (final l in bag) {
     if (l.arrival <= candidate.arrival && l.walk <= candidate.walk) return false;
@@ -119,10 +146,20 @@ bool _addToBag(List<_Label> bag, _Label candidate) {
       (l) => candidate.arrival <= l.arrival && candidate.walk <= l.walk);
   bag.add(candidate);
   if (bag.length > _bagCap) {
+    // A full bag is a Pareto front: ascending walk means descending arrival.
+    // Keep both extremes (least walk, earliest arrival) and drop the interior
+    // label closest in walk to its lower neighbour - the most redundant one.
     bag.sort((a, b) => a.walk != b.walk
         ? a.walk.compareTo(b.walk)
         : a.arrival.compareTo(b.arrival));
-    bag.removeRange(_bagCap, bag.length);
+    var drop = 1;
+    for (var i = 2; i < bag.length - 1; i++) {
+      if (bag[i].walk - bag[i - 1].walk <
+          bag[drop].walk - bag[drop - 1].walk) {
+        drop = i;
+      }
+    }
+    if (identical(bag.removeAt(drop), candidate)) return false;
   }
   return true;
 }
@@ -137,16 +174,94 @@ class Planner {
   /// [sortBalanced]). Returns an empty list when nothing is reachable.
   List<Journey> plan(PlanRequest req) {
     final date = DateTime(req.when.year, req.when.month, req.when.day);
-    final todayIdx = ix.dayIndexOf(date);
     final startSeconds =
         req.when.hour * 3600 + req.when.minute * 60 + req.when.second;
-    // ponytail: arrive-by runs one forward search from `deadline - window` and
-    // keeps what lands in time. Upgrade to a backward search if the window
-    // proves too narrow.
-    final departAt = req.arriveBy
-        ? startSeconds - req.windowMinutes * 60 - 3600
-        : startSeconds;
+    if (req.arriveBy) return _dedupe(_arriveBy(req, date, startSeconds));
 
+    var journeys = _search(req, date, startSeconds);
+    if (journeys.isEmpty) return const [];
+    // ---- filters (§7.3) --------------------------------------------------
+    final fastest = journeys.map((j) => j.arrival).reduce(math.min);
+    journeys = journeys
+        .where((j) =>
+            j.arrival <= fastest + req.maxExtraMinutes * 60 &&
+            j.walkMetres <= req.walkCapMetres)
+        .toList();
+    return _dedupe(journeys);
+  }
+
+  /// Arrive-by: forward searches from successively later departures, so the
+  /// answer leaves as late as it can and still lands by [deadline]. Each pass
+  /// starts just after the latest moment the previous pass's earliest option
+  /// could be left for, which moves it on to the next boarding.
+  List<Journey> _arriveBy(PlanRequest req, DateTime date, int deadline) {
+    final found = <Journey>[];
+    var from = deadline - req.windowMinutes * 60 - arriveByLookbackSeconds;
+    for (var pass = 0; pass < arriveByMaxPasses && from < deadline; pass++) {
+      final fits = [
+        for (final j in _search(req, date, from))
+          if (j.arrival <= deadline && j.walkMetres <= req.walkCapMetres) j,
+      ];
+      if (fits.isEmpty) break;
+      found.addAll(fits.map(_leaveLate));
+      // Leaving one second after the last moment that still catches the
+      // earliest first ride found forces the next pass onto a later one.
+      from = fits.map(_lastLeave).reduce(math.min) + 1;
+    }
+    if (found.isEmpty) return const [];
+    // Later departure, less walking and fewer rides are all better; keep
+    // what no other option beats on all three.
+    final front = [
+      for (final j in found)
+        if (!found.any((k) =>
+            !identical(k, j) &&
+            k.departure >= j.departure &&
+            k.walkMetres <= j.walkMetres &&
+            k.rides <= j.rides &&
+            (k.departure > j.departure ||
+                k.walkMetres < j.walkMetres ||
+                k.rides < j.rides)))
+          j,
+    ];
+    final latest = front.map((j) => j.departure).reduce(math.max);
+    return front
+        .where((j) => j.departure >= latest - req.maxExtraMinutes * 60)
+        .toList();
+  }
+
+  /// Moves the walking before the first ride as late as that ride allows
+  /// (keeping [arriveByBoardBufferSeconds] at the stop), so "leave at" is
+  /// honest.
+  Journey _leaveLate(Journey j) {
+    final r = j.legs.indexWhere((l) => l.kind == LegKind.ride);
+    if (r <= 0) return j;
+    final slack =
+        j.legs[r].departure - arriveByBoardBufferSeconds - j.legs[r - 1].arrival;
+    if (slack <= 0) return j;
+    return Journey([
+      for (var i = 0; i < j.legs.length; i++)
+        i < r
+            ? j.legs[i].withWalk(
+                walkMetres: j.legs[i].walkMetres,
+                departure: j.legs[i].departure + slack,
+                arrival: j.legs[i].arrival + slack,
+                route: j.legs[i].route,
+              )
+            : j.legs[i],
+    ], j.date);
+  }
+
+  /// The latest departure from the origin that still reaches the first ride.
+  static int _lastLeave(Journey j) {
+    final r = j.legs.indexWhere((l) => l.kind == LegKind.ride);
+    if (r <= 0) return j.departure;
+    return j.legs[r].departure - (j.legs[r - 1].arrival - j.departure);
+  }
+
+  /// One forward multicriteria search leaving at [departAt]; every
+  /// non-dominated journey, unfiltered.
+  List<Journey> _search(PlanRequest req, DateTime date, int departAt) {
+    final todayIdx = ix.dayIndexOf(date);
     final access = footpaths.grid
         .near(req.originLat, req.originLon, req.walkCapMetres)
         .where((e) => !req.suspendedStops.contains(e.$1))
@@ -197,8 +312,30 @@ class Planner {
           final stop = ix.patternStopAt(pattern, pos);
           final suspended = req.suspendedStops.contains(stop);
 
+          // A run that skips this stop (realtime) cannot set anyone down
+          // here; whoever boarded it could have taken the next run instead,
+          // so that run joins the active set from the same boarding.
+          if (!suspended && req.unavailable != null) {
+            for (var i = 0; i < active.length; i++) {
+              var a = active[i];
+              for (var hop = 0;
+                  hop < _skipRetries &&
+                      a.offset == 0 &&
+                      req.isUnavailable(a.trip, pos);
+                  hop++) {
+                final next = _earliestTrip(pattern, a.boardPos,
+                    ix.depOf(a.trip, a.boardPos) + a.offset + 1, todayIdx, req);
+                if (next == null) break;
+                final (trip, offset, departure) = next;
+                a = _Active(trip, offset, a.label, a.boardPos, departure);
+                active.add(a);
+              }
+            }
+          }
           for (final a in active) {
             if (suspended) continue;
+            // Skips this stop (realtime, today's runs only).
+            if (a.offset == 0 && req.isUnavailable(a.trip, pos)) continue;
             final arrival = ix.arrOf(a.trip, pos) + a.offset;
             final label = _Label(
               arrival: arrival,
@@ -210,7 +347,10 @@ class Planner {
               trip: a.trip,
               boardStop: ix.patternStopAt(pattern, a.boardPos),
               boardTime: a.boardTime,
-              readyTime: a.label.arrival,
+              // Same buffer the search boarded with, so the every-line pass
+              // never lists a connection the planner deems impossible.
+              readyTime: a.label.arrival +
+                  (a.label.ride ? req.minTransferSeconds : 0),
             );
             if (_addToBag(bags[round][stop], label)) newlyMarked.add(stop);
           }
@@ -219,12 +359,13 @@ class Planner {
           for (final label in bags[round - 1][stop]) {
             final ready = label.arrival +
                 (label.ride ? req.minTransferSeconds : 0);
-            final found = _earliestTrip(pattern, pos, ready, todayIdx);
+            final found = _earliestTrip(pattern, pos, ready, todayIdx, req);
             if (found == null) continue;
             final (trip, offset, departure) = found;
             var dominated = false;
             active.removeWhere((a) {
-              final aDep = ix.depOf(a.trip, a.boardPos) + a.offset;
+              // Both trips compared where they both are: at this stop.
+              final aDep = ix.depOf(a.trip, pos) + a.offset;
               if (departure <= aDep && label.walk <= a.label.walk) return true;
               if (aDep <= departure && a.label.walk <= label.walk) {
                 dominated = true;
@@ -268,24 +409,7 @@ class Planner {
       }
       finals.addAll(roundFinals);
     }
-    if (finals.isEmpty) return const [];
-
-    var journeys = finals
-        .map((l) => _buildJourney(l, date, req))
-        .toList();
-
-    // ---- filters (§7.3) --------------------------------------------------
-    final fastest =
-        journeys.map((j) => j.arrival).reduce(math.min);
-    journeys = journeys
-        .where((j) =>
-            j.arrival <= fastest + req.maxExtraMinutes * 60 &&
-            j.walkMetres <= req.walkCapMetres)
-        .toList();
-    if (req.arriveBy) {
-      journeys = journeys.where((j) => j.arrival <= startSeconds).toList();
-    }
-    return _dedupe(journeys);
+    return [for (final l in finals) _buildJourney(l, date, req)];
   }
 
   Set<int> _relaxFootpaths(
@@ -339,14 +463,16 @@ class Planner {
       label.stop == stop && (label.ride || label.prev == null);
 
   /// Earliest trip of [pattern] departing position [pos] at or after [minTime],
-  /// as (trip, dayOffsetSeconds, effectiveDeparture). Considers today's
-  /// services and trips that started the previous service day (times >= 24:00).
+  /// as (trip, dayOffsetSeconds, effectiveDeparture). Considers the previous
+  /// service day (trips past 24:00), today, and - once [minTime] itself is past
+  /// midnight - the next service day.
   (int, int, int)? _earliestTrip(
-      int pattern, int pos, int minTime, int todayIdx) {
+      int pattern, int pos, int minTime, int todayIdx, [PlanRequest? req]) {
     (int, int, int)? best;
     for (final (dayIdx, offset) in [
-      (todayIdx, 0),
       (todayIdx - 1, -secondsPerDay),
+      (todayIdx, 0),
+      if (minTime >= secondsPerDay) (todayIdx + 1, secondsPerDay),
     ]) {
       if (dayIdx < 0 || dayIdx >= ix.serviceDayCount) continue;
       final want = minTime - offset;
@@ -360,14 +486,18 @@ class Planner {
           hi = mid;
         }
       }
-      for (var i = lo; i < count; i++) {
+      // Trips are sorted at the first stop, not here: look a few either side
+      // of the hit, and a few past the first match, for an overtaking trip.
+      var stopAt = count;
+      for (var i = math.max(0, lo - _overtakeScan); i < stopAt; i++) {
         final trip = ix.patternTripAt(pattern, i);
         final dep = ix.depOf(trip, pos);
         if (dep < want) continue;
         if (!ix.serviceRunsOn(ix.tripService[trip], dayIdx)) continue;
+        if (offset == 0 && (req?.isUnavailable(trip, pos) ?? false)) continue;
         final eff = dep + offset;
         if (best == null || eff < best.$3) best = (trip, offset, eff);
-        break;
+        if (stopAt == count) stopAt = math.min(count, i + 1 + _overtakeScan);
       }
     }
     return best;
@@ -469,7 +599,8 @@ class Planner {
       PlanRequest req) {
     final todayIdx = ix.dayIndexOf(date);
     final windowEnd = readyTime + req.windowMinutes * 60;
-    final byRoute = <String, RideOption>{};
+    // Keyed by feed and number: regional "2" is not GTT tram 2.
+    final byRoute = <(int, String), RideOption>{};
     for (var i = ix.stopPatternOffset[boardStop];
         i < ix.stopPatternOffset[boardStop + 1];
         i++) {
@@ -486,8 +617,17 @@ class Planner {
         }
       }
       if (alightPos < 0) continue;
-      final found = _earliestTrip(pattern, boardPos, readyTime, todayIdx);
-      if (found == null) continue;
+      // Realtime disruptions describe today's runs (day offset 0) only.
+      bool skips((int, int, int) f) =>
+          f.$2 == 0 && req.isUnavailable(f.$1, alightPos);
+      var found = _earliestTrip(pattern, boardPos, readyTime, todayIdx, req);
+      // A run that will not stop at the alight stop: the next one may.
+      for (var hop = 0;
+          found != null && hop < _skipRetries && skips(found);
+          hop++) {
+        found = _earliestTrip(pattern, boardPos, found.$3 + 1, todayIdx, req);
+      }
+      if (found == null || skips(found)) continue;
       final (trip, offset, departure) = found;
       if (departure > windowEnd) continue;
       final route = ix.patternRoute[pattern];
@@ -502,9 +642,10 @@ class Planner {
         detoured: req.detouredRoutes.contains(route),
         scheduledOnly: ix.isScheduledOnly(route),
       );
-      final existing = byRoute[name];
+      final key = (ix.routeFeed[route], name);
+      final existing = byRoute[key];
       if (existing == null || option.departure < existing.departure) {
-        byRoute[name] = option;
+        byRoute[key] = option;
       }
     }
     final options = byRoute.values.toList()

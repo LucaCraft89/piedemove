@@ -155,6 +155,8 @@ extension OsmClip on OsmData {
 int nodeCrossing(Map<String, String>? t) {
   if (t == null) return -1;
   final hw = t['highway'];
+  // `crossing=no` maps a spot where crossing is not possible: not a crossing.
+  if (t['crossing'] == 'no') return -1;
   if (hw != 'crossing' && hw != 'traffic_signals' && t['crossing'] == null) {
     return -1;
   }
@@ -238,7 +240,11 @@ WayClass? classifyWay(Map<String, String> t) {
       if (fw == 'crossing' || cw == 'crossing') {
         return WayClass(
           kind: WalkKind.crossing,
-          sub: crossingType(t) ?? WalkCrossing.uncontrolled,
+          // A crossing way tagged `crossing=no` stays connected, at the
+          // unmarked price, rather than as a cheap uncontrolled crossing.
+          sub: t['crossing'] == 'no'
+              ? WalkCrossing.unmarked
+              : crossingType(t) ?? WalkCrossing.uncontrolled,
           covered: covered,
           name: name,
         );

@@ -16,6 +16,7 @@ import 'package:piedemove/location/live_trip.dart';
 import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/routing/journey.dart';
 import 'package:piedemove/routing/providers.dart';
+import 'package:piedemove/ui/map/map_style.dart';
 import 'package:piedemove/ui/nav/entity.dart';
 import 'package:piedemove/ui/sheets/alert_sheet.dart';
 import 'package:piedemove/ui/sheets/sheet_parts.dart';
@@ -56,12 +57,21 @@ class _TripSheetState extends ConsumerState<TripSheet> {
   @override
   Widget build(BuildContext context) {
     final trip = ref.watch(tripPlanProvider);
-    return DraggableScrollableSheet(
-      initialChildSize: 0.5,
-      minChildSize: 0.15,
-      maxChildSize: 0.92,
+    // Back steps out of a journey's detail to the list, then tucks the list
+    // away (the reopen chip brings it back) instead of closing the app.
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        final plan = ref.read(tripPlanProvider.notifier);
+        trip.selected != null ? plan.back() : plan.hideSheet();
+      },
+      child: DraggableScrollableSheet(
+      initialChildSize: sheetHalf,
+      minChildSize: sheetPeek,
+      maxChildSize: sheetFull,
       snap: true,
-      snapSizes: const [0.15, 0.5, 0.92],
+      snapSizes: sheetSnaps,
       builder: (context, controller) => Material(
         elevation: 8,
         color: Theme.of(context).colorScheme.surface,
@@ -78,6 +88,7 @@ class _TripSheetState extends ConsumerState<TripSheet> {
                 now: DateTime.now(),
               ),
         ),
+      ),
       ),
     );
   }

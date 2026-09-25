@@ -1,0 +1,126 @@
+# Keeps the line geometry in step with GTT: when GTT publishes a new export (or
+# the lines code/format changes), rebuild lines.bin + ambient + connectors from
+# the feed and the OSM Geofabrik extract and republish them to the fixed
+# release tag `lines-latest`. The app downloads a new set on its own
+# (lib/geo/lines_update.dart); the ci release job bundles the latest set into
+# the APK. Nothing here names a line, a stop or a coordinate.
+name: lines
+
+on:
+  schedule:
+    - cron: '41 4 * * *' # daily; GTT exports are irregular
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Rebuild and publish even if the feed is unchanged'
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      force:
+        type: boolean
+        default: false
+
+concurrency: lines
+
+permissions:
+  contents: write # release assets
+  actions: write # keep-alive
+
+env:
+  TAG: lines-latest
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+
+      # GTT only: regional buses have no geometry to match.
+      - name: Timetable index
+        run: |
+          for i in 1 2 3; do dart tool/build_index.dart --no-regional && break; sleep $((i * 20)); done
+          test -s build/index.bin
+
+      - name: Changed since the published set?
+        id: need
+        run: |
+          feed=$(dart tool/index_feed.dart)
+          format=$(sed -n 's/^const linesFormatVersion = \([0-9]*\);/\1/p' lib/geo/lines_io.dart)
+          prev=$(curl -fsSL "https://github.com/${{ github.repository }}/releases/download/$TAG/manifest.json" \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['feedVersion'], d['format'])" || echo none)
+          echo "feed $feed format $format; published: $prev"
+          if [ "${{ inputs.force }}" = "true" ] || [ "$feed $format" != "$prev" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # OSM: Geofabrik extract (Overpass is unreachable/throttled from runners),
+      # cached per ISO week, cut to the GTT network's own bounding box.
+      - id: week
+        if: steps.need.outputs.build == 'true'
+        run: echo "w=$(date +%G-%V)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        if: steps.need.outputs.build == 'true'
+        with:
+          path: build/nord-ovest.osm.pbf
+          key: geofabrik-nord-ovest-${{ steps.week.outputs.w }}
+      - name: Roads and track from OSM
+        if: steps.need.outputs.build == 'true'
+        run: |
+          mkdir -p build
+          [ -s build/nord-ovest.osm.pbf ] || curl -fL --retry 5 --retry-all-errors \
+            https://download.geofabrik.de/europe/italy/nord-ovest-latest.osm.pbf \
+            -o build/nord-ovest.osm.pbf
+          sudo apt-get update -qq && sudo apt-get install -y -qq osmium-tool
+          bbox=$(dart tool/lines_bbox.dart)
+          echo "bbox $bbox"
+          osmium extract --bbox "$bbox" --overwrite build/nord-ovest.osm.pbf -o build/gtt-area.osm.pbf
+          osmium tags-filter --overwrite build/gtt-area.osm.pbf w/highway w/railway -o build/gtt-ways.osm.pbf
+          osmium add-locations-to-ways --overwrite build/gtt-ways.osm.pbf -o build/gtt-ways-loc.osm.pbf
+          # locations_on_ways: without it OPL writes bare node ids and every way
+          # would arrive without coordinates.
+          osmium cat --overwrite build/gtt-ways-loc.osm.pbf -t way \
+            -f opl,locations_on_ways=true -o build/lines.opl
+          wc -l build/lines.opl
+
+      - name: Build line geometry
+        if: steps.need.outputs.build == 'true'
+        run: dart tool/build_lines.dart --opl build/lines.opl --zip build/gtt_gtfs.zip
+
+      # Quality gate: a broken build is never published; the app keeps its set.
+      - name: Quality gate
+        if: steps.need.outputs.build == 'true'
+        run: |
+          dart tool/lines_report.dart --fail
+          dart tool/gap_detector.dart
+
+      - name: Publish lines-latest
+        if: steps.need.outputs.build == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dart tool/lines_manifest.dart
+          cd build/lines_release
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --title "Line geometry (latest)" --latest=false \
+              --notes "Automated from the GTT feed and OpenStreetMap (ODbL). Rebuilt when GTT publishes. Do not edit."
+          # data first, manifest last: the app only sees the new manifest once the files are in place
+          gh release upload "$TAG" lines.bin.gz ambient.json.gz connectors.json.gz --clobber
+          gh release upload "$TAG" manifest.json --clobber
+
+  keepalive: # scheduled workflows are disabled after 60 days without repo activity
+    runs-on: ubuntu-latest
+    needs: build
+    if: always() && github.event_name == 'schedule'
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow enable lines.yml --repo "${{ github.repository }}"

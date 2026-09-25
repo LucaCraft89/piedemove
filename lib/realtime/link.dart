@@ -34,9 +34,11 @@ int? vehiclePosition(TransitIndex ix, int pattern, RtVehicle v) {
   }
   final sequence = v.stopSequence;
   if (sequence == null) return null;
-  // Feeds that number from 1 and never skip: the position is the offset.
-  final guess = sequence - 1;
-  return guess >= 0 && guess < ix.patternLength(pattern) ? guess : null;
+  // The index keeps each position's own stop_sequence (gaps and all).
+  for (var p = 0; p < ix.patternLength(pattern); p++) {
+    if (ix.stopSequenceAt(pattern, p) == sequence) return p;
+  }
+  return null;
 }
 
 List<RtVehicle> vehiclesOnRoute(TransitIndex ix, RealtimeState rt, int route) =>

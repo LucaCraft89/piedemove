@@ -6,11 +6,17 @@ import 'package:piedemove/data/transit_index.dart';
 ///
 ///   stops:    (id, name, lat, lon)
 ///   patterns: (routeShortName, routeType, [stopIds], [[depSecondsPerStop]])
+///
+/// Each pattern is its own route; [regionalPatterns] marks some as coming from
+/// the regional (scheduled-only) feed; [stopSequences] gives a pattern's GTFS
+/// stop_sequence numbers when they are not 1, 2, 3...
 TransitIndex syntheticIndex({
   required List<(String, String, double, double)> stops,
   required List<(String, int, List<String>, List<List<int>>)> patterns,
   int serviceStartDay = 20000,
   int serviceDayCount = 7,
+  Set<int> regionalPatterns = const {},
+  Map<int, List<int>> stopSequences = const {},
 }) {
   final stopIds = [for (final s in stops) s.$1];
   final stopIndex = {for (var i = 0; i < stops.length; i++) stops[i].$1: i};
@@ -85,10 +91,24 @@ TransitIndex syntheticIndex({
     routeShortNames: routeShort,
     routeLongNames: routeShort,
     routeTypes: Int8List.fromList(routeType),
+    routeFeed: Int8List.fromList([
+      for (var r = 0; r < routeIds.length; r++)
+        regionalPatterns.contains(r) ? feedRegional : feedGtt,
+    ]),
     patternRoute: Int32List.fromList(patternRoute),
     patternDir: Int8List(patternRoute.length),
     patternStopOffset: Int32List.fromList(patternStopOffset),
     patternStop: Int32List.fromList(patternStopFlat),
+    // GTFS stop_sequence per position; patterns not listed count 1, 2, 3...
+    patternSeq: stopSequences.isEmpty
+        ? null
+        : Int32List.fromList([
+            for (var p = 0; p < patternRoute.length; p++)
+              for (var i = 0;
+                  i < patternStopOffset[p + 1] - patternStopOffset[p];
+                  i++)
+                stopSequences[p]?[i] ?? i + 1,
+          ]),
     patternTripOffset: Int32List.fromList(patternTripOffset),
     patternTrip: Int32List.fromList(patternTripFlat),
     tripIds: tripIds,

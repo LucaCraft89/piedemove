@@ -43,8 +43,12 @@ const sideFactors = [
   [1.4, 1.1, 2.5],
 ];
 
-/// Smallest factor anywhere: keeps the A* heuristic admissible.
-const minWalkFactor = 0.9;
+/// Smallest factor any edge can get: the cheapest base factor (pedestrian
+/// zone / living street, 0.95) under an arcade ([coveredFactor]). The A*
+/// heuristic multiplies straight-line metres by it, so it must never exceed a
+/// real edge's factor or a longer route can win. walk_router_test checks it
+/// against every table above.
+const minWalkFactor = 0.95 * coveredFactor;
 
 double crossingMetres(int type) => switch (type) {
       WalkCrossing.signals => crossSignalsMetres,

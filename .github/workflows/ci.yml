@@ -1,0 +1,227 @@
+# Every push and PR: analyze, unit tests (the golden case against a freshly
+# built index, never skipped), then the app on an Android emulator with a
+# screenshot tour. Screenshots, logcat and the test log are uploaded.
+name: ci
+
+on:
+  push:
+    branches: [main, 'claude/**', 'release/**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TZ: Europe/Rome # DST tests bite in the app's own zone
+      PIEDEMOVE_REQUIRE_INDEX: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+
+      # GTFS zips cached per day: the feed is regenerated daily.
+      - id: day
+        run: echo "d=$(date +%F)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            build/gtt_gtfs.zip
+            build/piemonte_bus.zip
+          key: gtfs-${{ steps.day.outputs.d }}
+      - name: Build the timetable index
+        run: |
+          for i in 1 2 3; do dart tool/build_index.dart && break; sleep $((i * 20)); done
+          test -s build/index.bin
+
+      - run: flutter test
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: index
+          path: build/index.bin
+          retention-days: 3
+
+  emulator:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    permissions:
+      contents: write # the ci-shots branch below
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21' # maplibre_gl compiles with source level 21
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      # The project asks Gradle for 8 GB; the emulator shares this runner.
+      - name: Cap the Gradle heap
+        run: |
+          mkdir -p ~/.gradle
+          echo 'org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g' >> ~/.gradle/gradle.properties
+      - name: Build the debug APK
+        run: flutter build apk --debug
+      - uses: actions/download-artifact@v4
+        with:
+          name: index
+          path: build
+      - name: Smoke tour on an emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash tool/ci/emulator_smoke.sh
+      # Also as one orphan commit on `ci-shots`, readable with a plain git fetch
+      # where artifact storage is not reachable. Overwritten on every push run.
+      - name: Publish screenshots to the ci-shots branch
+        if: always() && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ -d build/ci/shots ] || exit 0
+          out=$(mktemp -d)
+          cp -r build/ci/shots "$out/"
+          cp build/ci/itest.log build/ci/logcat.txt "$out/" 2>/dev/null || true
+          cd "$out"
+          git init -q -b ci-shots
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com add -A
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com \
+            commit -q -m "emulator screenshots for $GITHUB_SHA (run $GITHUB_RUN_ID)"
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:ci-shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: emulator-screenshots
+          path: |
+            build/ci/shots/
+            build/ci/itest.log
+            build/ci/logcat.txt
+          retention-days: 14
+
+  # A push whose head commit message contains "[release]" publishes a GitHub
+  # prerelease, but only after check and the emulator tour passed. Tag and
+  # notes come from pubspec's version and docs/release-notes/v<version>.md.
+  # Line geometry for the release (and, on a "[lines]" push, a test run of
+  # the lines workflow): rebuilt and republished if GTT has a newer export.
+  lines:
+    needs: check
+    if: >-
+      github.event_name == 'push' &&
+      (contains(github.event.head_commit.message, '[release]') ||
+       contains(github.event.head_commit.message, '[lines]'))
+    permissions:
+      contents: write
+      actions: write
+    uses: ./.github/workflows/lines.yml
+
+  release:
+    needs: [check, emulator, lines]
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[release]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PM_KEYSTORE_BASE64: ${{ secrets.PM_KEYSTORE_BASE64 }}
+      PM_KEYSTORE_PASSWORD: ${{ secrets.PM_KEYSTORE_PASSWORD }}
+      PM_KEY_ALIAS: ${{ secrets.PM_KEY_ALIAS }}
+      PM_KEY_PASSWORD: ${{ secrets.PM_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21' # maplibre_gl compiles with source level 21
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Cap the Gradle heap
+        run: |
+          mkdir -p ~/.gradle
+          echo 'org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g' >> ~/.gradle/gradle.properties
+      # With the PM_* secrets set, the release key signs. Without them the
+      # build would fall back to the debug key, which later key-signed updates
+      # cannot replace: refuse, unless the release commit says
+      # "[debug-signed]" to accept that on purpose (a beta for testers).
+      - name: Release keystore
+        env:
+          HEAD_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          if [ -n "$PM_KEYSTORE_BASE64" ]; then
+            echo "$PM_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "PM_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          elif printf '%s' "$HEAD_MESSAGE" | grep -qF '[debug-signed]'; then
+            echo "::warning::no release keystore: signing with the debug key, as the commit asked"
+          else
+            echo "::error::no release keystore secret (PM_KEYSTORE_BASE64 ...); add it, or say [debug-signed] in the release commit"
+            exit 1
+          fi
+      # Ship the freshest published geometry, not whatever the repo holds: the
+      # app still updates itself later, but starts from the newest set.
+      - name: Bundle the latest line geometry
+        run: |
+          base="https://github.com/${{ github.repository }}/releases/download/lines-latest"
+          format=$(sed -n 's/^const linesFormatVersion = \([0-9]*\);/\1/p' lib/geo/lines_io.dart)
+          mkdir -p build/lines_latest && cd build/lines_latest
+          if curl -fsSL "$base/manifest.json" -o manifest.json && \
+             python3 -c "import json,sys; sys.exit(0 if json.load(open('manifest.json'))['format'] == $format else 1)"; then
+            ok=1
+            for f in lines.bin.gz ambient.json.gz connectors.json.gz; do
+              curl -fsSL "$base/$f" -o "$f" || ok=0
+              want=$(python3 -c "import json; print(json.load(open('manifest.json'))['files']['$f']['sha256'])")
+              [ "$(sha256sum "$f" | cut -d' ' -f1)" = "$want" ] || ok=0
+            done
+            if [ "$ok" = 1 ]; then
+              cp lines.bin.gz ambient.json.gz connectors.json.gz ../../assets/
+              echo "bundled lines-latest: $(python3 -c "import json; print(json.load(open('manifest.json'))['feedVersion'])")"
+            else
+              echo "::warning::lines-latest incomplete or corrupt: shipping the repo's line assets"
+            fi
+          else
+            echo "::warning::no lines-latest in format $format: shipping the repo's line assets"
+          fi
+      - run: flutter build apk --release
+      - name: Publish the prerelease
+        run: |
+          v=$(sed -n 's/^version: *\([^+]*\).*/\1/p' pubspec.yaml)
+          notes="docs/release-notes/v$v.md"
+          test -s "$notes"
+          apk="piedemove-$v.apk"
+          cp build/app/outputs/flutter-apk/app-release.apk "$apk"
+          sha256sum "$apk" > "$apk.sha256"
+          if gh release view "v$v" >/dev/null 2>&1; then
+            echo "::error::release v$v already exists: bump the version in pubspec.yaml"
+            exit 1
+          fi
+          gh release create "v$v" "$apk" "$apk.sha256" \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "PiedeMove ${v//-/ }" --notes-file "$notes"

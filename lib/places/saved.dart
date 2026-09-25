@@ -17,8 +17,12 @@ const maxRecents = 10;
 
 class PlaceList extends StateNotifier<List<Place>> {
   PlaceList(this._key, {this.cap}) : super(const []) {
-    _load();
+    _loaded = _load().catchError((Object _) {}); // a failed read never blocks saving
   }
+
+  /// Writes wait for this: saving before the first read would overwrite the
+  /// stored list with only what was added meanwhile.
+  late final Future<void> _loaded;
 
   final String _key;
   final int? cap;
@@ -27,18 +31,25 @@ class PlaceList extends StateNotifier<List<Place>> {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_key);
     if (raw == null) return;
+    if (!mounted) return;
     try {
-      state = [
+      final loaded = [
         for (final j in jsonDecode(raw) as List)
           Place.fromJson(j as Map<String, dynamic>),
       ];
+      // Places added before the load finished stay on top, not overwritten.
+      state = [
+        ...state,
+        for (final p in loaded)
+          if (!contains(p)) p,
+      ].take(cap ?? 1 << 30).toList();
     } catch (_) {
       // Corrupt or an older shape: start clean rather than break the search.
-      state = const [];
     }
   }
 
   Future<void> _save() async {
+    await _loaded;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_key, jsonEncode([for (final p in state) p.toJson()]));
   }

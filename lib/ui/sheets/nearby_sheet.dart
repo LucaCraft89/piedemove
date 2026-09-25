@@ -93,6 +93,7 @@ class _NearbyList extends ConsumerWidget {
             now,
             _departuresPerStop,
             delays: ref.watch(delayLookupProvider),
+            unavailable: ref.watch(unavailableLookupProvider),
           );
           children.add(_StopBlock(
             name: cleanStopName(ix.stopNames[stop]),
@@ -127,6 +128,7 @@ class _NearbyList extends ConsumerWidget {
           now,
           _departuresPerStop,
           delays: ref.watch(delayLookupProvider),
+          unavailable: ref.watch(unavailableLookupProvider),
         );
         if (departures.isEmpty) continue;
         children.add(_StopBlock(
