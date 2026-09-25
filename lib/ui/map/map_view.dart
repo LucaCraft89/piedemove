@@ -30,6 +30,7 @@ import 'package:piedemove/ui/theme/tokens.dart';
 
 import 'package:piedemove/settings/settings.dart';
 import 'basemap_style.dart';
+import 'cluster_pies.dart';
 import 'line_features.dart';
 import 'me_layer.dart';
 import 'map_style.dart';
@@ -196,6 +197,9 @@ class _MapViewState extends ConsumerState<MapView> {
   /// The focus the camera was last moved for: a redraw must not re-fit.
   MapFocus? _fitted;
 
+  /// Vehicles, visibility and focus last sent to the vehicle layer.
+  Object? _vehiclesFor;
+
   /// Live progress last drawn, packed as leg * 100000 + vertex; -1 = no trip.
   int _progress = -1;
 
@@ -222,7 +226,12 @@ class _MapViewState extends ConsumerState<MapView> {
     final vehicles = ref.watch(realtimeProvider.select((s) => s.vehicles));
     final showVehicles = ref.watch(vehiclesVisibleProvider);
     final focusNow = ref.watch(focusProvider);
-    if (_styleReady) {
+    // Only when something the layer shows changed: this build also runs for
+    // every sheet opened or closed over the map, and re-sending every vehicle
+    // across the platform channel each time made those transitions stutter.
+    final vehiclesFor = (vehicles, showVehicles, focusNow);
+    if (_styleReady && (!_vehiclesAdded || vehiclesFor != _vehiclesFor)) {
+      _vehiclesFor = vehiclesFor;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final ix = ref.read(transitIndexProvider).valueOrNull;
         _updateVehicles(showVehicles
@@ -930,18 +939,26 @@ class _MapViewState extends ConsumerState<MapView> {
     'pm-stop-poles',
     'pm-stop-labels',
     'pm-stop-clusters',
+    'pm-stop-cluster-pies',
     'pm-stop-cluster-count',
   ];
 
-  Future<void> _hideAmbientStops(MapLibreMapController controller) async {
-    for (final layer in _ambientStopLayers) {
-      await controller.setLayerVisibility(layer, false);
-    }
-  }
+  Future<void> _hideAmbientStops(MapLibreMapController controller) =>
+      _setAmbientStops(controller, false);
 
-  Future<void> _showAmbientStops(MapLibreMapController controller) async {
+  Future<void> _showAmbientStops(MapLibreMapController controller) =>
+      _setAmbientStops(controller, true);
+
+  /// Per layer: an optional one that failed to add (the pies) must not keep
+  /// the others from hiding.
+  Future<void> _setAmbientStops(
+      MapLibreMapController controller, bool visible) async {
     for (final layer in _ambientStopLayers) {
-      await controller.setLayerVisibility(layer, true);
+      try {
+        await controller.setLayerVisibility(layer, visible);
+      } catch (e) {
+        debugPrint('pm: $layer visibility failed: $e');
+      }
     }
   }
 
@@ -1029,6 +1046,7 @@ class _MapViewState extends ConsumerState<MapView> {
             : PmTokens.lightTokens;
     final onSurface = _textColor;
     final surface = _haloColor;
+    final pixelRatio = MediaQuery.devicePixelRatioOf(context);
 
     if (_stopsBusy) return; // an add is in flight
     final gen = _styleGen;
@@ -1100,10 +1118,8 @@ class _MapViewState extends ConsumerState<MapView> {
       _hex(tokens.modes.bus),
     ];
 
-    // A bubble takes the most distinctive mode inside it: metro > funicular >
-    // tram > bus, the same order as a mixed pole (`ModeColors.ofModes`).
-    // ponytail: one colour, not a pie split — a split bubble needs a sprite per
-    // combination, and maplibre-native would not show them.
+    // Fallback colour under the pie (cluster_pies.dart): the most distinctive
+    // mode inside, metro > funicular > tram > bus, as for a mixed pole.
     final clusterColor = [
       'case',
       ['==', ['get', 'm'], 1], _hex(tokens.modes.metro),
@@ -1148,6 +1164,35 @@ class _MapViewState extends ConsumerState<MapView> {
       );
     });
     if (gen == _styleGen) _stopAnchor = anchored;
+
+    // Equal slices, one per mode in the bubble, over the circle; a failure
+    // leaves the one-colour circle.
+    if (anchored) {
+      await layer('gruppi per modo', () async {
+        await addClusterPies(controller, tokens.modes, surface, pixelRatio);
+        await controller.addSymbolLayer(
+          _stopsSource,
+          'pm-stop-cluster-pies',
+          SymbolLayerProperties(
+            iconImage: clusterPieImage(),
+            // Same size as the circle + stroke under it (radius 10..24 + 2).
+            iconSize: [
+              'interpolate',
+              ['linear'],
+              ['get', 'point_count'],
+              2, 12.0 / clusterPieRadius,
+              50, 20.0 / clusterPieRadius,
+              300, 1.0,
+            ],
+            iconAllowOverlap: true,
+            iconIgnorePlacement: true,
+          ),
+          filter: ['has', 'point_count'],
+          belowLayerId: 'pm-stop-cluster-count',
+          enableInteraction: false,
+        );
+      });
+    }
 
     final poles = await layer('pali', () async {
       // Invisible, larger circle first: a >= 44 px tap target (§14).
@@ -1293,7 +1338,10 @@ class _MapViewState extends ConsumerState<MapView> {
         : PmTokens.lightTokens;
     final surface = _haloColor;
 
-    if (_vehiclesBusy) return; // an add is in flight; the next tick updates
+    if (_vehiclesBusy) {
+      _vehiclesFor = null; // an add is in flight; the next build updates
+      return;
+    }
     final gen = _styleGen;
     if (_vehiclesAdded) {
       try {

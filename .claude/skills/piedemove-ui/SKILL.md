@@ -42,7 +42,9 @@ chip appears when any feed is stale.
 
 ## Search (§11.3)
 
-One box, sectioned results: places, stops, lines, vehicles.
+One box, sectioned results: stops, lines, vehicles, then places **last** —
+Photon answers ~300 ms after a keystroke, and inserted above the stops it
+shoved the row under a finger already moving to it (user report, beta 3).
 
 - **Places**: Photon. Debounce 300 ms, min 3 chars, cancel stale requests, cache,
   bias to the user's location, bound to Piemonte. Sorted by distance from the
@@ -174,9 +176,12 @@ for approval of look, palette and line style before phase 6.
   `setGeoJsonSource` when the index arrives after the style. Layers, each in
   its own try/catch feeding `mapStatusProvider`: `pm-stop-clusters` (circle,
   coloured by the cluster's most distinctive mode from the `b`/`t`/`m`/`f`
-  flags aggregated with `max`; a split-pie **sprite** was tried and dropped —
-  maplibre-native never showed the registered images),
-  `pm-stop-cluster-count`, `pm-stop-touch` (invisible r=22 tap target),
+  flags aggregated with `max` - the fallback), `pm-stop-cluster-pies` (symbol
+  over it: 15 sprites `pm-pie-<b><t><m><f>` from `cluster_pies.dart`, equal
+  slices per mode, drawn at dp x devicePixelRatio because Android registers a
+  decoded bitmap at screen density; icon size = (circle radius + 2) / 26, so
+  it covers the circle exactly; own try/catch, hidden with the other ambient
+  stop layers in focus), `pm-stop-cluster-count`, `pm-stop-touch` (invisible r=22 tap target),
   `pm-stop-poles`, `pm-stop-labels`. Poles and labels from `poleMinZoom` 15,
   clusters below it (`clusterMaxZoom` 14), labels at constant opacity.
 - `lib/ui/home/home_page.dart`: search bar (live from phase 4), pill row,
@@ -369,6 +374,13 @@ for approval of look, palette and line style before phase 6.
   Filtri sliders update while dragging and replan on release via `replanSoon()`
   (300 ms); settings saves are coalesced (`settingsSaveDelay`).
 - Home watches only the stale-feed count of `realtimeProvider`.
+- Home `Scaffold(resizeToAvoidBottomInset: false)` and `MediaQuery.sizeOf`:
+  the keyboard of the search page above resized the map platform view every
+  animation frame (stutter opening/closing search). MapView re-sends vehicles
+  only when (vehicles, visibility, focus) changed - every sheet open/close
+  rebuilds it.
+- Ride legs show **one** `LineGroupBadge` (segment per mode, "10 · 16", cap 6
+  then "+N"); the detail's "Altre linee" rows are tappable to the line.
 - `entityNav.push` ignores the entity already on top (refs have `==`).
   Focus is still only cleared by X / Cancella (locked, phase 2).
 - A picked time more than 30 min in the past means tomorrow.
