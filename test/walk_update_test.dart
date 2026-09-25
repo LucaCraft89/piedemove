@@ -187,6 +187,31 @@ void main() {
     expect(s.requests.last.headers['If-None-Match'], '"v1"');
     expect(s.requests, hasLength(2));
   });
+
+  test('an incompatible manifest stores no ETag, so a later app still sees it',
+      () async {
+    final gz = _graphGz(_newer);
+    final s = _Server(_manifest(gz, format: walkGraphFormat + 1), gz);
+    final u = updater(s);
+    expect(await u.checkAndUpdate(), WalkUpdateResult.incompatible);
+    clock = clock.add(const Duration(days: 2));
+    // Same manifest, now readable (the app was updated).
+    s.manifest = _manifest(gz);
+    expect(await u.checkAndUpdate(), WalkUpdateResult.updated);
+    expect(s.requests.first.headers['If-None-Match'], isNull);
+  });
+
+  test('a deleted downloaded graph drops the ETag and is fetched again',
+      () async {
+    final gz = _graphGz(_newer);
+    final s = _Server(_manifest(gz), gz);
+    final u = updater(s);
+    expect(await u.checkAndUpdate(), WalkUpdateResult.updated);
+    u.graphFile.deleteSync();
+    clock = clock.add(const Duration(days: 2));
+    expect(await u.checkAndUpdate(), WalkUpdateResult.updated);
+    expect(s.requests.last.headers['If-None-Match'], isNull);
+  });
 }
 
 void layerTests() {

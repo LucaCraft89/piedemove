@@ -42,6 +42,7 @@ class TransitIndex {
     required this.patternDir,
     required this.patternStopOffset,
     required this.patternStop,
+    Int32List? patternSeq,
     required this.patternTripOffset,
     required this.patternTrip,
     required this.tripIds,
@@ -54,7 +55,8 @@ class TransitIndex {
     required this.stopPatternOffset,
     required this.stopPattern,
     required this.stopPatternPos,
-  }) : routeFeed = routeFeed ?? Int8List(routeIds.length);
+  })  : routeFeed = routeFeed ?? Int8List(routeIds.length),
+        patternSeq = patternSeq ?? Int32List(0);
 
   final String feedVersion;
 
@@ -81,6 +83,10 @@ class TransitIndex {
   final Int8List patternDir;
   final Int32List patternStopOffset;
   final Int32List patternStop;
+
+  /// GTFS `stop_sequence` at each pattern position (parallel to
+  /// [patternStop]); empty = positions are sequences 1, 2, 3...
+  final Int32List patternSeq;
   final Int32List patternTripOffset;
   final Int32List patternTrip;
 
@@ -140,6 +146,11 @@ class TransitIndex {
   int patternLength(int p) => patternStopOffset[p + 1] - patternStopOffset[p];
 
   int patternStopAt(int p, int pos) => patternStop[patternStopOffset[p] + pos];
+
+  /// The GTFS `stop_sequence` realtime uses for position [pos] of [p].
+  int stopSequenceAt(int p, int pos) => patternSeq.isEmpty
+      ? pos + 1
+      : patternSeq[patternStopOffset[p] + pos];
 
   int patternTripCount(int p) => patternTripOffset[p + 1] - patternTripOffset[p];
 

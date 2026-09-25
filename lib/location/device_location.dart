@@ -36,9 +36,9 @@ class LocState {
 /// its own stream for the dot.
 final locationProvider =
     StateNotifierProvider<LocationController, LocState>((ref) {
-  final c = LocationController();
-  ref.onDispose(c.dispose);
-  return c;
+  // StateNotifierProvider disposes its notifier itself; registering
+  // c.dispose here too ran it twice and threw when the app scope closed.
+  return LocationController();
 });
 
 /// Last known position, null while unknown or denied.
@@ -86,6 +86,8 @@ class LocationController extends StateNotifier<LocState>
     }
   }
 
+  Timer? _retry;
+
   void _set(Position p) => state = LocState(status: LocStatus.ok, position: p);
 
   void _listen() {
@@ -96,10 +98,28 @@ class LocationController extends StateNotifier<LocState>
           accuracy: LocationAccuracy.high,
           intervalDuration: const Duration(seconds: 1),
         ),
-      ).listen(_set, onError: (Object e) => debugPrint('pm: stream: $e'));
+      ).listen(
+        _set,
+        onError: (Object e) {
+          debugPrint('pm: stream: $e');
+          _lost();
+        },
+        onDone: _lost,
+      );
     } catch (e) {
       debugPrint('pm: location stream unavailable: $e');
+      _lost(); // no stream at all: re-check and retry like a dead one
     }
+  }
+
+  /// The stream died (location switched off, provider error): re-check the
+  /// status shortly, so the chip tells the truth and a fix resumes on its own.
+  void _lost() {
+    _stop();
+    _retry?.cancel();
+    _retry = Timer(const Duration(seconds: 5), () {
+      if (_foreground && mounted) unawaited(start(ask: false));
+    });
   }
 
   void _stop() {
@@ -121,6 +141,7 @@ class LocationController extends StateNotifier<LocState>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _retry?.cancel();
     _stop();
     super.dispose();
   }

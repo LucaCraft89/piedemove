@@ -24,7 +24,10 @@ int walkSeconds(double metres, {double walkSpeed = defaultWalkSpeed}) =>
 
 /// Uniform grid over stop coordinates, ~one cell per [cellMetres].
 class StopGrid {
-  StopGrid(this.ix, {this.cellMetres = 400}) {
+  StopGrid(this.ix, {this.cellMetres = 400})
+      : _refLat = ix.stopCount == 0
+            ? 45.0
+            : ix.stopLat.reduce((a, b) => a + b) / ix.stopCount {
     for (var s = 0; s < ix.stopCount; s++) {
       _cells.putIfAbsent(_key(ix.stopLat[s], ix.stopLon[s]), () => []).add(s);
     }
@@ -34,23 +37,29 @@ class StopGrid {
   final double cellMetres;
   final _cells = <int, List<int>>{};
 
+  /// One latitude for every cell's width: a per-point step would put two
+  /// neighbours near a cell edge into columns that do not line up.
+  final double _refLat;
+
   double get _latStep => cellMetres / 111320.0;
 
-  double _lonStep(double lat) =>
-      cellMetres / (111320.0 * math.max(0.2, math.cos(lat * math.pi / 180)));
+  // Around one city the mean latitude's cosine is within a percent of every
+  // stop's; [near] reaches one extra cell to absorb the difference.
+  double get _lonStep =>
+      cellMetres / (111320.0 * math.max(0.2, math.cos(_refLat * math.pi / 180)));
 
   int _key(double lat, double lon) {
     final y = (lat / _latStep).floor();
-    final x = (lon / _lonStep(lat)).floor();
+    final x = (lon / _lonStep).floor();
     return y * 100000 + x;
   }
 
   /// Stop indices within [radius] metres of the coordinate, with distances.
   List<(int, double)> near(double lat, double lon, double radius) {
     final out = <(int, double)>[];
-    final cells = (radius / cellMetres).ceil();
+    final cells = (radius / cellMetres).ceil() + 1;
     final y = (lat / _latStep).floor();
-    final x = (lon / _lonStep(lat)).floor();
+    final x = (lon / _lonStep).floor();
     for (var dy = -cells; dy <= cells; dy++) {
       for (var dx = -cells; dx <= cells; dx++) {
         final bucket = _cells[(y + dy) * 100000 + (x + dx)];
@@ -91,18 +100,18 @@ class Footpaths {
       }
     }
     // Transfers inside a display cluster must be transitively consistent: the
-    // radius alone can leave two ends of a long cluster unconnected.
+    // radius alone can leave two ends of a long cluster unconnected. Capped at
+    // the same radius - a same-name chain can stretch far past it, and an
+    // uncapped edge would be a free long walk the table promises nowhere else.
     final cl = clusters ?? StopClusters.build(ix);
     for (final group in cl.members) {
       for (final a in group) {
         for (final b in group) {
           if (a == b) continue;
           if (edges[a].any((e) => e.$1 == b)) continue;
-          edges[a].add((
-            b,
-            haversineMetres(ix.stopLat[a], ix.stopLon[a], ix.stopLat[b],
-                ix.stopLon[b]),
-          ));
+          final d = haversineMetres(
+              ix.stopLat[a], ix.stopLon[a], ix.stopLat[b], ix.stopLon[b]);
+          if (d <= radius) edges[a].add((b, d));
         }
       }
     }

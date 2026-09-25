@@ -99,14 +99,21 @@ Decisions the code makes, with their ceilings:
 
 - **Pareto front per number of rides.** Merging the rounds at the egress hides
   two-ride footpath answers behind three-ride chains that beat them on both
-  arrival and metres. Bags are capped at 8 labels, walk-first.
+  arrival and metres. Bags are capped at 8 labels; a full bag keeps both
+  extremes (least walk, earliest arrival) and drops the interior label closest
+  in walk to its neighbour.
 - **One departure, not a range.** McRAPTOR runs once from the requested time;
   the window is used by the every-line post-pass. A later departure never walks
   less, so the front does not change. Upgrade to a real range search only if a
   missing journey is demonstrated.
 - **No chained footpaths**: a label reached on foot cannot start another walk.
-- Arrive-by runs one forward search from `deadline - window - 1 h` and keeps
-  what lands in time.
+- Arrive-by (audit 2026-09): up to `arriveByMaxPasses` forward searches,
+  the first from `deadline - window - 1 h`, each next one starting 1 s after
+  the latest moment the previous pass's earliest first ride could still be
+  caught. Keeps what lands by the deadline, walking before the first ride
+  shifted late (`arriveByBoardBufferSeconds` at the stop), Pareto on
+  (later departure, less walk, fewer rides), slack measured from the latest
+  departure. `routeWalks(deadline:)` re-checks after real walks.
 
 ### The golden case, as the real feed actually behaves (2026-09-19)
 
@@ -168,3 +175,27 @@ Full detail in `docs/walk_routing.md`. Short version:
   only when the closure is built there; use a non-async helper (`_loadInIsolate`).
 - On device (db4ae341, release): graph parse+grid ~360 ms once; plan ~190 ms;
   routeWalks 1-2 ms for 6-9 candidates.
+
+## Audit fixes (2026-09)
+
+- Active-trip pruning compares both trips' departures **at the current stop**
+  (`depOf(a.trip, pos)`), never at each trip's own boarding stop: that hid
+  faster options caught further along (test: routing_fixes_test "prune").
+- Ride labels' `readyTime` includes `minTransferSeconds` after a ride, so the
+  every-line pass never lists a connection the search deems impossible.
+- `_earliestTrip` looks at yesterday, today and (once past 24:00) tomorrow,
+  and scans `_overtakeScan` trips around the binary-search hit because trips
+  are sorted at the first stop only.
+- Ride options are keyed by (feed, short name): regional "2" is not tram 2.
+- Cluster footpaths are capped at the footpath radius; the stop grid uses one
+  reference latitude for every cell width.
+- Clock times from service-day seconds go through `serviceDayTime` (calendar
+  fields, not midnight + Duration) - DST days were an hour off.
+- `nextDepartures` filters on expected time (late runs stay listed; looks back
+  `lateLookbackSeconds`) and reaches tomorrow when the horizon crosses midnight.
+- Walk router: `minWalkFactor = 0.95 * coveredFactor` (arcades), test-checked
+  against every factor table; `snapAll` projects each edge once; a zero-length
+  route is a route, not a crash. `crossing=no` is not a crossing (node), and a
+  crossing way tagged so costs as unmarked. Updater stores no ETag for an
+  incompatible manifest and drops it when the downloaded graph is gone; the
+  format check runs in an isolate.

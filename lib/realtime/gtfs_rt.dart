@@ -1,8 +1,8 @@
 /// GTFS-realtime decoding: FeedMessage -> the handful of records the app uses.
 ///
 /// Field numbers come from `gtfs-realtime.proto`; anything not listed here is
-/// skipped by [Pb]. Nothing throws: a malformed entity is dropped, never
-/// patched, and a feed that fails to parse leaves the previous state in place.
+/// skipped by [Pb]. A malformed entity is dropped, never patched; a feed whose
+/// envelope does not parse throws, and the poller keeps the previous state.
 library;
 
 import 'dart:typed_data';
@@ -53,6 +53,9 @@ class RtTripUpdate {
     required this.delayBySequence,
     required this.timeBySequence,
     required this.timestamp,
+    this.canceled = false,
+    this.skippedSequences = const {},
+    this.skippedStopIds = const {},
   });
 
   final String tripId;
@@ -74,6 +77,14 @@ class RtTripUpdate {
   final Map<int, int> timeBySequence;
 
   final DateTime? timestamp;
+
+  /// `TripDescriptor.schedule_relationship == CANCELED`: the run is not coming.
+  final bool canceled;
+
+  /// Stops this run will not serve (`StopTimeUpdate.schedule_relationship ==
+  /// SKIPPED`), by `stop_sequence` and by `stop_id`.
+  final Set<int> skippedSequences;
+  final Set<String> skippedStopIds;
 }
 
 class RtAlert {
@@ -88,6 +99,7 @@ class RtAlert {
     required this.tripIds,
     required this.from,
     required this.to,
+    this.periods = const [],
   });
 
   final String id;
@@ -98,12 +110,19 @@ class RtAlert {
   final Set<String> routeIds;
   final Set<String> stopIds;
   final Set<String> tripIds;
+  /// First active period, for display.
   final DateTime? from;
   final DateTime? to;
 
-  bool activeAt(DateTime when) =>
-      (from == null || !when.isBefore(from!)) &&
-      (to == null || when.isBefore(to!));
+  /// Every `active_period` (start, end); empty = always active.
+  final List<(DateTime?, DateTime?)> periods;
+
+  bool activeAt(DateTime when) {
+    bool inside(DateTime? a, DateTime? b) =>
+        (a == null || !when.isBefore(a)) && (b == null || when.isBefore(b));
+    if (periods.isEmpty) return inside(from, to);
+    return periods.any((p) => inside(p.$1, p.$2));
+  }
 }
 
 class RtFeed {
@@ -197,7 +216,15 @@ RtTripUpdate? _tripUpdate(Pb u) {
   final byStopId = <String, int>{};
   final delayBySequence = <int, int>{};
   final timeBySequence = <int, int>{};
+  final skippedSequences = <int>{};
+  final skippedStopIds = <String>{};
   for (final stu in u.all(2)) {
+    if (stu.int_(5) == _stopSkipped) {
+      final seq = stu.int_(1), stop = stu.str(4);
+      if (seq != null) skippedSequences.add(seq);
+      if (stop != null) skippedStopIds.add(stop);
+      continue;
+    }
     // Departure first: it is what a waiting rider sees.
     final event = stu.msg(3) ?? stu.msg(2);
     if (event == null) continue;
@@ -221,8 +248,17 @@ RtTripUpdate? _tripUpdate(Pb u) {
     delayBySequence: delayBySequence,
     timeBySequence: timeBySequence,
     timestamp: _epoch(u.int_(4)),
+    canceled: trip?.int_(4) == _tripCanceled,
+    skippedSequences: skippedSequences,
+    skippedStopIds: skippedStopIds,
   );
 }
+
+/// `TripDescriptor.ScheduleRelationship.CANCELED`.
+const _tripCanceled = 3;
+
+/// `StopTimeUpdate.ScheduleRelationship.SKIPPED`.
+const _stopSkipped = 1;
 
 RtAlert _alert(String id, Pb a) {
   final routes = <String>{}, stops = <String>{}, trips = <String>{};
@@ -234,7 +270,10 @@ RtAlert _alert(String id, Pb a) {
     final trip = selector.msg(4)?.str(1);
     if (trip != null) trips.add(trip);
   }
-  final period = a.all(1).firstOrNull;
+  final periods = [
+    for (final p in a.all(1)) (_epoch(p.int_(1)), _epoch(p.int_(2))),
+  ];
+  final period = periods.firstOrNull;
   return RtAlert(
     id: id,
     header: _text(a.msg(10)),
@@ -244,8 +283,9 @@ RtAlert _alert(String id, Pb a) {
     routeIds: routes,
     stopIds: stops,
     tripIds: trips,
-    from: _epoch(period?.int_(1)),
-    to: _epoch(period?.int_(2)),
+    from: period?.$1,
+    to: period?.$2,
+    periods: periods,
   );
 }
 

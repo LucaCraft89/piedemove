@@ -17,6 +17,7 @@ import 'package:piedemove/location/live_trip.dart';
 import 'package:piedemove/places/photon.dart';
 import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/ui/map/map_focus.dart';
+import 'package:piedemove/ui/map/map_style.dart';
 import 'package:piedemove/ui/map/map_view.dart';
 import 'package:piedemove/ui/nav/entity.dart';
 import 'package:piedemove/ui/sheets/alert_sheet.dart';
@@ -24,9 +25,13 @@ import 'package:piedemove/ui/search/search_page.dart';
 import 'package:piedemove/ui/settings/settings_page.dart';
 import 'package:piedemove/ui/sheets/nearby_sheet.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
+import 'package:piedemove/ui/sheets/lines_browser.dart';
 import 'package:piedemove/ui/trip/live_strip.dart';
 import 'package:piedemove/ui/trip/trip_plan.dart';
 import 'package:piedemove/ui/trip/trip_sheet.dart';
+
+/// A picked time this far in the past rolls to tomorrow; closer is "now-ish".
+const pickedTimePastGrace = Duration(minutes: 30);
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -64,7 +69,7 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final status = ref.watch(mapStatusProvider);
+    final status = ref.watch(mapStatusProvider).values.firstOrNull;
     final loc = ref.watch(locationProvider.select((l) => l.status));
     // Centre once on the first fix of the session; the button does it after.
     ref.listen(myPositionProvider, (_, p) {
@@ -75,7 +80,9 @@ class _HomePageState extends ConsumerState<HomePage> {
     });
     final indexState = ref.watch(transitIndexProvider);
     final stage = ref.watch(indexStageProvider);
-    final stale = ref.watch(realtimeProvider).staleFeeds();
+    // Only the count matters here: watching the whole store rebuilt the home
+    // page (and the map under it) on every realtime poll.
+    final stale = ref.watch(realtimeProvider.select((r) => r.staleFeeds().length));
     final trip = ref.watch(tripPlanProvider);
     final live = ref.watch(liveTripProvider);
     final showTrip =
@@ -101,7 +108,9 @@ class _HomePageState extends ConsumerState<HomePage> {
                     _Chip(_stageLabel(stage), progress: true),
                   if (indexState.hasError)
                     const _Chip('Orari non disponibili'),
-                  if (status != null) _Chip(status),
+                  if (status != null)
+                    _Chip(status,
+                        onTap: ref.read(mapStatusProvider.notifier).dismissAll),
                   if (loc == LocStatus.denied ||
                       loc == LocStatus.deniedForever ||
                       loc == LocStatus.servicesOff)
@@ -115,9 +124,9 @@ class _HomePageState extends ConsumerState<HomePage> {
                           ? null
                           : ref.read(tripPlanProvider.notifier).clear,
                     ),
-                  if (stale.length == RtFeedKind.values.length)
+                  if (stale == RtFeedKind.values.length)
                     const _Chip('Dati in tempo reale non disponibili')
-                  else if (stale.isNotEmpty)
+                  else if (stale > 0)
                     const _Chip('Alcuni dati in tempo reale sono fermi'),
                 ],
               ),
@@ -125,7 +134,8 @@ class _HomePageState extends ConsumerState<HomePage> {
           ),
           Positioned(
             right: Gap.screen,
-            bottom: MediaQuery.of(context).size.height * 0.15 + Gap.screen,
+            // Just above a sheet resting at peek.
+            bottom: MediaQuery.of(context).size.height * sheetPeek + Gap.screen,
             child: FloatingActionButton.small(
               heroTag: 'pm-locate',
               tooltip: 'La mia posizione',
@@ -323,10 +333,12 @@ class _WhenRow extends ConsumerWidget {
       );
       if (time == null) return;
       final now = DateTime.now();
-      plan.setWhen(
-        mode,
-        DateTime(now.year, now.month, now.day, time.hour, time.minute),
-      );
+      var at = DateTime(now.year, now.month, now.day, time.hour, time.minute);
+      // 00:30 picked at 23:50 means tonight, not this morning.
+      if (at.isBefore(now.subtract(pickedTimePastGrace))) {
+        at = DateTime(now.year, now.month, now.day + 1, time.hour, time.minute);
+      }
+      plan.setWhen(mode, at);
     }
 
     final label = query.whenMode == WhenMode.now || query.when == null
@@ -380,25 +392,7 @@ class _CancellaPill extends ConsumerWidget {
           label: const Text('Cancella'),
           onPressed: () async {
             final focus = ref.read(focusProvider.notifier);
-            if (focus.needsConfirm) {
-              final ok = await showDialog<bool>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  title: const Text('Terminare il viaggio?'),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(ctx, false),
-                      child: const Text('Annulla'),
-                    ),
-                    FilledButton(
-                      onPressed: () => Navigator.pop(ctx, true),
-                      child: const Text('Termina'),
-                    ),
-                  ],
-                ),
-              );
-              if (ok != true) return;
-            }
+            if (focus.needsConfirm && !await confirmEndTrip(context)) return;
             focus.cancella();
           },
         ),
@@ -442,7 +436,7 @@ class _PillRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final vehiclesOn = ref.watch(vehiclesVisibleProvider);
-    final alerts = ref.watch(realtimeProvider).alerts.length;
+    final alerts = ref.watch(realtimeProvider.select((r) => r.alerts.length));
     return SizedBox(
       height: 36,
       child: ListView(
@@ -474,11 +468,10 @@ class _PillRow extends ConsumerWidget {
             onPressed: () => showFilters(context),
           ),
           const SizedBox(width: 8),
-          // Linee arrives with the line network in phase 6.
-          const ActionChip(
-            avatar: Icon(Icons.timeline, size: 16),
-            label: Text('Linee'),
-            onPressed: null,
+          ActionChip(
+            avatar: const Icon(Icons.timeline, size: 16),
+            label: const Text('Linee'),
+            onPressed: () => openLinesBrowser(context),
           ),
           const SizedBox(width: 8),
           ActionChip(
@@ -510,11 +503,17 @@ class _Chip extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
           onTap: onTap,
+          child: ConstrainedBox(
+          // A chip you can tap is a full 48 dp target; a status line stays slim.
+          constraints: BoxConstraints(
+              minHeight: onTap == null ? 0 : kMinInteractiveDimension),
           child: Padding(
           padding:
               const EdgeInsets.symmetric(horizontal: Gap.element, vertical: 6),
           child: Row(
             mainAxisSize: MainAxisSize.min,
+            // Centred in the taller tap target.
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               if (progress) ...[
                 const SizedBox(
@@ -528,6 +527,7 @@ class _Chip extends StatelessWidget {
                   style: TextStyle(color: scheme.onSecondaryContainer)),
             ],
           ),
+        ),
         ),
         ),
       ),

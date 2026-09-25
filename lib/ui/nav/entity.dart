@@ -23,28 +23,55 @@ sealed class EntityRef {
 class StopRef extends EntityRef {
   const StopRef(this.stop);
   final int stop;
+
+  @override
+  bool operator ==(Object other) => other is StopRef && other.stop == stop;
+  @override
+  int get hashCode => Object.hash(StopRef, stop);
 }
 
 class LineRef extends EntityRef {
   const LineRef(this.route, {this.direction = 0});
   final int route;
   final int direction;
+
+  @override
+  bool operator ==(Object other) =>
+      other is LineRef && other.route == route && other.direction == direction;
+  @override
+  int get hashCode => Object.hash(LineRef, route, direction);
 }
 
 class VehicleRef extends EntityRef {
   const VehicleRef(this.vehicleId);
   final String vehicleId;
+
+  @override
+  bool operator ==(Object other) =>
+      other is VehicleRef && other.vehicleId == vehicleId;
+  @override
+  int get hashCode => Object.hash(VehicleRef, vehicleId);
 }
 
 class AlertRef extends EntityRef {
   const AlertRef(this.alertId);
   final String alertId;
+
+  @override
+  bool operator ==(Object other) => other is AlertRef && other.alertId == alertId;
+  @override
+  int get hashCode => Object.hash(AlertRef, alertId);
 }
 
 class EntityNav extends StateNotifier<List<EntityRef>> {
   EntityNav() : super(const []);
 
-  void push(EntityRef entity) => state = [...state, entity];
+  /// Tapping what is already on top (the same stop twice) changes nothing, so
+  /// back never has to be pressed twice for one sheet.
+  void push(EntityRef entity) {
+    if (state.lastOrNull == entity) return;
+    state = [...state, entity];
+  }
 
   /// Pops one level; false once the stack is empty and the sheet must close.
   bool pop() {

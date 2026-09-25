@@ -137,6 +137,10 @@ TransitIndex mergeRegional(TransitIndex gtt, TransitIndex regional,
   final patternDir = [...gtt.patternDir];
   final patternStopOffset = [...gtt.patternStopOffset];
   final patternStop = [...gtt.patternStop];
+  final patternSeq = [
+    for (var p = 0; p < gtt.patternCount; p++)
+      for (var i = 0; i < gtt.patternLength(p); i++) gtt.stopSequenceAt(p, i),
+  ];
   final patternTripOffset = [...gtt.patternTripOffset];
   final patternTrip = [...gtt.patternTrip];
   final tripIds = [...gtt.tripIds];
@@ -154,6 +158,7 @@ TransitIndex mergeRegional(TransitIndex gtt, TransitIndex regional,
     final length = regional.patternLength(p);
     for (var i = 0; i < length; i++) {
       patternStop.add(mapStop(regional.patternStopAt(p, i)));
+      patternSeq.add(regional.stopSequenceAt(p, i));
     }
     patternStopOffset.add(patternStop.length);
     final newPattern = patternRoute.length - 1;
@@ -215,6 +220,7 @@ TransitIndex mergeRegional(TransitIndex gtt, TransitIndex regional,
     patternDir: Int8List.fromList(patternDir),
     patternStopOffset: Int32List.fromList(patternStopOffset),
     patternStop: Int32List.fromList(patternStop),
+    patternSeq: Int32List.fromList(patternSeq),
     patternTripOffset: Int32List.fromList(patternTripOffset),
     patternTrip: Int32List.fromList(patternTrip),
     tripIds: tripIds,

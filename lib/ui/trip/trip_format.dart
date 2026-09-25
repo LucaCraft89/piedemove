@@ -27,13 +27,31 @@ String metresLabel(double metres, {bool approximate = false}) {
   return approximate ? '≈ $value' : value;
 }
 
-/// The live countdown on a card: `parte ora`, `parte tra 4 min`, `partito`.
+/// The live countdown on a card: `parte ora`, `parte tra 4 min`,
+/// `parte tra 2 h 5 min`, `partito`; a departure on another day reads as that
+/// day and time (`parte lun 18:00`) - a trip planned for Monday is not
+/// "5329 min" away in any useful sense.
 String leavesInLabel(DateTime departure, DateTime now) {
   final seconds = departure.difference(now).inSeconds;
   if (seconds < -60) return 'partito';
   if (seconds < 60) return 'parte ora';
-  return 'parte tra ${seconds ~/ 60} min';
+  final sameDay = departure.year == now.year &&
+      departure.month == now.month &&
+      departure.day == now.day;
+  if (!sameDay) {
+    final hh = departure.hour.toString().padLeft(2, '0');
+    final mm = departure.minute.toString().padLeft(2, '0');
+    return 'parte ${_weekdays[departure.weekday - 1]} $hh:$mm';
+  }
+  final minutes = seconds ~/ 60;
+  if (minutes < 60) return 'parte tra $minutes min';
+  final rest = minutes % 60;
+  return rest == 0
+      ? 'parte tra ${minutes ~/ 60} h'
+      : 'parte tra ${minutes ~/ 60} h $rest min';
 }
+
+const _weekdays = ['lun', 'mar', 'mer', 'gio', 'ven', 'sab', 'dom'];
 
 /// Every line that can make this hop — the product's whole point.
 List<String> legLines(Leg leg) =>

@@ -9,14 +9,16 @@ import 'package:yaml/yaml.dart';
 /// The user's own trips (`test/trips.yaml`) planned against the real index.
 void main() {
   const indexPath = 'build/index.bin';
-  final skip = File(indexPath).existsSync()
+  final required = Platform.environment['PIEDEMOVE_REQUIRE_INDEX'] == '1';
+  final skip = File(indexPath).existsSync() || required
       ? null
       : 'run `dart tool/build_index.dart` first';
 
   final spec = loadYaml(File('test/trips.yaml').readAsStringSync()) as YamlMap;
   for (final trip in (spec['trips'] as YamlList).cast<YamlMap>()) {
     test('${trip['name']}', () async {
-      final ix = (await readIndexFile(indexPath))!;
+      final ix = await readIndexFile(indexPath) ??
+          (throw StateError('$indexPath missing, unreadable or an old format'));
       final planner = Planner(ix, Footpaths.build(ix));
       final parts = (trip['at'] as String).split(':');
       var day = DateTime.now();

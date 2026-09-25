@@ -5,6 +5,7 @@
 /// every string is Italian in source, so the English switch needs l10n first.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart' show ThemeMode;
@@ -125,15 +126,24 @@ class PmSettings {
   }
 }
 
+/// Settings writes wait this long for the next change before saving.
+const settingsSaveDelay = Duration(milliseconds: 400);
+
 class SettingsController extends StateNotifier<PmSettings> {
   SettingsController() : super(const PmSettings()) {
-    _load();
+    _loaded = _load().catchError((Object _) {}); // a failed read never blocks saving
   }
+
+  late final Future<void> _loaded;
+
+  /// Set by the first user edit: a slow first load must not overwrite it.
+  var _edited = false;
+  Timer? _saveTimer;
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_key);
-    if (raw == null) return;
+    if (raw == null || _edited || !mounted) return;
     try {
       state = PmSettings.fromJson(jsonDecode(raw) as Map<String, dynamic>);
     } catch (_) {
@@ -142,10 +152,27 @@ class SettingsController extends StateNotifier<PmSettings> {
     }
   }
 
-  Future<void> update(PmSettings next) async {
+  /// Applies at once; the write is coalesced, so a dragged slider saves once.
+  void update(PmSettings next) {
+    _edited = true;
     state = next;
+    _saveTimer?.cancel();
+    _saveTimer = Timer(settingsSaveDelay, _save);
+  }
+
+  Future<void> _save() async {
+    await _loaded;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_key, jsonEncode(next.toJson()));
+    await prefs.setString(_key, jsonEncode(state.toJson()));
+  }
+
+  @override
+  void dispose() {
+    if (_saveTimer?.isActive ?? false) {
+      _saveTimer!.cancel();
+      unawaited(_save());
+    }
+    super.dispose();
   }
 
   void edit(PmSettings Function(PmSettings) change) => update(change(state));

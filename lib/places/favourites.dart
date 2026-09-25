@@ -15,16 +15,22 @@ String lineFavourite(String shortName) => 'line:$shortName';
 
 class Favourites extends StateNotifier<Set<String>> {
   Favourites() : super(const {}) {
-    _load();
+    _loaded = _load().catchError((Object _) {}); // a failed read never blocks saving
   }
+
+  /// Writes wait for the first read, or a quick tap would overwrite the list.
+  late final Future<void> _loaded;
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
-    state = (prefs.getStringList(_key) ?? const []).toSet();
+    if (!mounted) return;
+    // A star tapped before the load finished is kept, not overwritten.
+    state = {...(prefs.getStringList(_key) ?? const []), ...state};
   }
 
   Future<void> toggle(String key) async {
     state = state.contains(key) ? ({...state}..remove(key)) : {...state, key};
+    await _loaded;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_key, state.toList());
   }

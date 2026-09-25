@@ -60,7 +60,9 @@ class WalkRoutes {
 /// the road is a crossing away), so a ride the traveller can no longer catch is
 /// re-boarded on the next departure ([retime]) rather than the journey being
 /// thrown away. What still exceeds [capMetres] once walked properly, or
-/// arrives more than [maxExtraSeconds] after the best, is dropped. Without a
+/// arrives more than [maxExtraSeconds] after the best, is dropped. With an
+/// arrive-by [deadline], what now lands after it is dropped and the slack is
+/// measured from the latest departure instead. Without a
 /// router, or where the graph does not cover a leg, the planner's estimate is
 /// scaled by [walkDetourFactor] and the leg stays unrouted (shown with "≈").
 List<Journey> routeWalks(
@@ -73,6 +75,7 @@ List<Journey> routeWalks(
   double walkSpeed = walkSpeedMetresPerSecond,
   Leg? Function(Leg ride, int readyTime, DateTime date)? retime,
   int? maxExtraSeconds,
+  int? deadline,
 }) {
   final out = <Journey>[];
   for (final j in journeys) {
@@ -121,9 +124,17 @@ List<Journey> routeWalks(
     final routed = Journey(legs, j.date);
     if (routed.walkMetres <= capMetres) out.add(routed);
   }
+  if (deadline != null) out.removeWhere((j) => j.arrival > deadline);
   if (maxExtraSeconds != null && out.isNotEmpty) {
-    final fastest = out.map((j) => j.arrival).reduce((a, b) => a < b ? a : b);
-    out.removeWhere((j) => j.arrival > fastest + maxExtraSeconds);
+    if (deadline != null) {
+      final latest =
+          out.map((j) => j.departure).reduce((a, b) => a > b ? a : b);
+      out.removeWhere((j) => j.departure < latest - maxExtraSeconds);
+    } else {
+      final fastest =
+          out.map((j) => j.arrival).reduce((a, b) => a < b ? a : b);
+      out.removeWhere((j) => j.arrival > fastest + maxExtraSeconds);
+    }
   }
   return out;
 }

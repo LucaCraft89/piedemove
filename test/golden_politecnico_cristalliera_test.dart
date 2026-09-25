@@ -23,7 +23,12 @@ import 'package:piedemove/routing/raptor.dart';
 void main() {
   const indexPath = 'build/index.bin';
   final missing = !File(indexPath).existsSync();
-  final skip = missing ? 'run `dart tool/build_index.dart` first' : null;
+  // CI sets PIEDEMOVE_REQUIRE_INDEX=1: there a missing index is a failure,
+  // not a silent skip that would let the golden case go unchecked.
+  final required = Platform.environment['PIEDEMOVE_REQUIRE_INDEX'] == '1';
+  final skip = missing && !required
+      ? 'run `dart tool/build_index.dart` first'
+      : null;
 
   late TransitIndex ix;
   late Footpaths footpaths;
@@ -32,8 +37,12 @@ void main() {
   late List<Journey> journeys;
 
   setUpAll(() async {
-    if (missing) return;
-    ix = (await readIndexFile(indexPath))!;
+    if (missing) {
+      if (required) fail('$indexPath is missing: run `dart tool/build_index.dart`');
+      return; // tests are skipped
+    }
+    ix = await readIndexFile(indexPath) ??
+        (throw StateError('$indexPath is unreadable or an old format: rebuild it'));
     footpaths = Footpaths.build(ix);
     planner = Planner(ix, footpaths);
 

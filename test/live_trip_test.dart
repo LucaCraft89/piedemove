@@ -84,6 +84,55 @@ LiveFix _fix(
     );
 
 void main() {
+  group('audit fixes', () {
+    LiveTripState riding() =>
+        advanceLive(_start(), _fix(_lat, _lon0, speed: 6)); // boarded
+
+    test('arriving at the alight stop vibrates "scendi ora"', () {
+      var s = riding();
+      s = advanceLive(s, _fix(_lat, _lon0 + 2 * _step, speed: 6));
+      expect(s.cue, LiveCue.oneStopLeft);
+      final seq = s.cueSeq;
+      s = advanceLive(s, _fix(_lat, _lon0 + 3 * _step, speed: 6));
+      expect(s.finished, isTrue);
+      expect(s.cue, LiveCue.alightNow);
+      expect(s.cueSeq, greaterThan(seq));
+    });
+
+    test('a poor fix with no vehicle neither moves progress nor ends the ride',
+        () {
+      var s = riding();
+      final before = s.along;
+      s = advanceLive(s, _fix(_lat, _lon0 + 3 * _step, accuracy: 120, speed: 6));
+      expect(s.finished, isFalse);
+      expect(s.legIndex, 1);
+      expect(s.along, before);
+      expect(s.estimated, isTrue);
+    });
+
+    test('projection only looks a bounded distance ahead', () {
+      final leg = riding().leg;
+      final end = projectAhead(leg, _lat, _lon0 + 3 * _step, 0, maxAhead: 100);
+      expect(end.along, lessThan(leg.metres - 100));
+      final free = projectAhead(leg, _lat, _lon0 + 3 * _step, 0,
+          maxAhead: double.infinity);
+      expect(free.along, closeTo(leg.metres, 1));
+    });
+
+    test('the schedule estimate follows a reported delay', () {
+      final s = riding().copyWith(lastFix: DateTime(2026, 9, 19, 0, 1));
+      // 00:05 is at the scheduled arrival (420 s); five minutes late, the
+      // bus has only just left.
+      final now = DateTime(2026, 9, 19, 0, 7);
+      final onTime = staleLive(s, now, serviceStart: DateTime(2026, 9, 19));
+      final late = staleLive(s, now,
+          serviceStart: DateTime(2026, 9, 19), delaySeconds: 300);
+      expect(onTime.stopsRemaining, 0);
+      expect(late.stopsRemaining, greaterThan(0));
+      expect(late.cue, isNot(LiveCue.alightNow));
+    });
+  });
+
   test('a ride leg counts the stops left and cues once each', () {
     var s = _start();
     // Boarding: at the stop, moving like a vehicle.

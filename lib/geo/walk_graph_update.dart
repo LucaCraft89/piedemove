@@ -15,6 +15,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
@@ -139,7 +140,10 @@ class WalkGraphUpdater {
         _now().millisecondsSinceEpoch - last < walkUpdateInterval.inMilliseconds) {
       return WalkUpdateResult.tooSoon;
     }
-    final etag = meta['etag'] as String?;
+    // The ETag only stands for "you already have this graph" while the graph
+    // it was stored with is still on disk; otherwise ask afresh.
+    final haveDownload = meta['version'] == null || graphFile.existsSync();
+    final etag = haveDownload ? meta['etag'] as String? : null;
     final http.Response r;
     try {
       r = await client.get(Uri.parse(manifestUrl), headers: {
@@ -165,7 +169,9 @@ class WalkGraphUpdater {
       return WalkUpdateResult.failed;
     }
     if (m.format != walkGraphFormat) {
-      meta['etag'] = r.headers['etag'];
+      // No ETag: once an app update can read this format, the unchanged
+      // manifest must still be fetched (a 304 would hide it forever).
+      meta.remove('etag');
       _writeMeta(meta);
       return WalkUpdateResult.incompatible;
     }
@@ -210,8 +216,7 @@ class WalkGraphUpdater {
         tmp.deleteSync();
         return false;
       }
-      final graph = WalkGraph.decode(Uint8List.fromList(gzip.decode(bytes)));
-      if (graph.header.format != walkGraphFormat) {
+      if (await _formatInIsolate(bytes) != walkGraphFormat) {
         tmp.deleteSync();
         return false;
       }
@@ -258,3 +263,10 @@ WalkGraph? readWalkGraphBytes(Uint8List gz) {
   if (d != null && (s == null || d.header.osmTime >= s.header.osmTime)) return (d, 'downloaded');
   return s == null ? null : (s, 'asset');
 }
+
+int _formatOf(Uint8List gz) =>
+    WalkGraph.decode(Uint8List.fromList(gzip.decode(gz))).header.format;
+
+/// Off the UI thread: a ~1 MB gunzip and decode would drop frames. Kept a
+/// plain (non-async) function so the isolate closure captures only [gz].
+Future<int> _formatInIsolate(Uint8List gz) => Isolate.run(() => _formatOf(gz));

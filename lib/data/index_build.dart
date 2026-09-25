@@ -311,6 +311,7 @@ Future<TransitIndex> buildIndex(GtfsZip zip, {ProgressSink? onProgress}) async {
   final patternDir = <int>[];
   final patternStopOffset = <int>[0];
   final patternStopFlat = <int>[];
+  final patternSeqFlat = <int>[];
   final patternTrips = <List<int>>[];
 
   final keptTripIds = <String>[];
@@ -343,6 +344,7 @@ Future<TransitIndex> buildIndex(GtfsZip zip, {ProgressSink? onProgress}) async {
       patternDir.add(tripDir[t]);
       for (final i in order) {
         patternStopFlat.add(rowStop[i]);
+        patternSeqFlat.add(rowSeq[i]);
       }
       patternStopOffset.add(patternStopFlat.length);
       patternTrips.add(<int>[]);
@@ -423,6 +425,7 @@ Future<TransitIndex> buildIndex(GtfsZip zip, {ProgressSink? onProgress}) async {
     patternDir: Int8List.fromList(patternDir),
     patternStopOffset: Int32List.fromList(patternStopOffset),
     patternStop: Int32List.fromList(patternStopFlat),
+    patternSeq: Int32List.fromList(patternSeqFlat),
     patternTripOffset: patternTripOffset,
     patternTrip: patternTripFlat,
     tripIds: keptTripIds,

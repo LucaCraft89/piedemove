@@ -20,8 +20,9 @@ List<String> _toOpl(Map<String, dynamic> json) => [
 
 void main() {
   test('OPL input yields the same OsmData as the Overpass JSON', () {
-    final tile = Directory('build/walk_osm')
-        .listSync()
+    final dir = Directory('build/walk_osm');
+    // A cached Overpass tile when one exists, else the inline fixture.
+    final tile = (dir.existsSync() ? dir.listSync() : const <FileSystemEntity>[])
         .whereType<File>()
         .where((f) => f.path.endsWith('.json.gz'))
         .toList();

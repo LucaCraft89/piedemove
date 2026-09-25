@@ -7,11 +7,16 @@ library;
 
 import 'package:piedemove/data/transit_index.dart';
 
+import 'journey.dart' show serviceDayTime;
 import 'raptor.dart' show secondsPerDay;
 
 /// Realtime delay in seconds for a (trip, stop position), or null when the trip
 /// has no live data. Wired to the trip-update store in phase 3.
 typedef DelayLookup = int? Function(int trip, int stopPosition);
+
+/// True when realtime says a run will not serve a stop position (cancelled,
+/// or that stop skipped).
+typedef UnavailableLookup = bool Function(int trip, int stopPosition);
 
 class Departure {
   const Departure({
@@ -44,17 +49,21 @@ class Departure {
   bool get live => delaySeconds != null;
   int get expected => scheduled + (delaySeconds ?? 0);
 
-  DateTime get time => DateTime(date.year, date.month, date.day)
-      .add(Duration(seconds: expected));
+  DateTime get time => serviceDayTime(date, expected);
 }
 
-/// The next [n] departures at [stop] at or after [when].
+/// How far back scheduled departures are checked for a delay that still puts
+/// them ahead of now.
+const lateLookbackSeconds = 30 * 60;
+
+/// The next [n] departures at [stop] whose expected time is at or after [when].
 List<Departure> nextDepartures(
   TransitIndex ix,
   int stop,
   DateTime when,
   int n, {
   DelayLookup? delays,
+  UnavailableLookup? unavailable,
   int horizonSeconds = 3 * 3600,
 }) {
   final date = DateTime(when.year, when.month, when.day);
@@ -75,15 +84,26 @@ List<Departure> nextDepartures(
     for (final (dayIdx, offset) in [
       (todayIdx, 0),
       (todayIdx - 1, -secondsPerDay),
+      // A horizon that crosses midnight reaches tomorrow's first runs.
+      if (from + horizonSeconds >= secondsPerDay) (todayIdx + 1, secondsPerDay),
     ]) {
       if (dayIdx < 0 || dayIdx >= ix.serviceDayCount) continue;
-      var added = 0;
+      // Trips are sorted at the pattern's first stop, not here: an
+      // overtaking run can come later in the list, so scan them all.
       for (var t = 0; t < ix.patternTripCount(pattern); t++) {
         final trip = ix.patternTripAt(pattern, t);
         final scheduled = ix.depOf(trip, pos) + offset;
-        if (scheduled < from) continue;
-        if (scheduled > from + horizonSeconds) break;
+        // Scheduled time can be past while the bus is still coming: a late
+        // run stays listed until its expected time, an early one leaves then.
+        if (scheduled < from - lateLookbackSeconds) continue;
+        if (scheduled > from + horizonSeconds) continue;
         if (!ix.serviceRunsOn(ix.tripService[trip], dayIdx)) continue;
+        // Realtime cancellations are for today's runs only.
+        if (dayIdx == todayIdx && (unavailable?.call(trip, pos) ?? false)) {
+          continue;
+        }
+        final delay = delays?.call(trip, pos);
+        if (scheduled + (delay ?? 0) < from) continue;
         out.add(Departure(
           stop: stop,
           pattern: pattern,
@@ -92,10 +112,9 @@ List<Departure> nextDepartures(
           routeType: ix.routeTypes[route],
           headsign: headsign,
           scheduled: scheduled,
-          delaySeconds: delays?.call(trip, pos),
+          delaySeconds: delay,
           date: date,
         ));
-        if (++added >= n) break;
       }
     }
   }
