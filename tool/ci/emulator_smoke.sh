@@ -15,6 +15,11 @@ adb logcat -c
 # Install first so the app's data dir exists, then seed the index the check
 # job built (the app would otherwise download ~250 MB and build it on device).
 adb install -r build/app/outputs/flutter-apk/app-debug.apk
+# Answer the location prompt up front (it would cover every screenshot) and
+# put the emulator's GPS in Turin (Politecnico) instead of California.
+adb shell pm grant "$PKG" android.permission.ACCESS_FINE_LOCATION || true
+adb shell pm grant "$PKG" android.permission.ACCESS_COARSE_LOCATION || true
+adb emu geo fix 7.6624 45.0626 || true
 if [ -f build/index.bin ]; then
   adb push build/index.bin /data/local/tmp/index.bin
   adb shell chmod 644 /data/local/tmp/index.bin
