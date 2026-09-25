@@ -50,6 +50,10 @@ Stops are listed **once per stop** (`searchStopGroups`: one row per
 lines). Browsing opens the nearest pole's sheet, which lists the other poles
 under "Stessa fermata, altri pali"; picking for the planner gives
 `Place(stop: true)` and the router picks the side (routing skill).
+Place rows: icon from `Place.kind` (Photon `type` street/house, else
+`osm_key:osm_value`; `lib/places/place_icon.dart`), distance from the rider
+first in the subtitle (only from a real fix), sorted nearest-first from the
+rider, else from the map centre (`_reference`), which also biases Photon.
 
 - **Places**: Photon. Debounce 300 ms, min 3 chars, cancel stale requests, cache,
   bias to the user's location, bound to Piemonte. Sorted by distance from the
@@ -387,6 +391,10 @@ for approval of look, palette and line style before phase 6.
 - Ride legs show **one** `LineGroupBadge` (segment per mode, "10 · 16", cap 6
   then "+N"); the detail's "Altre linee" rows are tappable to the line.
 - `entityNav.push` ignores the entity already on top (refs have `==`).
+- Closing the last sheet (X, back, `FocusController.close`) returns to the
+  **running live trip, else the trip open in the planner's detail**
+  (`_tripFocus`); only with neither does the focus clear. A stop or line
+  looked at mid-trip lost the trip before (rider report, beta 5).
   Focus is still only cleared by X / Cancella (locked, phase 2).
 - A picked time more than 30 min in the past means tomorrow.
 - Saved places, favourites and settings: writes await the first load.

@@ -16,6 +16,7 @@ import 'package:piedemove/data/transit_index.dart';
 import 'package:piedemove/geo/distance.dart';
 import 'package:piedemove/location/device_location.dart';
 import 'package:piedemove/places/photon.dart';
+import 'package:piedemove/places/place_icon.dart';
 import 'package:piedemove/places/saved.dart';
 import 'package:piedemove/places/search_index.dart';
 import 'package:piedemove/realtime/store.dart';
@@ -23,6 +24,7 @@ import 'package:piedemove/ui/map/map_view.dart';
 import 'package:piedemove/ui/nav/entity.dart';
 import 'package:piedemove/ui/sheets/line_picker.dart' show compareRouteNames;
 import 'package:piedemove/ui/theme/tokens.dart';
+import 'package:piedemove/ui/trip/trip_format.dart' show metresLabel;
 import 'package:piedemove/ui/widgets/line_badge.dart';
 
 const searchDebounce = Duration(milliseconds: 300);
@@ -78,16 +80,16 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   Future<void> _fetchPlaces() async {
     final ticket = ++_ticket;
     final query = _query;
-    final me = ref.read(myPositionProvider);
+    final near = _reference();
     try {
       final places = await ref.read(photonClientProvider).search(
             query,
-            lat: me?.latitude,
-            lon: me?.longitude,
+            lat: near?.$1,
+            lon: near?.$2,
           );
       if (!mounted || ticket != _ticket) return;
       setState(() {
-        _places = _byDistance(places, me?.latitude, me?.longitude);
+        _places = _byDistance(places, near?.$1, near?.$2);
         _placesFailed = false;
       });
     } catch (e) {
@@ -98,6 +100,15 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         _placesFailed = true;
       });
     }
+  }
+
+  /// Where "nearest" is measured from: the rider, else the map's centre
+  /// (what they are looking at), so results are never in Photon's own order.
+  (double, double)? _reference() {
+    final me = ref.read(myPositionProvider);
+    if (me != null) return (me.latitude, me.longitude);
+    final target = ref.read(mapControllerProvider)?.cameraPosition?.target;
+    return target == null ? null : (target.latitude, target.longitude);
   }
 
   void _pick(Place place) {
@@ -123,7 +134,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     final stops = ix == null || clusters == null || _query.isEmpty
         ? const <List<int>>[]
         : searchStopGroups(ix, clusters, _query,
-            lat: me?.latitude, lon: me?.longitude);
+            lat: _reference()?.$1, lon: _reference()?.$2);
     final routes =
         ix == null || _query.isEmpty ? const <int>[] : searchRoutes(ix, _query);
     final vehicles = _query.isEmpty
@@ -242,10 +253,19 @@ class _SearchPageState extends ConsumerState<SearchPage> {
 
   Widget _placeTile(Place p) {
     final isSaved = ref.read(savedPlacesProvider.notifier).contains(p);
+    // Distance only from a real fix: from the map centre it would mislead.
+    final me = ref.read(myPositionProvider);
+    final metres = me == null
+        ? null
+        : haversineMetres(me.latitude, me.longitude, p.lat, p.lon);
+    final subtitle = [
+      if (metres != null) metresLabel(metres),
+      if (p.address.isNotEmpty) p.address,
+    ].join(' · ');
     return ListTile(
-      leading: const Icon(Icons.place_outlined),
+      leading: Icon(placeIcon(p)),
       title: Text(p.name),
-      subtitle: p.address.isEmpty ? null : Text(p.address),
+      subtitle: subtitle.isEmpty ? null : Text(subtitle),
       trailing: IconButton(
         tooltip: isSaved ? 'Rimuovi dai salvati' : 'Salva',
         icon: Icon(isSaved ? Icons.star : Icons.star_border),
@@ -277,7 +297,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           // on-street identifier, so it stands in for one.
           Text('${codes.length == 1 ? 'Fermata' : 'Fermate'} '
               '${codes.join(' · ')}'
-              '${metres == null ? '' : ' · ${metres.round()} m'}  '),
+              '${metres == null ? '' : ' · ${metresLabel(metres)}'}  '),
           Expanded(
             child: Wrap(
               spacing: 4,

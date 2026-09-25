@@ -94,12 +94,17 @@ List<Object> focusWidth(String kind, {double extra = 0}) => [
           in kind == kindRidden ? ambientBaseWidths : contextBaseWidths) ...[
         zoom,
         [
-          '+',
-          extra,
+          '*',
+          // Travelled ground is thin (§9.11), casing and line alike.
+          ['case', isTravelled, travelledWidthFactor, 1.0],
           [
-            '*',
-            base,
-            ['match', ['get', 'mode'], 'bus', 1.0, railWidthFactor],
+            '+',
+            extra,
+            [
+              '*',
+              base,
+              ['match', ['get', 'mode'], 'bus', 1.0, railWidthFactor],
+            ],
           ],
         ],
       ],

@@ -109,6 +109,46 @@ Grant/revoke: `adb shell pm grant|revoke <pkg> android.permission.ACCESS_FINE_LO
 - Walk legs have no off-route banner by design (riding only); the strip always carries an inline Ricalcola.
 - 6b verified live (mock): strip 380 -> 230 m with the fix advanced 150 m, next-maneuver line, travelled part faded / ahead bright joined at the dot, Ricalcola from a fix 200 m off reroutes the leg from the dot (450 m, new first maneuver) without replanning. Not verified: ride-leg off-route banner, no-fix Ricalcola fallback.
 
+## Live strip numbers (post beta 5, rider request)
+
+Under the instruction: walking to a ride, "Il 10 passa alle 18:07 · tra
+4 min · +2 min|in orario|programmato"; riding, "Arrivo in fermata alle ... ";
+then always "Destinazione 18:41 · tra 23 min · 3.2 km" (+ "orario
+programmato" without a live delay on the last ride). `lib/ui/trip/
+live_stats.dart` (pure, `test/live_stats_test.dart`); the strip ticks every
+15 s so countdowns move without fixes. Not yet seen on a real ride.
+
+## Boarding on the road (beta 5 report: "never detected")
+
+Two causes: (1) the rule needed ONE fix both within 40 m of the stop and
+faster than walking - the rider waits still, then the bus leaves the circle
+in ~5 s, usually between fixes and before the phone reports speed; (2) the
+live stream used plain `LocationSettings` = Android's ~5 s default interval.
+Now: `AndroidSettings(bestForNavigation, intervalDuration: 1 s)`; speed
+falls back to `derivedSpeed` between fixes; being within 60 m of the stop
+latches `reachedBoardStop`, and a good fix on the ride's path >= 60 m past
+the stop boards (after the latch, or at vehicle speed without it), with
+progress placed by that fix. Replays in `test/live_trip_test.dart`
+("boarding on the road"). Needs a real ride to confirm.
+
+## Position dot glide (rider report: "updates too slow")
+
+The dot stream was already 1 Hz; it jumped once per fix. `_updateMe` now
+glides it in `meGlideSteps` (6) over `meGlide` (600 ms) from where it is on
+screen (`_meAt`), jumps past `meGlideMaxMetres` (300 m) or on first draw; a
+new fix cancels the running glide at once (`_meGlideGen` bumped at entry,
+only when the fix changed - a bump on every rebuild left the dot short).
+
+## Cue vibration (rider report: "works but too weak")
+
+`HapticFeedback.vibrate` is a UI tap (short, weak, muted by the touch-feedback
+setting). Cues now go through `lib/location/haptics.dart` -> method channel
+`piedemove/vibrate` in `MainActivity.kt`: `VibrationEffect.createWaveform`
+at amplitude 255 with **alarm usage** (API 33 `VibrationAttributes`, older
+`AudioAttributes`); `VIBRATE` permission in the manifest. Patterns: one stop
+left 500-250-500 ms; get off 900-300-900-300-1200 ms. The tap stays as the
+fallback. Do-not-disturb can still silence it.
+
 ## Live trip audit fixes (2026-09)
 
 - Reaching the alight stop (60 m) now vibrates "scendi ora" when the per-stop

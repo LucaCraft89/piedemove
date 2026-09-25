@@ -20,7 +20,9 @@ const _wedgeImage = 'pm-me-wedge';
 double _radiusPx22(double metres, double lat) =>
     metres / (78271.517 * math.cos(lat * math.pi / 180) / (1 << 22));
 
-Map<String, dynamic> meFeatures(Position? p) => {
+/// The dot for fix [p]; [at] draws it at another point (a glide step toward
+/// [p]) with [p]'s accuracy and heading.
+Map<String, dynamic> meFeatures(Position? p, {(double, double)? at}) => {
       'type': 'FeatureCollection',
       'features': p == null
           ? []
@@ -29,7 +31,7 @@ Map<String, dynamic> meFeatures(Position? p) => {
                 'type': 'Feature',
                 'geometry': {
                   'type': 'Point',
-                  'coordinates': [p.longitude, p.latitude],
+                  'coordinates': [at?.$2 ?? p.longitude, at?.$1 ?? p.latitude],
                 },
                 'properties': {
                   'r22': _radiusPx22(p.accuracy.clamp(0, 2000), p.latitude),
@@ -127,3 +129,23 @@ Future<void> raiseMeLayers(MapLibreMapController c) async {
   }
   await _addLayers(c);
 }
+
+/// Glide between fixes: this many steps over [meGlide], so the dot moves
+/// instead of jumping once a second (rider report: "updates too slow").
+const meGlideSteps = 6;
+const meGlide = Duration(milliseconds: 600);
+
+/// Past this the dot jumps: a glide across town would lie about where it was.
+const meGlideMaxMetres = 300.0;
+
+/// The glide's points from ([aLat], [aLon]) to ([bLat], [bLon]), end included.
+List<(double, double)> meGlidePoints(
+        double aLat, double aLon, double bLat, double bLon) =>
+    [
+      for (var i = 1; i <= meGlideSteps; i++)
+        (
+          aLat + (bLat - aLat) * i / meGlideSteps,
+          aLon + (bLon - aLon) * i / meGlideSteps,
+        ),
+    ];
+

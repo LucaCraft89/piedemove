@@ -13,7 +13,6 @@ library;
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
@@ -30,10 +29,20 @@ import 'package:piedemove/realtime/gtfs_rt.dart';
 import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/routing/journey.dart';
 import 'package:piedemove/settings/settings.dart';
+import 'package:piedemove/location/haptics.dart';
 import 'package:piedemove/ui/trip/trip_plan.dart';
 
 /// Distances the rules turn on (§12), all metres.
 const liveBoardRadius = 40.0;
+
+/// Having been this close to the boarding stop arms the path rule below.
+const liveBoardLatchRadius = 60.0;
+
+/// Boarded by position: on the ride's own path, this far past the boarding
+/// stop. A bus leaves the 40 m circle in ~5 s, often between two fixes and
+/// before the phone reports a speed, so "at the stop and moving" alone almost
+/// never fired on the road (rider report, beta 5).
+const liveBoardedAlong = 60.0;
 const liveAlightRadius = 60.0;
 const liveWalkEndRadius = 25.0;
 const liveOnRouteCutoff = 60.0;
@@ -144,6 +153,7 @@ class LiveTripState {
     this.lastFix,
     this.cue,
     this.cueSeq = 0,
+    this.reachedBoardStop = false,
   });
 
   final LiveRoute route;
@@ -178,6 +188,10 @@ class LiveTripState {
   final LiveCue? cue;
   final int cueSeq;
 
+  /// Walking to a ride: the rider has been at the boarding stop
+  /// ([liveBoardLatchRadius]). Reset on every leg change.
+  final bool reachedBoardStop;
+
   LiveLeg get leg => route.legs[legIndex.clamp(0, route.legs.length - 1)];
   bool get riding => leg.kind == LegKind.ride;
   bool get isLastLeg => legIndex >= route.legs.length - 1;
@@ -195,6 +209,7 @@ class LiveTripState {
     DateTime? lastFix,
     LiveCue? cue,
     int? cueSeq,
+    bool? reachedBoardStop,
     bool clearOffRouteSince = false,
     bool clearCue = false,
   }) => LiveTripState(
@@ -214,6 +229,7 @@ class LiveTripState {
     lastFix: lastFix ?? this.lastFix,
     cue: clearCue ? null : (cue ?? this.cue),
     cueSeq: cueSeq ?? this.cueSeq,
+    reachedBoardStop: reachedBoardStop ?? this.reachedBoardStop,
   );
 }
 
@@ -447,6 +463,26 @@ LiveTripState advanceLive(
       haversineMetres(lat, lon, vehicleLat, vehicleLon) <= liveBoardRadius;
   final movingLikeAVehicle = fix.speed > walkSpeed * 1.6;
 
+  if (boarding) {
+    if (straightToEnd <= liveBoardLatchRadius && !state.reachedBoardStop) {
+      state = state.copyWith(reachedBoardStop: true);
+    }
+    // On the ride's path past the stop: aboard, whatever the speed says -
+    // after being at the stop, or clearly moving like a vehicle.
+    final ride = state.route.legs[state.legIndex + 1];
+    final onRide = projectAhead(ride, lat, lon, 0, maxAhead: ride.metres);
+    // A good fix (not the vehicle stand-in); "estimated" is no guard here:
+    // past the stop the rider is off the walk leg, which is what sets it.
+    if (fix.accuracy <= livePoorAccuracy &&
+        onRide.distance <= liveOnRouteCutoff &&
+        onRide.along >= liveBoardedAlong &&
+        (state.reachedBoardStop || movingLikeAVehicle)) {
+      // Straight onto the ride, progress placed by this same fix.
+      return advanceLive(nextLeg(state), fix,
+          vehicleLat: vehicleLat, vehicleLon: vehicleLon, walkSpeed: walkSpeed);
+    }
+  }
+
   final advance = switch (leg.kind) {
     LegKind.ride => straightToEnd <= liveAlightRadius,
     LegKind.walk =>
@@ -464,6 +500,15 @@ LiveTripState advanceLive(
         : next;
   }
   return state;
+}
+
+/// Metres per second from [prev] to (lat, lon) at [at]; -1 when unknown
+/// (no previous fix, too close in time, or too old to mean anything).
+double derivedSpeed(LiveFix? prev, double lat, double lon, DateTime at) {
+  if (prev == null) return -1;
+  final dt = at.difference(prev.at).inMilliseconds / 1000;
+  if (dt < 0.5 || dt > 30) return -1;
+  return haversineMetres(prev.lat, prev.lon, lat, lon) / dt;
 }
 
 /// Result of [projectAhead].
@@ -615,6 +660,7 @@ LiveTripState nextLeg(LiveTripState s) {
     offRoute: false,
     clearOffRouteSince: true,
     clearCue: true,
+    reachedBoardStop: false,
   );
 }
 
@@ -766,9 +812,11 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     try {
       _sub =
           Geolocator.getPositionStream(
-            locationSettings: const LocationSettings(
+            // A fix a second: the plain settings gave Android's default of
+            // one every ~5 s, 40+ m apart at bus speed.
+            locationSettings: AndroidSettings(
               accuracy: LocationAccuracy.bestForNavigation,
-              distanceFilter: 5,
+              intervalDuration: const Duration(seconds: 1),
             ),
           ).listen(
             _onFix,
@@ -819,23 +867,22 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   void _onFix(Position p) {
     final s = state;
     if (s == null) return;
-    _lastPos = LiveFix(
+    final now = DateTime.now();
+    final prev = _lastPos;
+    final fix = LiveFix(
       lat: p.latitude,
       lon: p.longitude,
       accuracy: p.accuracy,
-      speed: p.speed,
-      at: DateTime.now(),
+      // Many phones report 0 or nothing: fall back to the move since the
+      // previous fix.
+      speed: p.speed > 0 ? p.speed : derivedSpeed(prev, p.latitude, p.longitude, now),
+      at: now,
     );
+    _lastPos = fix;
     final vehicle = _vehicleFor(s);
     final next = advanceLive(
       s,
-      LiveFix(
-        lat: p.latitude,
-        lon: p.longitude,
-        accuracy: p.accuracy,
-        speed: p.speed,
-        at: DateTime.now(),
-      ),
+      fix,
       vehicleLat: vehicle?.lat,
       vehicleLon: vehicle?.lon,
       walkSpeed: _ref.read(settingsProvider).walkSpeed,
@@ -874,7 +921,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     state = next;
     if (next.cue != null && next.cueSeq != _lastCueSeq) {
       _lastCueSeq = next.cueSeq;
-      unawaited(HapticFeedback.vibrate());
+      unawaited(vibrateCue(next.cue!));
     }
     if (next.finished) stop();
   }

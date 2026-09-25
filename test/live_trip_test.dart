@@ -163,6 +163,49 @@ void main() {
     expect(s.legIndex, 1, reason: 'the matched vehicle is right there');
   });
 
+  group('boarding on the road (beta 5 report: never detected)', () {
+    test('wait at the stop, then the next fix is already down the line', () {
+      var s = _start();
+      // Standing at the stop: no speed, not boarded, but the stop is reached.
+      s = advanceLive(s, _fix(_lat, _lon0 + 0.0001, speed: 0));
+      expect(s.legIndex, 0);
+      expect(s.reachedBoardStop, isTrue);
+      // The bus left the 40 m circle between fixes; the phone reports no
+      // speed. 120 m along the line: aboard, progress placed there.
+      s = advanceLive(s, _fix(_lat, _lon0 + 0.0015, speed: -1));
+      expect(s.legIndex, 1);
+      expect(s.riding, isTrue);
+      expect(s.along, greaterThan(100));
+    });
+
+    test('never at the stop: needs vehicle speed on the line', () {
+      var s = _start();
+      // Walking along the line past where the stop is, at walking pace.
+      s = advanceLive(s, _fix(_lat, _lon0 + 0.0015, speed: 1.2));
+      expect(s.legIndex, 0, reason: 'a walker on the pavement is not aboard');
+      s = advanceLive(s, _fix(_lat, _lon0 + 0.0016, speed: 7));
+      expect(s.legIndex, 1, reason: 'moving like a bus, on its line');
+    });
+
+    test('at the stop but off the line (another street) stays walking', () {
+      var s = _start();
+      s = advanceLive(s, _fix(_lat, _lon0, speed: 0));
+      s = advanceLive(s, _fix(_lat + 0.003, _lon0 + 0.0015, speed: 7));
+      expect(s.legIndex, 0);
+    });
+
+    test('speed from two fixes when the phone reports none', () {
+      final a = _fix(_lat, _lon0, at: DateTime(2026, 9, 19, 9));
+      expect(
+          derivedSpeed(a, _lat, _lon0 + 0.001, DateTime(2026, 9, 19, 9, 0, 10)),
+          closeTo(7.9, 0.3));
+      expect(derivedSpeed(null, _lat, _lon0, DateTime(2026)), -1);
+      expect(
+          derivedSpeed(a, _lat, _lon0, DateTime(2026, 9, 19, 9, 1)), -1,
+          reason: 'too old to mean anything');
+    });
+  });
+
   test('progress is monotone: a fix behind the rider does not rewind', () {
     var s = _start();
     s = advanceLive(s, _fix(_lat, _lon0, speed: 6));

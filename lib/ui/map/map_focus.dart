@@ -42,7 +42,8 @@ class JourneyFocus extends MapFocus {
 /// The one owner of what the map is focused on (§9.9).
 ///
 /// A line or vehicle sheet, or a selected trip, *sets* it; only [close] (the
-/// sheet's X) and [cancella] (the top pill) clear it. Minimising a sheet,
+/// sheet's X, which falls back to the running or opened trip) and [cancella]
+/// (the top pill) clear it. Minimising a sheet,
 /// zooming, panning, a realtime tick or a lifecycle change never touch it.
 class FocusController extends StateNotifier<MapFocus?> {
   FocusController(this._ref) : super(null) {
@@ -50,7 +51,11 @@ class FocusController extends StateNotifier<MapFocus?> {
     // leave the current focus alone.
     _ref.listen<List<EntityRef>>(entityNavProvider, (_, stack) {
       final top = stack.lastOrNull;
-      if (top is LineRef) {
+      if (top == null) {
+        // The last sheet went: back to the trip it was opened over, if any.
+        final trip = _tripFocus();
+        if (trip != null) state = trip;
+      } else if (top is LineRef) {
         state = RouteFocus(top.route);
       } else if (top is VehicleRef) {
         final ix = _ref.read(transitIndexProvider).valueOrNull;
@@ -81,10 +86,24 @@ class FocusController extends StateNotifier<MapFocus?> {
 
   final Ref _ref;
 
-  /// X on a sheet: closes the sheet stack and drops the focus.
+  /// X (or back) on a sheet: closes the sheet stack and drops the focus -
+  /// except that a running or opened trip comes back, so a stop or line
+  /// looked at mid-trip never loses the trip (rider report, beta 5).
   void close() {
     _ref.read(entityNavProvider.notifier).clear();
-    state = null;
+    state = _tripFocus();
+  }
+
+  /// The live trip's journey, else the trip open in the planner's detail.
+  MapFocus? _tripFocus() {
+    final live = _ref.read(liveTripProvider);
+    if (live != null) return JourneyFocus(live.journey);
+    final t = _ref.read(tripPlanProvider);
+    final list = t.result?.forTab(t.tab);
+    final i = t.selected;
+    return list != null && i != null && i < list.length
+        ? JourneyFocus(list[i])
+        : null;
   }
 
   /// A live trip is running: the pill must confirm before [cancella].
