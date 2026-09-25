@@ -99,7 +99,23 @@ class SnappedPattern {
     required this.stopLon,
     required this.hopApprox,
     this.vertexEdge,
+    this.synthetic = false,
   });
+
+  /// The same geometry filed under another pattern number (a newer index).
+  SnappedPattern withPattern(int id) => SnappedPattern(
+        pattern: id,
+        vertexLat: vertexLat,
+        vertexLon: vertexLon,
+        vertexWay: vertexWay,
+        vertexDir: vertexDir,
+        stopVertex: stopVertex,
+        stopLat: stopLat,
+        stopLon: stopLon,
+        hopApprox: hopApprox,
+        vertexEdge: vertexEdge,
+        synthetic: synthetic,
+      );
 
   final int pattern;
 
@@ -126,6 +142,10 @@ class SnappedPattern {
   /// [edgeApprox] / [edgeShape]. Only the desktop build has it (edge ids are
   /// not stable across graph builds), so it is not in `lines.bin`.
   final Int32List? vertexEdge;
+
+  /// True when no matched geometry exists for the pattern and this is only
+  /// its stops joined by straight lines: drawn dotted, marked approximate.
+  final bool synthetic;
 
   int get vertexCount => vertexLat.length;
   int get approxHops => hopApprox.where((f) => f != 0).length;

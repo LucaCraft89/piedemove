@@ -286,5 +286,7 @@ LineNetwork buildLineNetwork({
     if (log != null && (p & 127) == 0) log('pattern $p/${ix.patternCount}');
   }
   statsOut?.addAll({for (final e in snappers.entries) e.key: e.value.stats});
-  return LineNetwork(ix.feedVersion, out, osmApproximate: osmApproximate);
+  return LineNetwork(ix.feedVersion, out,
+      osmApproximate: osmApproximate,
+      signatures: [for (final g in out) patternSignature(ix, g.pattern)]);
 }

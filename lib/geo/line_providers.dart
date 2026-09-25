@@ -15,6 +15,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/providers.dart';
 import 'lines_io.dart';
+import 'lines_rebase.dart';
 
 Map<String, dynamic> _gunzipJson(Uint8List gz) =>
     jsonDecode(utf8.decode(gzip.decode(gz), allowMalformed: true))
@@ -51,21 +52,22 @@ final metroEntrancesProvider = FutureProvider<Map<String, dynamic>?>(
 LineNetwork? _decode(Uint8List gz) =>
     decodeLines(Uint8List.fromList(gzip.decode(gz)));
 
-/// Snapped pattern geometry, loaded only when focus mode needs it. Null when
-/// the asset is for another feed: stale geometry is worse than none.
+/// Snapped pattern geometry for the index on the phone, loaded only when
+/// focus mode needs it. Geometry from another GTT export is matched pattern
+/// by pattern ([rebaseLines]); whatever has none is drawn through its stops,
+/// dotted and marked approximate - never nothing, never silently wrong.
 final lineNetworkProvider = FutureProvider<LineNetwork?>((ref) async {
   final ix = await ref.watch(transitIndexProvider.future);
+  LineNetwork? source;
   try {
     final data = await rootBundle.load('assets/lines.bin.gz');
     final gz = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
-    final net = await compute(_decode, gz);
-    if (net == null || net.feedVersion != ix.feedVersion) {
-      debugPrint('pm: lines.bin.gz is for another feed (${net?.feedVersion})');
-      return null;
-    }
-    return net;
+    source = await compute(_decode, gz);
   } catch (e) {
     debugPrint('pm: lines.bin.gz unavailable: $e');
-    return null;
   }
+  final r = rebaseLines(source, ix);
+  debugPrint('pm: lines ${source?.feedVersion} on index ${ix.feedVersion}: '
+      '${r.matched} patterns matched, ${r.synthetic} drawn through stops');
+  return r.net;
 });

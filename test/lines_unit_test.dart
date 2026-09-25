@@ -226,13 +226,14 @@ void main() {
             [45.0000, 7.6035],
           ],
           shape: shape(run(45.00003, 7.600, 45.00003, 7.604, n: 8))),
-    ]);
+    ], signatures: ['2|3|A,B']);
     final bytes = encodeLines(net);
     final back = decodeLines(bytes, feedVersion: 'feed-a');
     expect(back, isNotNull);
     expect(back![0]!.vertexWay, net.patterns.first.vertexWay);
     expect(back[0]!.stopVertex, net.patterns.first.stopVertex);
     expect(decodeLines(bytes, feedVersion: 'feed-b'), isNull);
+    expect(back.signatures, ['2|3|A,B']);
   });
 
   group('merge by graph segment identity', () {

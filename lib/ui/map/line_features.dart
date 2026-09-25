@@ -183,6 +183,8 @@ Map<String, dynamic> routeFocusLines(
         'arrow': 1,
         'shade': shadeOf(ix.routeShortNames[route]),
         'kind': kindRidden,
+        // No matched geometry: straight through the stops, drawn dotted.
+        'approx': geom.synthetic ? 1 : 0,
       },
     ));
   }
@@ -257,6 +259,8 @@ Map<String, dynamic> journeyFocusLines(
       'n': 1,
       'tier': 0,
       'shade': shadeOf(option.routeShortName),
+      // No matched geometry: straight through the stops, drawn dotted.
+      'approx': geom.synthetic ? 1 : 0,
     };
     out['features'].add(_line(
       id++,
