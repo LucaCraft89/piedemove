@@ -37,6 +37,14 @@ Future<bool> pumpUntil(WidgetTester t, bool Function() done,
   return done();
 }
 
+/// scrollUntilVisible stops once the chip is *built*, which can leave it
+/// half past the edge of the row (a tap at x = -17 missed once): bring it
+/// fully on screen before tapping.
+Future<void> showChip(WidgetTester t, Finder chip) async {
+  await t.ensureVisible(chip);
+  await hold(t, const Duration(milliseconds: 500));
+}
+
 Future<void> step(WidgetTester t, String name) async {
   await hold(t, const Duration(seconds: 3)); // tiles and layers settle
   // ignore: avoid_print
@@ -48,6 +56,8 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets('smoke tour', (t) async {
+    // A tap that would miss its widget fails right there, not 15 s later.
+    WidgetController.hitTestWarningShouldBeFatal = true;
     app.main();
     await t.pump();
     final container =
@@ -69,6 +79,7 @@ void main() {
                 of: find.widgetWithText(ActionChip, 'Cerca'),
                 matching: find.byType(Scrollable))
             .first);
+    await showChip(t, linee);
     await t.tap(linee);
     expect(await pumpUntil(t, () => find.text('Metro').evaluate().isNotEmpty,
             timeout: const Duration(seconds: 15)),
@@ -88,6 +99,7 @@ void main() {
                 of: find.widgetWithText(ActionChip, 'Filtri'),
                 matching: find.byType(Scrollable))
             .first);
+    await showChip(t, find.widgetWithText(ActionChip, 'Cerca'));
     await t.tap(find.widgetWithText(ActionChip, 'Cerca'));
     // The search route animates in; on a busy emulator 1 s was not always it.
     expect(await pumpUntil(t, () => find.byType(TextField).evaluate().isNotEmpty,
