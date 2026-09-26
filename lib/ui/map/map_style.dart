@@ -47,7 +47,8 @@ const sheetPeek = 0.15, sheetHalf = 0.5, sheetFull = 0.92;
 const sheetSnaps = <double>[sheetPeek, sheetHalf, sheetFull];
 
 /// Camera padding when fitting a focus: the sheet rests at peek.
-const focusFitSide = 40.0, focusFitTop = 240.0, focusFitBottomExtra = 24.0;
+/// Top: the planner card, the chip row and one status chip (~320 dp on a phone).
+const focusFitSide = 40.0, focusFitTop = 330.0, focusFitBottomExtra = 24.0;
 
 /// Screen share the live-trip strip covers (instruction, tiles, button).
 const liveStripFraction = 0.36;
