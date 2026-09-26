@@ -54,4 +54,19 @@ void main() {
     await vibrateCue(LiveCue.oneStopLeft);
     expect(taps.where((c) => c.method == 'HapticFeedback.vibrate'), hasLength(1));
   });
+
+  test('"get off" with sound on also asks for the notification sound',
+      () async {
+    final calls = <String>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call.method);
+      return true;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    await vibrateCue(LiveCue.alightNow, sound: true);
+    expect(calls, ['sound', 'pattern']);
+    calls.clear();
+    await vibrateCue(LiveCue.oneStopLeft, sound: true);
+    expect(calls, ['pattern'], reason: 'the early warning stays silent');
+  });
 }

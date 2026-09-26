@@ -29,7 +29,9 @@ import 'package:piedemove/realtime/gtfs_rt.dart';
 import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/routing/journey.dart';
 import 'package:piedemove/settings/settings.dart';
+import 'package:piedemove/location/bus_match.dart';
 import 'package:piedemove/location/haptics.dart';
+import 'package:piedemove/location/trip_notification.dart';
 import 'package:piedemove/ui/trip/trip_plan.dart';
 
 /// Distances the rules turn on (§12), all metres.
@@ -397,6 +399,7 @@ LiveTripState advanceLive(
   double? vehicleLat,
   double? vehicleLon,
   double walkSpeed = 1.2,
+  int warnStops = 1,
 }) {
   if (s.finished) return s;
   var state = s.copyWith(lastFix: fix.at, clearCue: true);
@@ -462,11 +465,7 @@ LiveTripState advanceLive(
 
   // Alight cues: one stop out, then at the stop itself.
   if (leg.kind == LegKind.ride) {
-    if (stopsRemaining == 1 && s.stopsRemaining > 1) {
-      state = _cue(state, LiveCue.oneStopLeft);
-    } else if (stopsRemaining == 0 && s.stopsRemaining > 0) {
-      state = _cue(state, LiveCue.alightNow);
-    }
+    state = _alightCues(state, s.stopsRemaining, stopsRemaining, warnStops);
   }
 
   final boarding =
@@ -506,7 +505,10 @@ LiveTripState advanceLive(
         speedOk) {
       // Straight onto the ride, progress placed by this same fix.
       return advanceLive(nextLeg(state), fix,
-          vehicleLat: vehicleLat, vehicleLon: vehicleLon, walkSpeed: walkSpeed);
+          vehicleLat: vehicleLat,
+          vehicleLon: vehicleLon,
+          walkSpeed: walkSpeed,
+          warnStops: warnStops);
     }
   }
 
@@ -547,6 +549,28 @@ double derivedSpeed(LiveFix? prev, double lat, double lon, DateTime at) {
   final dt = at.difference(prev.at).inMilliseconds / 1000;
   if (dt < 0.5 || dt > 30) return -1;
   return haversineMetres(prev.lat, prev.lon, lat, lon) / dt;
+}
+
+const liveNotificationTitle = 'PiedeMove · viaggio in corso';
+
+/// One line for the trip notification, the strip's instruction in brief.
+String liveNotificationText(LiveTripState s) {
+  final leg = s.leg;
+  final name = leg.endName;
+  if (leg.kind == LegKind.ride) {
+    final n = s.stopsRemaining;
+    if (n <= 0) return 'Scendi ora${name.isEmpty ? '' : ' a $name'}';
+    if (n == 1) return 'Scendi alla prossima: $name';
+    return 'Scendi a $name tra $n fermate';
+  }
+  final i = s.legIndex + 1;
+  if (i < s.journey.legs.length && s.journey.legs[i].kind == LegKind.ride) {
+    final line = s.journey.legs[i].options.firstOrNull?.routeShortName ?? '';
+    if (s.reachedBoardStop) return 'Aspetta il $line a $name';
+    return 'A piedi verso $name (il $line): '
+        '${((s.metresToEnd / 10).round() * 10).clamp(0, 1 << 30)} m';
+  }
+  return walkStripText(s);
 }
 
 /// Result of [projectAhead].
@@ -704,6 +728,18 @@ LiveTripState nextLeg(LiveTripState s, {DateTime? at}) {
   );
 }
 
+/// Alight cues for a ride whose count went from [before] to [now] stops:
+/// the early warning when it first reaches [warnStops] (1 or 2, a setting),
+/// then "get off" at the stop itself.
+LiveTripState _alightCues(
+    LiveTripState state, int before, int now, int warnStops) {
+  if (now == 0 && before > 0) return _cue(state, LiveCue.alightNow);
+  if (now >= 1 && now <= warnStops && before > warnStops) {
+    return _cue(state, LiveCue.oneStopLeft);
+  }
+  return state;
+}
+
 LiveTripState _cue(LiveTripState s, LiveCue cue) =>
     s.copyWith(cue: cue, cueSeq: s.cueSeq + 1);
 
@@ -714,6 +750,7 @@ LiveTripState staleLive(
   DateTime now, {
   DateTime? serviceStart,
   int delaySeconds = 0,
+  int warnStops = 1,
 }) {
   final last = s.lastFix;
   if (s.finished || last == null || now.difference(last) < liveNoFixFor) {
@@ -748,11 +785,7 @@ LiveTripState staleLive(
     stopsRemaining: stopsRemaining,
   );
   if (leg.kind == LegKind.ride) {
-    if (stopsRemaining == 1 && s.stopsRemaining > 1) {
-      state = _cue(state, LiveCue.oneStopLeft);
-    } else if (stopsRemaining == 0 && s.stopsRemaining > 0) {
-      state = _cue(state, LiveCue.alightNow);
-    }
+    state = _alightCues(state, s.stopsRemaining, stopsRemaining, warnStops);
   }
   return state;
 }
@@ -770,9 +803,12 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   StreamSubscription<Position>? _sub;
   Timer? _stale;
   Timer? _retry;
-  var _foreground = true;
   int _lastCueSeq = 0;
   LiveFix? _lastPos;
+  LiveFix? _lastGood;
+
+  /// Text last put in the trip notification.
+  String? _notified;
 
   /// The latest device fix, or null when none arrived yet.
   LiveFix? get lastFix => _lastPos;
@@ -804,6 +840,9 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     );
     _lastCueSeq = 0;
     WidgetsBinding.instance.addObserver(this);
+    _notified = null;
+    // Android 13+: the trip notification needs the user's yes (asked once).
+    unawaited(requestNotificationPermission());
     _listen();
     _stale = Timer.periodic(const Duration(seconds: 5), (_) => _onStale());
     unawaited(_wake(true));
@@ -818,6 +857,8 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     _retry = null;
     WidgetsBinding.instance.removeObserver(this);
     unawaited(_wake(false));
+    unawaited(cancelTripNotification());
+    _notified = null;
     state = null;
   }
 
@@ -834,15 +875,12 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (this.state == null) return;
     if (state == AppLifecycleState.resumed) {
-      _foreground = true;
       _listen();
       unawaited(_wake(true));
     } else {
-      // Foreground only (§12): nothing listens while the app is away.
-      _foreground = false;
-      _retry?.cancel();
-      _sub?.cancel();
-      _sub = null;
+      // Screen off or another app: the position stream keeps running in the
+      // foreground service (its notification says so), so progress and the
+      // "scendi" vibrations go on in a pocket. Only the screen may sleep.
       unawaited(_wake(false));
     }
   }
@@ -857,6 +895,15 @@ class LiveTripController extends StateNotifier<LiveTripState?>
             locationSettings: AndroidSettings(
               accuracy: LocationAccuracy.bestForNavigation,
               intervalDuration: const Duration(seconds: 1),
+              // A foreground service: fixes keep coming with the screen off
+              // (rider request). Its notification is rewritten live below.
+              foregroundNotificationConfig: const ForegroundNotificationConfig(
+                notificationTitle: liveNotificationTitle,
+                notificationText: 'Segue la tua posizione',
+                notificationChannelName: 'Viaggio live',
+                enableWakeLock: true,
+                setOngoing: true,
+              ),
             ),
           ).listen(
             _onFix,
@@ -878,9 +925,10 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     _sub?.cancel();
     _sub = null;
     _retry?.cancel();
-    if (state == null || !_foreground) return;
+    if (state == null) return;
+    // Background too: the trip is running in a pocket.
     _retry = Timer(liveStreamRetry, () {
-      if (state != null && _foreground) _listen();
+      if (state != null) _listen();
     });
   }
 
@@ -919,6 +967,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
       at: now,
     );
     _lastPos = fix;
+    if (fix.accuracy <= livePoorAccuracy) _lastGood = fix;
     final vehicle = _vehicleFor(s);
     final next = advanceLive(
       s,
@@ -926,6 +975,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
       vehicleLat: vehicle?.lat,
       vehicleLon: vehicle?.lon,
       walkSpeed: _ref.read(settingsProvider).walkSpeed,
+      warnStops: _ref.read(settingsProvider).alightWarnStops,
     );
     _apply(next);
   }
@@ -940,6 +990,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
         DateTime.now(),
         serviceStart: DateTime(date.year, date.month, date.day),
         delaySeconds: _knownDelay(s) ?? 0,
+        warnStops: _ref.read(settingsProvider).alightWarnStops,
       ),
     );
   }
@@ -959,22 +1010,41 @@ class LiveTripController extends StateNotifier<LiveTripState?>
 
   void _apply(LiveTripState next) {
     state = next;
+    // The notification says what the strip says, when it changes.
+    final text = liveNotificationText(next);
+    if (!next.finished && text != _notified) {
+      _notified = text;
+      unawaited(showTripNotification(liveNotificationTitle, text));
+    }
     if (next.cue != null && next.cueSeq != _lastCueSeq) {
       _lastCueSeq = next.cueSeq;
-      unawaited(vibrateCue(next.cue!));
+      unawaited(vibrateCue(next.cue!,
+          sound: _ref.read(settingsProvider).alightSound));
     }
     if (next.finished) stop();
   }
 
-  /// The live vehicle of the leg's own run, when the feed knows it.
+  /// On board: the rider's vehicle - by run id when the feed has one (GTT's
+  /// does not), else by line, heading and nearness to the rider
+  /// ([riderVehicle]). It stands in for a poor fix (tunnels, the metro).
+  /// Never while walking: a bus pulling in must not "board" anyone.
   RtVehicle? _vehicleFor(LiveTripState s) {
-    final tripId = s.leg.tripId;
-    if (tripId == null) return null;
+    if (!s.riding) return null;
     final vehicles = _ref.read(realtimeProvider).vehicles;
-    for (final v in vehicles.values) {
-      if (v.tripId == tripId) return v;
+    final tripId = s.leg.tripId;
+    if (tripId != null) {
+      for (final v in vehicles.values) {
+        if (v.tripId == tripId) return v;
+      }
     }
-    return null;
+    final ix = _ref.read(transitIndexProvider).valueOrNull;
+    // Matched near the last *good* fix: a poor one can be 200 m off.
+    final at = _lastGood;
+    if (ix == null || at == null || s.legIndex >= s.journey.legs.length) {
+      return null;
+    }
+    return riderVehicle(
+        ix, vehicles.values, s.journey.legs[s.legIndex], at.lat, at.lon);
   }
 
   @override

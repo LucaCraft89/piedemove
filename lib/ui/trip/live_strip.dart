@@ -12,10 +12,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:piedemove/data/providers.dart';
 import 'package:piedemove/data/transit_index.dart';
 import 'package:piedemove/geo/walk_router.dart';
+import 'package:piedemove/location/bus_match.dart';
 import 'package:piedemove/location/live_trip.dart';
 import 'package:piedemove/places/photon.dart';
 import 'package:piedemove/realtime/store.dart'
-    show delayLookupProvider, unavailableLookupProvider;
+    show delayLookupProvider, realtimeProvider, unavailableLookupProvider;
 import 'package:piedemove/routing/departures.dart' show Departure;
 import 'package:piedemove/routing/journey.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
@@ -56,6 +57,17 @@ String? waitingLabel(LiveTripState s, TransitIndex? ix, {Departure? coming}) {
       : ' per ${cleanStopName(ix.stopNames[ix.patternStopAt(pattern, ix.patternLength(pattern) - 1)])}';
   return 'Aspetta il $line$head'
       '${others.isEmpty ? '' : ' (o ${others.join(', ')})'}';
+}
+
+/// `Il 10 è a 2 fermate (650 m)`, `Il 10 sta arrivando`.
+String busLabel(ApproachingBus b) {
+  if (b.stopsAway == 0 && b.metresAway < 250) {
+    return 'Il ${b.routeShortName} sta arrivando';
+  }
+  // Stops it reaches up to yours, yours included ("2 stops away").
+  final n = b.stopsAway + 1;
+  return 'Il ${b.routeShortName} è a $n ${n == 1 ? 'fermata' : 'fermate'} '
+      '(${metresLabel(b.metresAway)})';
 }
 
 /// Second strip line for a routed walk: the next turn, crossing or steps.
@@ -143,6 +155,17 @@ class _LiveStripState extends ConsumerState<LiveStrip> {
         live.route.legs[live.legIndex + 1].kind == LegKind.ride;
     // At the stop: the walk is done, what matters is the bus.
     final waiting = waitingLabel(live, ix, coming: stats?.next);
+    // Where the bus is, by live position (line + heading + place on route).
+    final nextRide = live.riding
+        ? -1
+        : live.journey.legs.indexWhere(
+            (l) => l.kind == LegKind.ride, live.legIndex + 1);
+    final bus = ix == null || nextRide < 0
+        ? null
+        : approachingBus(
+            ix,
+            ref.watch(realtimeProvider.select((r) => r.vehicles)).values,
+            live.journey.legs[nextRide]);
 
     final (title, detail) = switch (live) {
       _ when waiting != null => (
@@ -202,6 +225,26 @@ class _LiveStripState extends ConsumerState<LiveStrip> {
                                   detail,
                                   style: theme.textTheme.bodyLarge?.copyWith(
                                       color: theme.colorScheme.onSurfaceVariant),
+                                ),
+                              ),
+                            if (bus != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.directions_bus,
+                                        size: 16, color: context.tokens.live),
+                                    const SizedBox(width: 4),
+                                    Expanded(
+                                      child: Text(
+                                        busLabel(bus),
+                                        style: theme.textTheme.bodyMedium
+                                            ?.copyWith(
+                                                color: context.tokens.live,
+                                                fontWeight: FontWeight.w700),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             if (live.estimated)

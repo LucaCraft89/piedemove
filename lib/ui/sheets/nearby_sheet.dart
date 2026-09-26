@@ -3,6 +3,8 @@
 /// Favourite stops sit above the nearby ones (§11.3).
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -15,8 +17,11 @@ import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/routing/departures.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
 import 'package:piedemove/ui/widgets/departure_row.dart';
+import 'package:piedemove/ui/widgets/line_badge.dart';
 
 const nearbyRadiusMetres = 400.0;
+const _boardPerStop = 2;
+const _boardHeight = 78.0;
 const _departuresPerStop = 3;
 
 /// Stops within [nearbyRadiusMetres], nearest first.
@@ -64,14 +69,37 @@ class NearbySheet extends ConsumerWidget {
   }
 }
 
-class _NearbyList extends ConsumerWidget {
+class _NearbyList extends ConsumerStatefulWidget {
   const _NearbyList({required this.controller, required this.onStopTap});
 
   final ScrollController controller;
   final void Function(int stop) onStopTap;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_NearbyList> createState() => _NearbyListState();
+}
+
+class _NearbyListState extends ConsumerState<_NearbyList> {
+  /// Minutes count down between realtime polls too.
+  Timer? _tick;
+
+  @override
+  void initState() {
+    super.initState();
+    _tick = Timer.periodic(
+        const Duration(seconds: 30), (_) => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = widget.controller;
+    final onStopTap = widget.onStopTap;
     final index = ref.watch(transitIndexProvider);
     final position = ref.watch(myPositionProvider);
     final now = DateTime.now();
@@ -85,27 +113,29 @@ class _NearbyList extends ConsumerWidget {
             ix.stopIndexById[key.substring(5)],
       ].whereType<int>().toList();
       if (favourites.isNotEmpty) {
-        children.add(const _Note('Preferiti'));
-        for (final stop in favourites) {
-          final departures = nextDepartures(
-            ix,
-            stop,
-            now,
-            _departuresPerStop,
-            delays: ref.watch(delayLookupProvider),
-            unavailable: ref.watch(unavailableLookupProvider),
-          );
-          children.add(_StopBlock(
-            name: cleanStopName(ix.stopNames[stop]),
-            metres: position == null
-                ? null
-                : haversineMetres(position.latitude, position.longitude,
-                    ix.stopLat[stop], ix.stopLon[stop]),
-            departures: departures,
-            now: now,
-            onTap: () => onStopTap(stop),
-          ));
-        }
+        // The live board: one card per favourite, visible even at peek.
+        children.add(SizedBox(
+          height: _boardHeight,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            children: [
+              for (final stop in favourites)
+                _BoardCard(
+                  name: cleanStopName(ix.stopNames[stop]),
+                  departures: nextDepartures(
+                    ix,
+                    stop,
+                    now,
+                    _boardPerStop,
+                    delays: ref.watch(delayLookupProvider),
+                    unavailable: ref.watch(unavailableLookupProvider),
+                  ),
+                  now: now,
+                  onTap: () => onStopTap(stop),
+                ),
+            ],
+          ),
+        ));
       }
     }
     if (index.isLoading) {
@@ -199,6 +229,95 @@ class _StopBlock extends StatelessWidget {
       ),
     );
   }
+}
+
+/// A favourite stop at a glance: its name, then the next two vehicles as
+/// badge + big minutes (live ones in the live colour).
+class _BoardCard extends StatelessWidget {
+  const _BoardCard({
+    required this.name,
+    required this.departures,
+    required this.now,
+    required this.onTap,
+  });
+
+  final String name;
+  final List<Departure> departures;
+  final DateTime now;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(right: 8, bottom: 6),
+      child: Material(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Container(
+            width: 196,
+            padding: const EdgeInsets.fromLTRB(10, 6, 10, 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.star, size: 14, color: theme.colorScheme.primary),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelLarge
+                              ?.copyWith(fontWeight: FontWeight.w700)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                if (departures.isEmpty)
+                  Text('Nessuna corsa a breve',
+                      style: theme.textTheme.bodySmall)
+                else
+                  // Both vehicles on one line: the card fits the sheet at peek;
+                  // long line names shrink rather than overflow.
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (final (i, d) in departures.indexed) ...[
+                        if (i > 0) const SizedBox(width: 10),
+                        LineBadge(
+                            shortName: d.routeShortName,
+                            routeType: d.routeType),
+                        const SizedBox(width: 4),
+                        Text(
+                          _minutes(d.time, now),
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: d.live ? context.tokens.live : null,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String _minutes(DateTime at, DateTime now) {
+  final m = at.difference(now).inSeconds ~/ 60;
+  return m <= 0 ? 'ora' : "$m'";
 }
 
 class _Grabber extends StatelessWidget {

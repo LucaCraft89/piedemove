@@ -41,9 +41,14 @@ lines, missing lines, wrong colours, wrong direction lane.
 
 ## Live trip mode (§12)
 
-Started from the trip detail. **Foreground only**: `getPositionStream` while the
-app is resumed, cancelled on pause, re-synced on resume. Screen kept awake with
-`wakelock_plus` for the trip. No background service.
+Started from the trip detail. **Runs with the screen off** (post beta 7): the
+live stream uses geolocator's foreground service
+(`ForegroundNotificationConfig`, wake lock, ongoing), kept across pause; the
+screen wakelock is only held while resumed. `MainActivity` rewrites the
+service notification (id 75415, channel `geolocator_channel_01`) with
+`liveNotificationText` on every change and asks POST_NOTIFICATIONS on
+Android 13+; stop cancels it. Manifest: FOREGROUND_SERVICE(_LOCATION),
+POST_NOTIFICATIONS, WAKE_LOCK. Needs a phone to verify (emulator: no).
 
 - **The rider's position drives progress**, not the vehicle's. The vehicle's
   GTFS-RT position stays a separate concept.

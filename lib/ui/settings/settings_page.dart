@@ -6,6 +6,9 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:piedemove/app/app_update.dart';
+import 'package:piedemove/geo/offline_map.dart';
+
 import 'package:piedemove/data/feeds.dart';
 import 'package:piedemove/data/providers.dart';
 import 'package:piedemove/data/transit_index.dart';
@@ -49,6 +52,30 @@ class SettingsPage extends ConsumerWidget {
           padding: const EdgeInsets.all(Gap.screen),
           children: [
           const PlanningControls(),
+          const _Header('Viaggio live'),
+          const ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text('Avvisami prima di scendere'),
+            subtitle: Text('Una vibrazione quando mancano queste fermate.'),
+          ),
+          SegmentedButton<int>(
+            segments: const [
+              ButtonSegment(value: 1, label: Text('1 fermata prima')),
+              ButtonSegment(value: 2, label: Text('2 fermate prima')),
+            ],
+            selected: {settings.alightWarnStops},
+            onSelectionChanged: (v) =>
+                controller.edit((s) => s.copyWith(alightWarnStops: v.first)),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: settings.alightSound,
+            title: const Text('Suono con "scendi ora"'),
+            subtitle: const Text(
+                'Oltre alla vibrazione, il suono di notifica del telefono.'),
+            onChanged: (on) =>
+                controller.edit((s) => s.copyWith(alightSound: on)),
+          ),
           const _Header('Aspetto'),
           SegmentedButton<ThemeMode>(
             segments: const [
@@ -83,6 +110,8 @@ class SettingsPage extends ConsumerWidget {
             subtitle: Text('L\'inglese arriva con le traduzioni.'),
             enabled: false,
           ),
+          const _Header('Mappa offline'),
+          const _OfflineMapRow(),
           const _Header('Stato dei dati'),
           const _DataStatus(),
           const _Header('Avanzate'),
@@ -98,6 +127,7 @@ class SettingsPage extends ConsumerWidget {
           ),
           if (settings.advanced) const _FeedSources(),
           const _Header('Informazioni'),
+          const _VersionRow(),
           ListTile(
             contentPadding: EdgeInsets.zero,
             leading: const Icon(Icons.info_outline),
@@ -375,3 +405,115 @@ class _Header extends StatelessWidget {
         ),
       );
 }
+
+/// This build's version, and a manual "is there a newer beta?" check.
+class _VersionRow extends ConsumerStatefulWidget {
+  const _VersionRow();
+
+  @override
+  ConsumerState<_VersionRow> createState() => _VersionRowState();
+}
+
+class _VersionRowState extends ConsumerState<_VersionRow> {
+  String? _installed;
+  String? _status;
+  AppRelease? _found;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    installedVersion().then((v) {
+      if (mounted) setState(() => _installed = v);
+    });
+  }
+
+  Future<void> _check() async {
+    setState(() {
+      _busy = true;
+      _status = null;
+    });
+    final r = await checkForUpdate(force: true);
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _found = r;
+      _status = r == null ? 'Hai già l\'ultima versione.' : null;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final found = _found;
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: const Icon(Icons.system_update_outlined),
+      title: Text('Versione ${_installed ?? '…'}'),
+      subtitle: Text(found != null
+          ? 'Disponibile ${found.version}: tocca per scaricarla'
+          : _status ?? 'Tocca per cercare aggiornamenti'),
+      trailing: _busy
+          ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2))
+          : null,
+      onTap: _busy
+          ? null
+          : () => found != null ? openUrl(found.apkUrl) : _check(),
+    );
+  }
+}
+
+/// Download / delete the basemap of the GTT area for use without data.
+class _OfflineMapRow extends ConsumerWidget {
+  const _OfflineMapRow();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final st = ref.watch(offlineMapProvider);
+    final ctl = ref.read(offlineMapProvider.notifier);
+    final mb = st.estimateBytes == null
+        ? null
+        : (st.estimateBytes! / (1024 * 1024)).ceil();
+    final at = st.region?.metadata['at'] as String?;
+    final String subtitle;
+    if (st.downloading) {
+      subtitle = 'Scarico… ${((st.progress ?? 0) * 100).round()}%';
+    } else if (st.error != null) {
+      subtitle = 'Errore: ${st.error}. Riprova con una connessione Wi-Fi.';
+    } else if (st.region != null) {
+      subtitle = 'Scaricata${at == null ? '' : ' il ${at.substring(0, 10)}'}. '
+          'Mappa di Torino e dintorni anche senza dati.';
+    } else {
+      subtitle = 'Mappa della zona GTT senza connessione'
+          '${mb == null ? '' : ' (circa $mb MB, meglio in Wi-Fi)'}.';
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.download_for_offline_outlined),
+          title: Text(st.region != null && !st.downloading
+              ? 'Mappa offline pronta'
+              : 'Scarica la mappa'),
+          subtitle: Text(subtitle),
+        ),
+        if (st.downloading) LinearProgressIndicator(value: st.progress),
+        Row(
+          children: [
+            FilledButton.tonal(
+              onPressed: st.downloading ? null : ctl.download,
+              child: Text(st.region == null ? 'Scarica' : 'Aggiorna'),
+            ),
+            const SizedBox(width: 8),
+            if (st.region != null && !st.downloading)
+              TextButton(onPressed: ctl.remove, child: const Text('Elimina')),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
