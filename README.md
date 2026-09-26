@@ -10,8 +10,13 @@ account, no tracking, no Google data.
 ## Install
 
 Download the APK from the [Releases page](https://github.com/LucaCraft89/piedemove/releases)
-(latest: `0.9.0-beta.1`, a prerelease), allow installing from unknown sources,
-and open it. Report problems in [Issues](https://github.com/LucaCraft89/piedemove/issues).
+(latest: `0.9.0-beta.9`, the first signed with the release key; uninstall any
+earlier beta once first), allow installing from unknown sources, and open it. Later versions
+install over it, and the app offers them itself. Report problems in
+[Issues](https://github.com/LucaCraft89/piedemove/issues).
+
+The release certificate's SHA-256 is in `android/release-cert-sha256.txt`
+(`apksigner verify --print-certs piedemove-<version>.apk` shows it).
 
 ## Build
 

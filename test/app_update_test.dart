@@ -89,4 +89,19 @@ void main() {
           isNull);
     });
   });
+
+  test('a stable install is offered stable releases only', () {
+    final releases = [
+      {..._release('v0.9.1-beta.1'), 'prerelease': true},
+      _release('v0.9.0'),
+    ];
+    expect(newestRelease(releases)!.version, '0.9.1-beta.1');
+    expect(newestRelease(releases, stableOnly: true)!.version, '0.9.0');
+    expect(isPrerelease('0.9.0'), isFalse);
+    expect(isPrerelease('0.9.0-beta.8'), isTrue);
+  });
+
+  test('stable 0.9.0 is newer than every 0.9.0 beta', () {
+    expect(compareVersions('0.9.0', '0.9.0-beta.8'), greaterThan(0));
+  });
 }

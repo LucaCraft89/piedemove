@@ -7,14 +7,19 @@
 /// the real screen (the map is a platform view Flutter screenshots miss).
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:piedemove/data/providers.dart';
 import 'package:piedemove/main.dart' as app;
+import 'package:piedemove/places/favourites.dart';
 import 'package:piedemove/places/photon.dart';
 import 'package:piedemove/ui/home/home_page.dart';
+import 'package:piedemove/ui/settings/settings_page.dart' show openSettings;
+import 'package:piedemove/ui/sheets/nearby_sheet.dart' show stopsNear;
 import 'package:piedemove/ui/map/map_focus.dart';
 import 'package:piedemove/ui/map/map_view.dart' show mapControllerProvider;
 import 'package:piedemove/ui/trip/trip_plan.dart';
@@ -94,7 +99,17 @@ void main() {
         t, () => container.read(transitIndexProvider).hasValue,
         timeout: const Duration(minutes: 12));
     expect(ready, isTrue, reason: 'timetable index never loaded');
+    // A favourite, so the home sheet shows its live board: the stop nearest
+    // Politecnico, found in the data (no hard-coded id).
+    final ix = container.read(transitIndexProvider).value!;
+    final near = stopsNear(ix, 45.0626, 7.6624, radius: 600);
+    if (near.isNotEmpty) {
+      await container
+          .read(favouritesProvider.notifier)
+          .toggle(stopFavourite(ix.stopIds[near.first.$1]));
+    }
     await step(t, '01-home');
+    expect(find.text('Casa +'), findsOneWidget, reason: 'Casa chip');
 
     // The chip row scrolls sideways; on a phone "Linee" starts off screen.
     final linee = find.widgetWithText(ActionChip, 'Linee');
@@ -161,5 +176,23 @@ void main() {
 
     plan.select(0);
     await step(t, '06-trip-detail');
+
+    // Settings: the live-trip options and the offline map (beta 8).
+    unawaited(openSettings(t.element(find.byType(HomePage))));
+    // "Impostazioni" is also a home chip: wait for the page's own app bar.
+    final bar = find.widgetWithText(AppBar, 'Impostazioni');
+    expect(await pumpUntil(t, () => bar.evaluate().isNotEmpty,
+            timeout: const Duration(seconds: 15)),
+        isTrue, reason: 'settings did not open');
+    final list = find
+        .descendant(
+            of: find.ancestor(of: bar, matching: find.byType(Scaffold)).first,
+            matching: find.byType(Scrollable))
+        .first;
+    await t.scrollUntilVisible(find.text('2 fermate prima'), 200,
+        scrollable: list);
+    await step(t, '07-settings-live');
+    await t.scrollUntilVisible(find.text('Scarica'), 200, scrollable: list);
+    await step(t, '08-settings-offline');
   }, timeout: const Timeout(Duration(minutes: 20)));
 }

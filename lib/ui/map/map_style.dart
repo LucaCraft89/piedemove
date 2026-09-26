@@ -47,7 +47,10 @@ const sheetPeek = 0.15, sheetHalf = 0.5, sheetFull = 0.92;
 const sheetSnaps = <double>[sheetPeek, sheetHalf, sheetFull];
 
 /// Camera padding when fitting a focus: the sheet rests at peek.
-const focusFitSide = 40.0, focusFitTop = 160.0, focusFitBottomExtra = 24.0;
+const focusFitSide = 40.0, focusFitTop = 240.0, focusFitBottomExtra = 24.0;
+
+/// Screen share the live-trip strip covers (instruction, tiles, button).
+const liveStripFraction = 0.36;
 
 /// Ambient/focus base stroke width by zoom (before the n-route and rail factors).
 const ambientBaseWidths = <(double, double)>[(11, 1.4), (14, 2.6), (17, 4.5)];

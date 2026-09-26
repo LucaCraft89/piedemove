@@ -460,7 +460,7 @@ class _PillRow extends ConsumerWidget {
         scrollDirection: Axis.horizontal,
         children: [
           for (final sc in Shortcut.values) ...[
-            _ShortcutChip(sc),
+            ShortcutChip(sc),
             const SizedBox(width: 8),
           ],
           ActionChip(
@@ -508,8 +508,8 @@ class _PillRow extends ConsumerWidget {
 
 /// Casa / Lavoro: tap plans from here to it now; the first tap (or a long
 /// press) picks the place.
-class _ShortcutChip extends ConsumerWidget {
-  const _ShortcutChip(this.shortcut);
+class ShortcutChip extends ConsumerWidget {
+  const ShortcutChip(this.shortcut, {super.key});
 
   final Shortcut shortcut;
 
@@ -573,19 +573,40 @@ class _ShortcutChip extends ConsumerWidget {
       }
     }
 
-    return GestureDetector(
-      onLongPress: manage,
-      child: ActionChip(
-        avatar: Icon(
-            shortcut == Shortcut.home
-                ? Icons.home_outlined
-                : Icons.work_outline,
-            size: 16),
-        label: Text(place == null ? '$label +' : label),
-        tooltip: place == null
-            ? 'Scegli $label'
-            : '$label: ${place.name}. Tieni premuto per cambiare',
-        onPressed: () => place == null ? choose() : go(place),
+    // Tap and long press on one InkWell: a chip's tooltip also answers a
+    // long press and swallowed it, so "change" never opened (rider report).
+    final scheme = Theme.of(context).colorScheme;
+    return Semantics(
+      button: true,
+      label: place == null
+          ? 'Scegli $label'
+          : '$label: ${place.name}. Tieni premuto per cambiare',
+      excludeSemantics: true,
+      child: Material(
+        color: scheme.surfaceContainerLow,
+        shape: StadiumBorder(side: BorderSide(color: scheme.outlineVariant)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => place == null ? choose() : go(place),
+          onLongPress: manage,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                    shortcut == Shortcut.home
+                        ? Icons.home_outlined
+                        : Icons.work_outline,
+                    size: 16,
+                    color: scheme.primary),
+                const SizedBox(width: 6),
+                Text(place == null ? '$label +' : label,
+                    style: Theme.of(context).textTheme.labelLarge),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

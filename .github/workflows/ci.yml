@@ -25,6 +25,37 @@ jobs:
       PIEDEMOVE_REQUIRE_INDEX: '1'
     steps:
       - uses: actions/checkout@v4
+      # The PM_* secrets must hold the key installed copies were signed with
+      # (its public certificate fingerprint is android/release-cert-sha256.txt):
+      # a wrong secret would publish an APK that cannot update the app.
+      # Checked on every push, before any release depends on it; never printed.
+      - name: Release key
+        if: github.event_name != 'pull_request'
+        env:
+          PM_KEYSTORE_BASE64: ${{ secrets.PM_KEYSTORE_BASE64 }}
+          PM_KEYSTORE_PASSWORD: ${{ secrets.PM_KEYSTORE_PASSWORD }}
+          PM_KEY_ALIAS: ${{ secrets.PM_KEY_ALIAS }}
+          PM_KEY_PASSWORD: ${{ secrets.PM_KEY_PASSWORD }}
+        run: |
+          if [ -z "$PM_KEYSTORE_BASE64" ]; then
+            echo "::notice::no release keystore secret: releases need [debug-signed]"
+            exit 0
+          fi
+          k="$RUNNER_TEMP/check.jks"
+          echo "$PM_KEYSTORE_BASE64" | base64 -d > "$k"
+          fp=$(keytool -list -v -keystore "$k" -storepass "$PM_KEYSTORE_PASSWORD" \
+                 -alias "$PM_KEY_ALIAS" 2>/dev/null | sed -n 's/^[[:space:]]*SHA256: //p' | head -1)
+          # The key password must open the key too (Gradle signs with it).
+          keytool -exportcert -keystore "$k" -storepass "$PM_KEYSTORE_PASSWORD" \
+            -alias "$PM_KEY_ALIAS" -keypass "$PM_KEY_PASSWORD" >/dev/null 2>&1 \
+            || { rm -f "$k"; echo "::error::PM_KEY_PASSWORD does not open the key"; exit 1; }
+          rm -f "$k"
+          want=$(tr -d '[:space:]' < android/release-cert-sha256.txt)
+          if [ "$fp" != "$want" ]; then
+            echo "::error::release key certificate '${fp:-unreadable}' is not the expected $want (wrong secret or password?)"
+            exit 1
+          fi
+          echo "release key OK: $fp"
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -125,8 +156,9 @@ jobs:
           retention-days: 14
 
   # A push whose head commit message contains "[release]" publishes a GitHub
-  # prerelease, but only after check and the emulator tour passed. Tag and
-  # notes come from pubspec's version and docs/release-notes/v<version>.md.
+  # release (a prerelease for a -beta version), but only after check and the
+  # emulator tour passed. Tag and notes come from pubspec's version and
+  # docs/release-notes/v<version>.md.
   # Line geometry for the release (and, on a "[lines]" push, a test run of
   # the lines workflow): rebuilt and republished if GTT has a newer export.
   lines:
@@ -210,6 +242,18 @@ jobs:
             echo "::warning::no lines-latest in format $format: shipping the repo's line assets"
           fi
       - run: flutter build apk --release
+      # Signed with the release key when there is one: prove it on the APK.
+      - name: Verify the APK signer
+        run: |
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          signer=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner
+          got=$("$signer" verify --print-certs "$apk" | sed -n 's/.*certificate SHA-256 digest: //p' | head -1)
+          want=$(tr -d ':[:space:]' < android/release-cert-sha256.txt | tr 'A-F' 'a-f')
+          echo "APK signer SHA-256: $got"
+          if [ -n "$PM_KEYSTORE_PATH" ] && [ "$got" != "$want" ]; then
+            echo "::error::the APK is not signed with the release key"
+            exit 1
+          fi
       - name: Publish the prerelease
         run: |
           v=$(sed -n 's/^version: *\([^+]*\).*/\1/p' pubspec.yaml)
@@ -222,6 +266,12 @@ jobs:
             echo "::error::release v$v already exists: bump the version in pubspec.yaml"
             exit 1
           fi
+          # A version with a suffix (0.9.1-beta.1) is a prerelease; a plain
+          # one (0.9.0) is a final release, marked latest.
+          case "$v" in
+            *-*) kind=--prerelease ;;
+            *) kind=--latest ;;
+          esac
           gh release create "v$v" "$apk" "$apk.sha256" \
-            --target "$GITHUB_SHA" --prerelease \
+            --target "$GITHUB_SHA" $kind \
             --title "PiedeMove ${v//-/ }" --notes-file "$notes"

@@ -3,6 +3,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'package:piedemove/app/app_update.dart' show installedVersion;
+
 import 'package:piedemove/ui/theme/tokens.dart';
 
 Future<void> openAbout(BuildContext context) => Navigator.of(
@@ -76,7 +78,13 @@ class AboutPage extends StatelessWidget {
               style: text.bodyMedium,
             ),
             const SizedBox(height: Gap.screen),
-            Text('Versione 0.9.0-beta.1', style: text.bodySmall),
+            // The installed build's own version, never a typed-in one.
+            FutureBuilder<String?>(
+              future: installedVersion(),
+              builder: (context, v) => Text(
+                  'Versione ${v.data ?? '…'}',
+                  style: text.bodySmall),
+            ),
           ],
         ),
       ),
