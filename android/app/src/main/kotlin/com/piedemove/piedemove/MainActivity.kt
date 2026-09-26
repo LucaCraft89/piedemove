@@ -1,7 +1,9 @@
 package com.piedemove.piedemove
 
+import android.content.Intent
 import android.media.AudioAttributes
 import android.media.RingtoneManager
+import android.net.Uri
 import android.os.Build
 import android.os.VibrationAttributes
 import android.os.VibrationEffect
@@ -17,6 +19,32 @@ class MainActivity : FlutterActivity() {
         // Live trip cues (lib/location/haptics.dart): a full-strength waveform
         // with alarm usage, so "get off now" is felt in a pocket on a bus and
         // is not muted by the touch-feedback setting like a haptic tap is.
+        // App info and links (lib/app/app_update.dart): the installed version
+        // for the update check, and the browser for the APK download.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "piedemove/app")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "version" -> result.success(
+                        try {
+                            packageManager.getPackageInfo(packageName, 0).versionName
+                        } catch (e: Exception) {
+                            null
+                        },
+                    )
+                    "openUrl" -> result.success(
+                        try {
+                            startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(call.argument<String>("url")))
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                            true
+                        } catch (e: Exception) {
+                            false
+                        },
+                    )
+                    else -> result.notImplemented()
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "piedemove/vibrate")
             .setMethodCallHandler { call, result ->
                 if (call.method == "pattern") {

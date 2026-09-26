@@ -8,6 +8,8 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import 'package:piedemove/app/app_update.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 
 import 'package:piedemove/data/index_source.dart';
@@ -85,6 +87,9 @@ class _HomePageState extends ConsumerState<HomePage> {
     final stale = ref.watch(realtimeProvider.select((r) => r.staleFeeds().length));
     final trip = ref.watch(tripPlanProvider);
     final live = ref.watch(liveTripProvider);
+    // A newer beta on GitHub (daily check, silent when offline).
+    final update = ref.watch(appUpdateProvider).valueOrNull;
+    final dismissedUpdate = ref.watch(dismissedUpdateProvider);
     final showTrip =
         !trip.sheetHidden && (trip.planning || trip.result != null);
 
@@ -128,6 +133,13 @@ class _HomePageState extends ConsumerState<HomePage> {
                           ? null
                           : ref.read(tripPlanProvider.notifier).clear,
                     ),
+                  if (update != null && update.version != dismissedUpdate)
+                    _Chip('Nuova versione ${update.version} · Scarica',
+                        onTap: () {
+                      ref.read(dismissedUpdateProvider.notifier).state =
+                          update.version;
+                      openUrl(update.apkUrl);
+                    }),
                   if (stale == RtFeedKind.values.length)
                     const _Chip('Dati in tempo reale non disponibili')
                   else if (stale > 0)
