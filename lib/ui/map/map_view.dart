@@ -378,6 +378,7 @@ class _MapViewState extends ConsumerState<MapView> {
         _meAt = null;
         _focusDrawn = false;
         _pins = null;
+        _pinsAdded = false;
         _framed = null;
         _addLines(ref.read(ambientLinesProvider).valueOrNull);
         _addStops();
@@ -1391,7 +1392,20 @@ class _MapViewState extends ConsumerState<MapView> {
 
   Future<void> _raiseMeNow() async {
     final c = _controller;
-    if (c == null || !_meAdded) return;
+    if (c == null) return;
+    // Pins first, then the dot: both above every layer added since. The pins
+    // rise even without a fix (no dot yet).
+    final look = _pinsLook;
+    if (_pinsAdded && look != null) {
+      try {
+        await c.removeLayer(_pinsLayer);
+        await c.addCircleLayer(_pinsSource, _pinsLayer, look,
+            enableInteraction: false);
+      } catch (e) {
+        debugPrint('pm: raise pins failed: $e');
+      }
+    }
+    if (!_meAdded) return;
     try {
       await raiseMeLayers(c);
     } catch (e) {
@@ -1400,8 +1414,17 @@ class _MapViewState extends ConsumerState<MapView> {
     }
   }
 
+  static const _pinsSource = 'pm-pins', _pinsLayer = 'pm-pins';
+  bool _pinsAdded = false;
+
+  /// The pin layer's look, kept so a raise can re-add it identically.
+  CircleLayerProperties? _pinsLook;
+
   /// The searched place, and the planned trip's start (hollow) and
-  /// destination (filled, larger): circle annotations, redrawn together.
+  /// destination (filled, larger). Our own layer, not the plugin's circle
+  /// annotations: those sit below every line layer, so a destination on a
+  /// busy street vanished under the lines (rider report, beta 9). It is
+  /// kept on top, just under the position dot ([_raiseMeNow]).
   Future<void> _updatePins((Place?, Place?, Place?) pins) async {
     final controller = _controller;
     if (controller == null || !_styleReady || !mounted) return;
@@ -1409,30 +1432,53 @@ class _MapViewState extends ConsumerState<MapView> {
     final (place, from, to) = pins;
     final scheme = Theme.of(context).colorScheme;
     final status = ref.read(mapStatusProvider.notifier);
+    Map<String, dynamic> pin(Place p, String kind) => {
+          'type': 'Feature',
+          'geometry': {
+            'type': 'Point',
+            'coordinates': [p.lon, p.lat],
+          },
+          'properties': {'kind': kind},
+        };
+    final data = {
+      'type': 'FeatureCollection',
+      'features': [
+        if (from != null && from.name != 'La mia posizione') pin(from, 'from'),
+        if (place != null && !identical(place, to)) pin(place, 'place'),
+        if (to != null) pin(to, 'to'),
+      ],
+    };
     try {
-      await controller.clearCircles();
-      if (from != null && from.name != 'La mia posizione') {
-        await controller.addCircle(CircleOptions(
-          geometry: LatLng(from.lat, from.lon),
-          circleRadius: 7,
-          circleColor: _hex(scheme.surface),
-          circleStrokeColor: _hex(scheme.primary),
-          circleStrokeWidth: 3,
-        ));
-      }
-      for (final p in [place, to]) {
-        if (p == null || (identical(p, to) && identical(place, to))) continue;
-        await controller.addCircle(CircleOptions(
-          geometry: LatLng(p.lat, p.lon),
-          circleRadius: identical(p, to) ? 11 : 9,
-          circleColor: _hex(scheme.primary),
-          circleStrokeColor: _hex(scheme.surface),
-          circleStrokeWidth: 3,
-        ));
+      if (_pinsAdded) {
+        await controller.setGeoJsonSource(_pinsSource, data);
+      } else {
+        _pinsLook = CircleLayerProperties(
+          circleRadius: [
+            'match', ['get', 'kind'], 'to', 11.0, 'from', 7.0, 9.0,
+          ],
+          circleColor: [
+            'match', ['get', 'kind'],
+            'from', _hex(scheme.surface),
+            _hex(scheme.primary),
+          ],
+          circleStrokeColor: [
+            'match', ['get', 'kind'],
+            'from', _hex(scheme.primary),
+            _hex(scheme.surface),
+          ],
+          circleStrokeWidth: 3.0,
+        );
+        await controller.addSource(
+            _pinsSource, GeojsonSourceProperties(data: data));
+        await controller.addCircleLayer(_pinsSource, _pinsLayer, _pinsLook!,
+            enableInteraction: false);
+        _pinsAdded = true;
+        unawaited(_raiseMe()); // the dot stays above the pins
       }
       status.clear('pin');
     } catch (e) {
       debugPrint('pm: layer segnaposto failed: $e');
+      if (!'$e'.contains('already exists')) _pinsAdded = false;
       if (mounted) status.set('pin', 'Segnaposto non disponibile');
     }
   }

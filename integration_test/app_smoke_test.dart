@@ -173,6 +173,7 @@ void main() {
     await step(t, '05-trip-results');
     await logRendered(container, 'pm-stop-clusters');
     await logRendered(container, 'pm-stop-cluster-pies');
+    await logRendered(container, 'pm-pins'); // start + destination
 
     plan.select(0);
     await step(t, '06-trip-detail');
