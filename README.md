@@ -10,8 +10,8 @@ account, no tracking, no Google data.
 ## Install
 
 Download the APK from the [Releases page](https://github.com/LucaCraft89/piedemove/releases)
-(latest: `0.9.0`, signed with the release key; uninstall any `0.9.0-beta.*` build
-once first), allow installing from unknown sources, and open it. Later versions
+(latest: `0.9.0-beta.9`, the first signed with the release key; uninstall any
+earlier beta once first), allow installing from unknown sources, and open it. Later versions
 install over it, and the app offers them itself. Report problems in
 [Issues](https://github.com/LucaCraft89/piedemove/issues).
 
