@@ -1,6 +1,7 @@
 package com.piedemove.piedemove
 
 import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.os.Build
 import android.os.VibrationAttributes
 import android.os.VibrationEffect
@@ -24,11 +25,23 @@ class MainActivity : FlutterActivity() {
                     val amplitudes = (call.argument<List<Int>>("amplitudes") ?: emptyList())
                         .toIntArray()
                     result.success(vibrate(timings, amplitudes))
+                } else if (call.method == "sound") {
+                    result.success(playNotificationSound())
                 } else {
                     result.notImplemented()
                 }
             }
     }
+
+    /// The user's notification sound, once ("scendi ora" with sound on).
+    private fun playNotificationSound(): Boolean =
+        try {
+            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            RingtoneManager.getRingtone(applicationContext, uri)?.play()
+            true
+        } catch (e: Exception) {
+            false
+        }
 
     private fun vibrator(): Vibrator? =
         if (Build.VERSION.SDK_INT >= 31) {

@@ -268,6 +268,17 @@ void main() {
     });
   });
 
+  test('the early warning can come two stops before', () {
+    var s = advanceLive(_start(), _fix(_lat, _lon0, speed: 6), warnStops: 2);
+    expect(s.stopsRemaining, 3);
+    s = advanceLive(s, _fix(_lat, _lon0 + _step, speed: 6), warnStops: 2);
+    expect(s.stopsRemaining, 2);
+    expect(s.cue, LiveCue.oneStopLeft, reason: 'two stops out: warn now');
+    final seq = s.cueSeq;
+    s = advanceLive(s, _fix(_lat, _lon0 + 2 * _step, speed: 6), warnStops: 2);
+    expect(s.cueSeq, seq, reason: 'warned once, not again at one stop');
+  });
+
   test('progress is monotone: a fix behind the rider does not rewind', () {
     var s = _start();
     s = advanceLive(s, _fix(_lat, _lon0, speed: 6));

@@ -49,6 +49,30 @@ class SettingsPage extends ConsumerWidget {
           padding: const EdgeInsets.all(Gap.screen),
           children: [
           const PlanningControls(),
+          const _Header('Viaggio live'),
+          const ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text('Avvisami prima di scendere'),
+            subtitle: Text('Una vibrazione quando mancano queste fermate.'),
+          ),
+          SegmentedButton<int>(
+            segments: const [
+              ButtonSegment(value: 1, label: Text('1 fermata prima')),
+              ButtonSegment(value: 2, label: Text('2 fermate prima')),
+            ],
+            selected: {settings.alightWarnStops},
+            onSelectionChanged: (v) =>
+                controller.edit((s) => s.copyWith(alightWarnStops: v.first)),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: settings.alightSound,
+            title: const Text('Suono con "scendi ora"'),
+            subtitle: const Text(
+                'Oltre alla vibrazione, il suono di notifica del telefono.'),
+            onChanged: (on) =>
+                controller.edit((s) => s.copyWith(alightSound: on)),
+          ),
           const _Header('Aspetto'),
           SegmentedButton<ThemeMode>(
             segments: const [

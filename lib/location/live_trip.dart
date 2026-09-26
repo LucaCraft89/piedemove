@@ -397,6 +397,7 @@ LiveTripState advanceLive(
   double? vehicleLat,
   double? vehicleLon,
   double walkSpeed = 1.2,
+  int warnStops = 1,
 }) {
   if (s.finished) return s;
   var state = s.copyWith(lastFix: fix.at, clearCue: true);
@@ -462,11 +463,7 @@ LiveTripState advanceLive(
 
   // Alight cues: one stop out, then at the stop itself.
   if (leg.kind == LegKind.ride) {
-    if (stopsRemaining == 1 && s.stopsRemaining > 1) {
-      state = _cue(state, LiveCue.oneStopLeft);
-    } else if (stopsRemaining == 0 && s.stopsRemaining > 0) {
-      state = _cue(state, LiveCue.alightNow);
-    }
+    state = _alightCues(state, s.stopsRemaining, stopsRemaining, warnStops);
   }
 
   final boarding =
@@ -506,7 +503,10 @@ LiveTripState advanceLive(
         speedOk) {
       // Straight onto the ride, progress placed by this same fix.
       return advanceLive(nextLeg(state), fix,
-          vehicleLat: vehicleLat, vehicleLon: vehicleLon, walkSpeed: walkSpeed);
+          vehicleLat: vehicleLat,
+          vehicleLon: vehicleLon,
+          walkSpeed: walkSpeed,
+          warnStops: warnStops);
     }
   }
 
@@ -704,6 +704,18 @@ LiveTripState nextLeg(LiveTripState s, {DateTime? at}) {
   );
 }
 
+/// Alight cues for a ride whose count went from [before] to [now] stops:
+/// the early warning when it first reaches [warnStops] (1 or 2, a setting),
+/// then "get off" at the stop itself.
+LiveTripState _alightCues(
+    LiveTripState state, int before, int now, int warnStops) {
+  if (now == 0 && before > 0) return _cue(state, LiveCue.alightNow);
+  if (now >= 1 && now <= warnStops && before > warnStops) {
+    return _cue(state, LiveCue.oneStopLeft);
+  }
+  return state;
+}
+
 LiveTripState _cue(LiveTripState s, LiveCue cue) =>
     s.copyWith(cue: cue, cueSeq: s.cueSeq + 1);
 
@@ -714,6 +726,7 @@ LiveTripState staleLive(
   DateTime now, {
   DateTime? serviceStart,
   int delaySeconds = 0,
+  int warnStops = 1,
 }) {
   final last = s.lastFix;
   if (s.finished || last == null || now.difference(last) < liveNoFixFor) {
@@ -748,11 +761,7 @@ LiveTripState staleLive(
     stopsRemaining: stopsRemaining,
   );
   if (leg.kind == LegKind.ride) {
-    if (stopsRemaining == 1 && s.stopsRemaining > 1) {
-      state = _cue(state, LiveCue.oneStopLeft);
-    } else if (stopsRemaining == 0 && s.stopsRemaining > 0) {
-      state = _cue(state, LiveCue.alightNow);
-    }
+    state = _alightCues(state, s.stopsRemaining, stopsRemaining, warnStops);
   }
   return state;
 }
@@ -926,6 +935,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
       vehicleLat: vehicle?.lat,
       vehicleLon: vehicle?.lon,
       walkSpeed: _ref.read(settingsProvider).walkSpeed,
+      warnStops: _ref.read(settingsProvider).alightWarnStops,
     );
     _apply(next);
   }
@@ -940,6 +950,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
         DateTime.now(),
         serviceStart: DateTime(date.year, date.month, date.day),
         delaySeconds: _knownDelay(s) ?? 0,
+        warnStops: _ref.read(settingsProvider).alightWarnStops,
       ),
     );
   }
@@ -961,7 +972,8 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     state = next;
     if (next.cue != null && next.cueSeq != _lastCueSeq) {
       _lastCueSeq = next.cueSeq;
-      unawaited(vibrateCue(next.cue!));
+      unawaited(vibrateCue(next.cue!,
+          sound: _ref.read(settingsProvider).alightSound));
     }
     if (next.finished) stop();
   }

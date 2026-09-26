@@ -45,6 +45,8 @@ class PmSettings {
     this.themeMode = ThemeMode.system,
     this.mapStyle = MapStyleKind.auto,
     this.advanced = false,
+    this.alightWarnStops = 1,
+    this.alightSound = false,
   });
 
   static const allModes = <int>{
@@ -69,6 +71,13 @@ class PmSettings {
   /// Raw-data mode (§11.7): record expanders and the feed screen.
   final bool advanced;
 
+  /// Live trip: the early "get off soon" vibration this many stops before
+  /// the alight stop (1 or 2).
+  final int alightWarnStops;
+
+  /// Live trip: also play the notification sound with "scendi ora".
+  final bool alightSound;
+
   Set<int> get excludedModes => allModes.difference(modes);
 
   PmSettings copyWith({
@@ -80,6 +89,8 @@ class PmSettings {
     ThemeMode? themeMode,
     MapStyleKind? mapStyle,
     bool? advanced,
+    int? alightWarnStops,
+    bool? alightSound,
   }) =>
       PmSettings(
         maxExtraMinutes: maxExtraMinutes ?? this.maxExtraMinutes,
@@ -90,6 +101,9 @@ class PmSettings {
         themeMode: themeMode ?? this.themeMode,
         mapStyle: mapStyle ?? this.mapStyle,
         advanced: advanced ?? this.advanced,
+        alightWarnStops:
+            (alightWarnStops ?? this.alightWarnStops).clamp(1, 2),
+        alightSound: alightSound ?? this.alightSound,
       );
 
   Map<String, dynamic> toJson() => {
@@ -101,6 +115,8 @@ class PmSettings {
         'theme': themeMode.name,
         'mapStyle': mapStyle.name,
         'advanced': advanced,
+        'warnStops': alightWarnStops,
+        'alightSound': alightSound,
       };
 
   static PmSettings fromJson(Map<String, dynamic> j) {
@@ -122,6 +138,8 @@ class PmSettings {
         orElse: () => MapStyleKind.auto,
       ),
       advanced: j['advanced'] as bool? ?? false,
+      alightWarnStops: ((j['warnStops'] as num?)?.toInt() ?? 1).clamp(1, 2),
+      alightSound: j['alightSound'] as bool? ?? false,
     );
   }
 }

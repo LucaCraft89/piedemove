@@ -17,7 +17,7 @@ const _channel = MethodChannel('piedemove/vibrate');
 /// Off/on timings in ms (starting with a pause) and amplitudes 0-255.
 typedef VibrationPattern = ({List<int> timings, List<int> amplitudes});
 
-/// One stop left: two firm pulses. Get off now: three long ones, the last
+/// The early warning (1 or 2 stops before): two firm pulses. Get off now: three long ones, the last
 /// longest - unmistakable, about 3.5 s in all.
 VibrationPattern cuePattern(LiveCue cue) => switch (cue) {
       LiveCue.oneStopLeft => (
@@ -30,8 +30,16 @@ VibrationPattern cuePattern(LiveCue cue) => switch (cue) {
         ),
     };
 
-/// Never throws.
-Future<void> vibrateCue(LiveCue cue) async {
+/// Never throws. With [sound], "get off now" also plays the phone's
+/// notification sound (a setting: a vibration can go unfelt in a coat).
+Future<void> vibrateCue(LiveCue cue, {bool sound = false}) async {
+  if (sound && cue == LiveCue.alightNow) {
+    try {
+      await _channel.invokeMethod<bool>('sound');
+    } catch (e) {
+      debugPrint('pm: sound channel: $e');
+    }
+  }
   final p = cuePattern(cue);
   try {
     final ok = await _channel.invokeMethod<bool>(
