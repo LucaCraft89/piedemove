@@ -1,6 +1,11 @@
 package com.piedemove.piedemove
 
+import android.Manifest
+import android.app.Notification
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.net.Uri
@@ -42,6 +47,25 @@ class MainActivity : FlutterActivity() {
                             false
                         },
                     )
+                    "requestNotifications" -> {
+                        if (Build.VERSION.SDK_INT >= 33 &&
+                            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+                            PackageManager.PERMISSION_GRANTED
+                        ) {
+                            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7)
+                        }
+                        result.success(true)
+                    }
+                    "tripNotification" -> result.success(
+                        showTripNotification(
+                            call.argument<String>("title") ?: "",
+                            call.argument<String>("text") ?: "",
+                        ),
+                    )
+                    "tripNotificationCancel" -> {
+                        notificationManager().cancel(TRIP_NOTIFICATION_ID)
+                        result.success(true)
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -59,6 +83,56 @@ class MainActivity : FlutterActivity() {
                     result.notImplemented()
                 }
             }
+    }
+
+    private fun notificationManager() =
+        getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+
+    /// Rewrites the location service's foreground notification (same id and
+    /// channel as geolocator's GeolocatorLocationService) with the trip's
+    /// current instruction; a tap brings the app back. Skipped until the
+    /// service has created its channel, so nothing lingers without it.
+    private fun showTripNotification(title: String, text: String): Boolean {
+        val nm = notificationManager()
+        if (Build.VERSION.SDK_INT >= 26 &&
+            nm.getNotificationChannel(TRIP_NOTIFICATION_CHANNEL) == null
+        ) {
+            return false
+        }
+        val open = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val builder = if (Build.VERSION.SDK_INT >= 26) {
+            Notification.Builder(this, TRIP_NOTIFICATION_CHANNEL)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+        }
+        val notification = builder
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text))
+            .setSmallIcon(applicationInfo.icon)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(open)
+            .build()
+        return try {
+            nm.notify(TRIP_NOTIFICATION_ID, notification)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    companion object {
+        // geolocator_android's GeolocatorLocationService constants.
+        private const val TRIP_NOTIFICATION_ID = 75415
+        private const val TRIP_NOTIFICATION_CHANNEL = "geolocator_channel_01"
     }
 
     /// The user's notification sound, once ("scendi ora" with sound on).

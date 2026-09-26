@@ -279,6 +279,19 @@ void main() {
     expect(s.cueSeq, seq, reason: 'warned once, not again at one stop');
   });
 
+  test('the trip notification says the instruction in brief', () {
+    var s = _start();
+    expect(liveNotificationText(s), startsWith('A piedi verso Fermata 0 (il 2)'));
+    s = s.copyWith(reachedBoardStop: true);
+    expect(liveNotificationText(s), 'Aspetta il 2 a Fermata 0');
+    s = advanceLive(_start(), _fix(_lat, _lon0, speed: 6));
+    expect(liveNotificationText(s), 'Scendi a Fermata 3 tra 3 fermate');
+    s = s.copyWith(stopsRemaining: 1);
+    expect(liveNotificationText(s), 'Scendi alla prossima: Fermata 3');
+    s = s.copyWith(stopsRemaining: 0);
+    expect(liveNotificationText(s), 'Scendi ora a Fermata 3');
+  });
+
   test('progress is monotone: a fix behind the rider does not rewind', () {
     var s = _start();
     s = advanceLive(s, _fix(_lat, _lon0, speed: 6));
