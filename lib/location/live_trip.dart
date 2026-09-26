@@ -29,6 +29,7 @@ import 'package:piedemove/realtime/gtfs_rt.dart';
 import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/routing/journey.dart';
 import 'package:piedemove/settings/settings.dart';
+import 'package:piedemove/location/bus_match.dart';
 import 'package:piedemove/location/haptics.dart';
 import 'package:piedemove/ui/trip/trip_plan.dart';
 
@@ -782,6 +783,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   var _foreground = true;
   int _lastCueSeq = 0;
   LiveFix? _lastPos;
+  LiveFix? _lastGood;
 
   /// The latest device fix, or null when none arrived yet.
   LiveFix? get lastFix => _lastPos;
@@ -928,6 +930,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
       at: now,
     );
     _lastPos = fix;
+    if (fix.accuracy <= livePoorAccuracy) _lastGood = fix;
     final vehicle = _vehicleFor(s);
     final next = advanceLive(
       s,
@@ -978,15 +981,27 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     if (next.finished) stop();
   }
 
-  /// The live vehicle of the leg's own run, when the feed knows it.
+  /// On board: the rider's vehicle - by run id when the feed has one (GTT's
+  /// does not), else by line, heading and nearness to the rider
+  /// ([riderVehicle]). It stands in for a poor fix (tunnels, the metro).
+  /// Never while walking: a bus pulling in must not "board" anyone.
   RtVehicle? _vehicleFor(LiveTripState s) {
-    final tripId = s.leg.tripId;
-    if (tripId == null) return null;
+    if (!s.riding) return null;
     final vehicles = _ref.read(realtimeProvider).vehicles;
-    for (final v in vehicles.values) {
-      if (v.tripId == tripId) return v;
+    final tripId = s.leg.tripId;
+    if (tripId != null) {
+      for (final v in vehicles.values) {
+        if (v.tripId == tripId) return v;
+      }
     }
-    return null;
+    final ix = _ref.read(transitIndexProvider).valueOrNull;
+    // Matched near the last *good* fix: a poor one can be 200 m off.
+    final at = _lastGood;
+    if (ix == null || at == null || s.legIndex >= s.journey.legs.length) {
+      return null;
+    }
+    return riderVehicle(
+        ix, vehicles.values, s.journey.legs[s.legIndex], at.lat, at.lon);
   }
 
   @override
