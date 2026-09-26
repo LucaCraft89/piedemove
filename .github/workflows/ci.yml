@@ -156,8 +156,9 @@ jobs:
           retention-days: 14
 
   # A push whose head commit message contains "[release]" publishes a GitHub
-  # prerelease, but only after check and the emulator tour passed. Tag and
-  # notes come from pubspec's version and docs/release-notes/v<version>.md.
+  # release (a prerelease for a -beta version), but only after check and the
+  # emulator tour passed. Tag and notes come from pubspec's version and
+  # docs/release-notes/v<version>.md.
   # Line geometry for the release (and, on a "[lines]" push, a test run of
   # the lines workflow): rebuilt and republished if GTT has a newer export.
   lines:
@@ -265,6 +266,12 @@ jobs:
             echo "::error::release v$v already exists: bump the version in pubspec.yaml"
             exit 1
           fi
+          # A version with a suffix (0.9.1-beta.1) is a prerelease; a plain
+          # one (0.9.0) is a final release, marked latest.
+          case "$v" in
+            *-*) kind=--prerelease ;;
+            *) kind=--latest ;;
+          esac
           gh release create "v$v" "$apk" "$apk.sha256" \
-            --target "$GITHUB_SHA" --prerelease \
+            --target "$GITHUB_SHA" $kind \
             --title "PiedeMove ${v//-/ }" --notes-file "$notes"

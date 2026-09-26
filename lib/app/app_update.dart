@@ -66,11 +66,17 @@ int compareVersions(String a, String b) {
   return 0;
 }
 
-/// The newest release in a GitHub `/releases` answer that ships an APK.
-AppRelease? newestRelease(List<dynamic> releases) {
+/// A version with a suffix (`0.9.1-beta.2`) is a beta.
+bool isPrerelease(String version) => version.contains('-');
+
+/// The newest release in a GitHub `/releases` answer that ships an APK;
+/// with [stableOnly], betas are skipped (a stable install is offered stable
+/// updates only).
+AppRelease? newestRelease(List<dynamic> releases, {bool stableOnly = false}) {
   AppRelease? best;
   for (final r in releases.whereType<Map>()) {
     if (r['draft'] == true) continue;
+    if (stableOnly && r['prerelease'] == true) continue;
     final tag = (r['tag_name'] as String?) ?? '';
     final apk = (r['assets'] as List? ?? const [])
         .whereType<Map>()
@@ -80,6 +86,7 @@ AppRelease? newestRelease(List<dynamic> releases) {
         .firstOrNull;
     if (apk == null) continue;
     final version = tag.startsWith('v') ? tag.substring(1) : tag;
+    if (stableOnly && isPrerelease(version)) continue;
     if (best == null || compareVersions(version, best.version) > 0) {
       best = AppRelease(
           version: version,
@@ -136,7 +143,8 @@ Future<AppRelease?> checkForUpdate({
         'Accept': 'application/vnd.github+json',
       }).timeout(const Duration(seconds: 15));
       if (r.statusCode == 200) {
-        latest = newestRelease(jsonDecode(utf8.decode(r.bodyBytes)) as List);
+        latest = newestRelease(jsonDecode(utf8.decode(r.bodyBytes)) as List,
+            stableOnly: !isPrerelease(installed));
         await prefs?.setInt(_checkedKey, now().millisecondsSinceEpoch);
         if (latest != null) {
           await prefs?.setString(_cachedKey, jsonEncode(latest.toJson()));
@@ -155,6 +163,9 @@ Future<AppRelease?> checkForUpdate({
         latest = AppRelease.fromJson(jsonDecode(raw) as Map<String, dynamic>);
       }
     } catch (_) {}
+  }
+  if (latest != null && !isPrerelease(installed) && isPrerelease(latest.version)) {
+    latest = null; // a stable install is not offered betas
   }
   if (latest == null || compareVersions(latest.version, installed) <= 0) {
     return null;
