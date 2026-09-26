@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:piedemove/app/app_update.dart';
+import 'package:piedemove/geo/offline_map.dart';
 
 import 'package:piedemove/data/feeds.dart';
 import 'package:piedemove/data/providers.dart';
@@ -109,6 +110,8 @@ class SettingsPage extends ConsumerWidget {
             subtitle: Text('L\'inglese arriva con le traduzioni.'),
             enabled: false,
           ),
+          const _Header('Mappa offline'),
+          const _OfflineMapRow(),
           const _Header('Stato dei dati'),
           const _DataStatus(),
           const _Header('Avanzate'),
@@ -458,6 +461,58 @@ class _VersionRowState extends ConsumerState<_VersionRow> {
       onTap: _busy
           ? null
           : () => found != null ? openUrl(found.apkUrl) : _check(),
+    );
+  }
+}
+
+/// Download / delete the basemap of the GTT area for use without data.
+class _OfflineMapRow extends ConsumerWidget {
+  const _OfflineMapRow();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final st = ref.watch(offlineMapProvider);
+    final ctl = ref.read(offlineMapProvider.notifier);
+    final mb = st.estimateBytes == null
+        ? null
+        : (st.estimateBytes! / (1024 * 1024)).ceil();
+    final at = st.region?.metadata['at'] as String?;
+    final String subtitle;
+    if (st.downloading) {
+      subtitle = 'Scarico… ${((st.progress ?? 0) * 100).round()}%';
+    } else if (st.error != null) {
+      subtitle = 'Errore: ${st.error}. Riprova con una connessione Wi-Fi.';
+    } else if (st.region != null) {
+      subtitle = 'Scaricata${at == null ? '' : ' il ${at.substring(0, 10)}'}. '
+          'Mappa di Torino e dintorni anche senza dati.';
+    } else {
+      subtitle = 'Mappa della zona GTT senza connessione'
+          '${mb == null ? '' : ' (circa $mb MB, meglio in Wi-Fi)'}.';
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.download_for_offline_outlined),
+          title: Text(st.region != null && !st.downloading
+              ? 'Mappa offline pronta'
+              : 'Scarica la mappa'),
+          subtitle: Text(subtitle),
+        ),
+        if (st.downloading) LinearProgressIndicator(value: st.progress),
+        Row(
+          children: [
+            FilledButton.tonal(
+              onPressed: st.downloading ? null : ctl.download,
+              child: Text(st.region == null ? 'Scarica' : 'Aggiorna'),
+            ),
+            const SizedBox(width: 8),
+            if (st.region != null && !st.downloading)
+              TextButton(onPressed: ctl.remove, child: const Text('Elimina')),
+          ],
+        ),
+      ],
     );
   }
 }

@@ -401,3 +401,22 @@ for approval of look, palette and line style before phase 6.
 - "Linee" chip opens `lib/ui/sheets/lines_browser.dart`: every served route
   grouped Metro/Tram/Bus/Funicolare/Altre/Regionali (`groupLines`, badge order
   via `compareRouteNames`), filter via `searchRoutes`, tap = `openEntity(LineRef)`.
+
+## Post beta 7 features (rider requests)
+
+- **Casa / Lavoro** chips first in the home row (`lib/places/shortcuts.dart`):
+  first tap / long press picks via search pick mode, tap plans from the
+  position leaving now; long press changes or removes.
+- **Favourite board**: favourite stops open the nearby sheet as horizontal
+  cards (name, next two vehicles as badge + big minutes, live colour), 78 dp
+  so they show at peek; the sheet ticks every 30 s.
+- **Update chip**: `lib/app/app_update.dart` reads GitHub releases daily,
+  compares `0.9.0-beta.N` versions, home chip "Nuova versione … · Scarica"
+  opens the APK in the browser (native `piedemove/app` channel: `version`,
+  `openUrl`); Settings shows the version and checks on demand.
+- **Settings > Viaggio live**: warn 1 or 2 stops before, optional sound.
+- **Settings > Mappa offline** (`lib/geo/offline_map.dart`): MapLibre offline
+  region of OpenFreeMap's hosted positron style (same `openmaptiles` source
+  and Noto glyphs as ours; the offline DB answers by URL), area = GTT live
+  stops' extent, z10-14 (lower if > 6000 tiles), 2 requests per host.
+
