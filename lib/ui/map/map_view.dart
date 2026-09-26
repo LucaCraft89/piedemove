@@ -197,7 +197,10 @@ class _MapViewState extends ConsumerState<MapView> {
   int _meGlideGen = 0;
 
   /// The place currently pinned by search, as last drawn.
-  Place? _pinned;
+  (Place?, Place?, Place?)? _pins;
+
+  /// The (from, to, list shown) the camera last framed.
+  Object? _framed;
 
   /// Focus last drawn, so a rebuild with the same focus costs nothing.
   MapFocus? _focus;
@@ -312,9 +315,31 @@ class _MapViewState extends ConsumerState<MapView> {
       WidgetsBinding.instance.addPostFrameCallback((_) => _updateMe(me));
     }
 
+    // Pins: the searched place, and the planned trip's start and end while
+    // no journey is open (an open journey draws its own Partenza/Arrivo).
     final place = ref.watch(selectedPlaceProvider);
-    if (_styleReady && !identical(place, _pinned)) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _updatePin(place));
+    final trip = ref.watch(tripPlanProvider);
+    final openJourney = focus is JourneyFocus;
+    final pins = (
+      place,
+      openJourney ? null : trip.query.from,
+      openJourney ? null : trip.query.to,
+    );
+    if (_styleReady && pins != _pins) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _updatePins(pins));
+    }
+    // A destination picked (or the results shown): frame start and end,
+    // like a maps app, clear of the sheet that is up.
+    final listUp =
+        trip.result != null && !trip.sheetHidden && trip.selected == null;
+    final frame = (trip.query.from, trip.query.to, listUp);
+    if (_styleReady &&
+        focus == null &&
+        trip.query.to != null &&
+        frame != _framed) {
+      _framed = frame;
+      WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _frameTrip(trip.query.from, trip.query.to!, listUp));
     }
 
     return MapLibreMap(
@@ -352,7 +377,8 @@ class _MapViewState extends ConsumerState<MapView> {
         _meAdded = false;
         _meAt = null;
         _focusDrawn = false;
-        _pinned = null;
+        _pins = null;
+        _framed = null;
         _addLines(ref.read(ambientLinesProvider).valueOrNull);
         _addStops();
       },
@@ -857,7 +883,10 @@ class _MapViewState extends ConsumerState<MapView> {
           final live = ref.read(liveTripProvider);
           final lines = journeyFocusLines(ix, net!, journey, live: live);
           if (focus != wasFitted) {
-            await _fitTo(controller, _journeyStops(ix, journey));
+            await _fitTo(controller, _journeyStops(ix, journey),
+                bottomFraction: ref.read(liveTripProvider) != null
+                    ? liveStripFraction
+                    : sheetHalf);
           }
           await controller.setGeoJsonSource(_focusLinesSource, lines);
           await controller.setGeoJsonSource(
@@ -912,8 +941,9 @@ class _MapViewState extends ConsumerState<MapView> {
   /// whatever viewport it had and the selection is off screen.
   Future<void> _fitTo(
     MapLibreMapController controller,
-    Map<String, dynamic> collection,
-  ) async {
+    Map<String, dynamic> collection, {
+    double bottomFraction = sheetPeek,
+  }) async {
     var minLat = 90.0, maxLat = -90.0, minLon = 180.0, maxLon = -180.0;
     for (final f in collection['features'] as List) {
       final coords = f['geometry']['coordinates'] as List;
@@ -938,14 +968,43 @@ class _MapViewState extends ConsumerState<MapView> {
           left: focusFitSide,
           right: focusFitSide,
           top: focusFitTop,
-          // The sheet rests at peek.
-          bottom: MediaQuery.of(context).size.height * sheetPeek +
+          // Clear of whatever sheet covers the bottom now (rider report:
+          // the half-open trip sheet hid half the journey).
+          bottom: MediaQuery.of(context).size.height * bottomFraction +
               focusFitBottomExtra,
         ),
       );
     } catch (e) {
       debugPrint('pm: fit to focus failed: $e');
     }
+  }
+
+  /// Start (or the rider, or nothing) and destination in view.
+  Future<void> _frameTrip(Place? from, Place to, bool listUp) async {
+    final controller = _controller;
+    if (controller == null || !mounted) return;
+    final me = ref.read(myPositionProvider);
+    final start = from != null
+        ? (from.lat, from.lon)
+        : (me == null ? null : (me.latitude, me.longitude));
+    Map<String, dynamic> point(double lat, double lon) => {
+          'type': 'Feature',
+          'geometry': {
+            'type': 'Point',
+            'coordinates': [lon, lat],
+          },
+        };
+    await _fitTo(
+      controller,
+      {
+        'type': 'FeatureCollection',
+        'features': [
+          point(to.lat, to.lon),
+          if (start != null) point(start.$1, start.$2),
+        ],
+      },
+      bottomFraction: listUp ? sheetHalf : sheetPeek,
+    );
   }
 
   static const _ambientStopLayers = [
@@ -1341,24 +1400,36 @@ class _MapViewState extends ConsumerState<MapView> {
     }
   }
 
-  Future<void> _updatePin(Place? place) async {
+  /// The searched place, and the planned trip's start (hollow) and
+  /// destination (filled, larger): circle annotations, redrawn together.
+  Future<void> _updatePins((Place?, Place?, Place?) pins) async {
     final controller = _controller;
     if (controller == null || !_styleReady || !mounted) return;
-    _pinned = place;
+    _pins = pins;
+    final (place, from, to) = pins;
     final scheme = Theme.of(context).colorScheme;
     final status = ref.read(mapStatusProvider.notifier);
     try {
       await controller.clearCircles();
-      if (place == null) return;
-      await controller.addCircle(
-        CircleOptions(
-          geometry: LatLng(place.lat, place.lon),
-          circleRadius: 9,
+      if (from != null && from.name != 'La mia posizione') {
+        await controller.addCircle(CircleOptions(
+          geometry: LatLng(from.lat, from.lon),
+          circleRadius: 7,
+          circleColor: _hex(scheme.surface),
+          circleStrokeColor: _hex(scheme.primary),
+          circleStrokeWidth: 3,
+        ));
+      }
+      for (final p in [place, to]) {
+        if (p == null || (identical(p, to) && identical(place, to))) continue;
+        await controller.addCircle(CircleOptions(
+          geometry: LatLng(p.lat, p.lon),
+          circleRadius: identical(p, to) ? 11 : 9,
           circleColor: _hex(scheme.primary),
           circleStrokeColor: _hex(scheme.surface),
           circleStrokeWidth: 3,
-        ),
-      );
+        ));
+      }
       status.clear('pin');
     } catch (e) {
       debugPrint('pm: layer segnaposto failed: $e');
