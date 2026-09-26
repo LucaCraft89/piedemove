@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:piedemove/app/app_update.dart';
+import 'package:piedemove/places/shortcuts.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 
 import 'package:piedemove/data/index_source.dart';
@@ -458,6 +459,10 @@ class _PillRow extends ConsumerWidget {
       child: ListView(
         scrollDirection: Axis.horizontal,
         children: [
+          for (final sc in Shortcut.values) ...[
+            _ShortcutChip(sc),
+            const SizedBox(width: 8),
+          ],
           ActionChip(
             avatar: const Icon(Icons.search, size: 16),
             label: const Text('Cerca'),
@@ -496,6 +501,91 @@ class _PillRow extends ConsumerWidget {
             onPressed: () => openSettings(context),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Casa / Lavoro: tap plans from here to it now; the first tap (or a long
+/// press) picks the place.
+class _ShortcutChip extends ConsumerWidget {
+  const _ShortcutChip(this.shortcut);
+
+  final Shortcut shortcut;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final place = ref.watch(shortcutPlacesProvider)[shortcut];
+    final label = shortcutLabel(shortcut);
+
+    Future<void> choose() async {
+      final picked = await openSearch(context, pick: true);
+      if (picked != null) {
+        ref.read(shortcutPlacesProvider.notifier).set(shortcut, picked);
+      }
+    }
+
+    void go(Place to) {
+      final me = ref.read(myPositionProvider);
+      final plan = ref.read(tripPlanProvider.notifier)
+        ..setTo(to)
+        ..setWhen(WhenMode.now);
+      if (me != null) {
+        plan.setFrom(Place(
+            name: 'La mia posizione',
+            address: '',
+            lat: me.latitude,
+            lon: me.longitude));
+      }
+      if (ref.read(tripPlanProvider).query.from == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Posizione non disponibile: scegli da dove parti.')));
+        return;
+      }
+      plan.plan();
+    }
+
+    Future<void> manage() async {
+      final action = await showModalBottomSheet<String>(
+        context: context,
+        builder: (ctx) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.edit_location_alt_outlined),
+                title: Text('Cambia $label'),
+                onTap: () => Navigator.pop(ctx, 'change'),
+              ),
+              if (place != null)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline),
+                  title: Text('Rimuovi $label'),
+                  onTap: () => Navigator.pop(ctx, 'remove'),
+                ),
+            ],
+          ),
+        ),
+      );
+      if (action == 'change') await choose();
+      if (action == 'remove') {
+        ref.read(shortcutPlacesProvider.notifier).clear(shortcut);
+      }
+    }
+
+    return GestureDetector(
+      onLongPress: manage,
+      child: ActionChip(
+        avatar: Icon(
+            shortcut == Shortcut.home
+                ? Icons.home_outlined
+                : Icons.work_outline,
+            size: 16),
+        label: Text(place == null ? '$label +' : label),
+        tooltip: place == null
+            ? 'Scegli $label'
+            : '$label: ${place.name}. Tieni premuto per cambiare',
+        onPressed: () => place == null ? choose() : go(place),
       ),
     );
   }
