@@ -17,6 +17,8 @@ import 'package:piedemove/data/providers.dart';
 import 'package:piedemove/main.dart' as app;
 import 'package:piedemove/places/favourites.dart';
 import 'package:piedemove/places/photon.dart';
+import 'package:piedemove/realtime/link.dart';
+import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/ui/home/home_page.dart';
 import 'package:piedemove/ui/settings/settings_page.dart' show openSettings;
 import 'package:piedemove/ui/sheets/nearby_sheet.dart' show stopsNear;
@@ -80,6 +82,28 @@ Future<void> logRendered(ProviderContainer c, String layer) async {
     // ignore: avoid_print
     print('PM_RENDERED $layer failed: $e');
   }
+}
+
+/// Live vehicles per mode, and route ids the index does not know: tells
+/// whether GTT's feed carries the metro (its position replaces GPS
+/// underground) and under which route id.
+void logVehicles(ProviderContainer c) {
+  final ix = c.read(transitIndexProvider).valueOrNull;
+  final vehicles = c.read(realtimeProvider).vehicles.values;
+  if (ix == null) return;
+  final modes = <int, int>{};
+  final unknown = <String>{};
+  for (final v in vehicles) {
+    final r = routeIndexOf(ix, v);
+    if (r == null) {
+      unknown.add(v.routeId ?? '?');
+    } else {
+      modes[ix.routeTypes[r]] = (modes[ix.routeTypes[r]] ?? 0) + 1;
+    }
+  }
+  // ignore: avoid_print
+  print('PM_VEHICLES ${vehicles.length} byType=$modes '
+      'unknown=${unknown.take(20).toList()}');
 }
 
 void main() {
@@ -174,6 +198,7 @@ void main() {
     await logRendered(container, 'pm-stop-clusters');
     await logRendered(container, 'pm-stop-cluster-pies');
     await logRendered(container, 'pm-pins'); // start + destination
+    logVehicles(container);
 
     plan.select(0);
     await step(t, '06-trip-detail');

@@ -134,3 +134,43 @@ RtVehicle? riderVehicle(TransitIndex ix, Iterable<RtVehicle> vehicles,
   }
   return best;
 }
+
+/// Underground: the train of [ride]'s line heading its way whose place on
+/// the route is nearest where the timetable puts the rider ([fraction] of
+/// the ride, board to alight), within [busTrainMaxMetres] of it.
+const busTrainMaxMetres = 1500.0;
+
+RtVehicle? trainNearSchedule(TransitIndex ix, Iterable<RtVehicle> vehicles,
+    Leg ride, double fraction) {
+  RtVehicle? best;
+  var bestD = busTrainMaxMetres;
+  for (final o in ride.options) {
+    final p = o.pattern;
+    var board = -1, alight = -1;
+    for (var i = 0; i < ix.patternLength(p); i++) {
+      final stop = ix.patternStopAt(p, i);
+      if (board < 0 && stop == ride.fromStop) {
+        board = i;
+      } else if (board >= 0 && stop == ride.toStop) {
+        alight = i;
+        break;
+      }
+    }
+    if (board < 0 || alight < 0) continue;
+    final a = _alongAtStop(ix, p, board), b = _alongAtStop(ix, p, alight);
+    final expected = a + (b - a) * fraction;
+    for (final v in vehicles) {
+      if (routeIndexOf(ix, v) != ix.patternRoute[p]) continue;
+      final at = _onPattern(ix, p, v.lat, v.lon);
+      if (at == null || at.off > busMatchMaxOffMetres) continue;
+      if (!_sameWay(v.bearing, at.heading)) continue;
+      final d = (at.along - expected).abs();
+      if (d < bestD) {
+        bestD = d;
+        best = v;
+      }
+    }
+  }
+  return best;
+}
+
