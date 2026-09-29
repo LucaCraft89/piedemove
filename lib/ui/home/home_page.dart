@@ -29,6 +29,8 @@ import 'package:piedemove/ui/settings/settings_page.dart';
 import 'package:piedemove/ui/sheets/nearby_sheet.dart';
 import 'package:piedemove/ui/theme/tokens.dart';
 import 'package:piedemove/ui/sheets/lines_browser.dart';
+import 'package:piedemove/location/trip_summary.dart';
+import 'package:piedemove/ui/trip/arrival_sheet.dart';
 import 'package:piedemove/ui/trip/live_strip.dart';
 import 'package:piedemove/ui/trip/trip_plan.dart';
 import 'package:piedemove/ui/trip/trip_sheet.dart';
@@ -165,6 +167,8 @@ class _HomePageState extends ConsumerState<HomePage> {
             const EntitySheet()
           else if (live != null)
             const LiveStrip()
+          else if (ref.watch(tripSummaryProvider) != null)
+            const ArrivalSheet()
           else if (showTrip)
             const TripSheet()
           else

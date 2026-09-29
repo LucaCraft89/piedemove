@@ -420,3 +420,11 @@ for approval of look, palette and line style before phase 6.
   and Noto glyphs as ours; the offline DB answers by URL), area = GTT live
   stops' extent, z10-14 (lower if > 6000 tiles), 2 requests per host.
 
+- **Arrival** (`lib/ui/trip/arrival_sheet.dart`, beta 11): when the live trip
+  finishes (auto or "Sono arrivato") the controller's `_finish` stores a
+  `TripSummary` (`lib/location/trip_summary.dart`) in `tripSummaryProvider`
+  and stops; home shows `ArrivalSheet` after LiveStrip in the bottom chain:
+  destination, arrival vs plan (`punctualityLabel`), time, walk (always "≈"),
+  transfers, the ridden line groups. "Fine" clears it and the plan; "Ritorno"
+  swaps from/to and plans now. Closing the trip with X/back shows nothing.
+  Smoke tour step `07-arrival`.

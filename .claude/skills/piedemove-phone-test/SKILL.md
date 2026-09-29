@@ -64,6 +64,13 @@ POST_NOTIFICATIONS, WAKE_LOCK. Needs a phone to verify (emulator: no).
 - **Poor GPS** (accuracy > 50 m, or no fix for 20 s — metro, tunnels): fall back
   to the vehicle's live position if known, else schedule-based estimation,
   labelled **"posizione stimata"**.
+- **Metro ride** (`isUnderground`, beta 10 report): GPS is ignored entirely -
+  underground Wi-Fi/cell fixes claim good accuracy streets away. Progress comes
+  from the train (`trainNearSchedule`: same line and heading, nearest the
+  timetable position) else timetable + live delay (`undergroundLive`). Never off
+  route; the ride ends by "Sono sceso" or a <= 30 m fix within 150 m of the
+  exit once <= 1 stop is left. CI logs `PM_VEHICLES` (per route type) to show
+  whether GTT's feed carries the metro.
 - **Off route / missed connection**: more than 150 m from the leg path for 30 s
   while riding, or the boarding vehicle has departed -> a one-tap **"Ricalcola"**
   banner. **Never recalculate silently.**

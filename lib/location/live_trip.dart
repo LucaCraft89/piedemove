@@ -30,6 +30,7 @@ import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/routing/journey.dart';
 import 'package:piedemove/settings/settings.dart';
 import 'package:piedemove/location/bus_match.dart';
+import 'package:piedemove/location/trip_summary.dart';
 import 'package:piedemove/location/haptics.dart';
 import 'package:piedemove/location/trip_notification.dart';
 import 'package:piedemove/ui/trip/trip_plan.dart';
@@ -756,6 +757,22 @@ LiveTripState staleLive(
   if (s.finished || last == null || now.difference(last) < liveNoFixFor) {
     return s;
   }
+  return scheduleEstimate(s, now,
+      serviceStart: serviceStart,
+      delaySeconds: delaySeconds,
+      warnStops: warnStops);
+}
+
+/// Progress from the timetable (moved by [delaySeconds]): linear along the
+/// current leg between its two times, forward only, "posizione stimata".
+LiveTripState scheduleEstimate(
+  LiveTripState s,
+  DateTime now, {
+  DateTime? serviceStart,
+  int delaySeconds = 0,
+  int warnStops = 1,
+}) {
+  if (s.finished) return s;
   final leg = s.leg;
   var state = s.copyWith(estimated: true);
   if (serviceStart == null || leg.arrival <= leg.departure) return state;
@@ -790,6 +807,66 @@ LiveTripState staleLive(
   return state;
 }
 
+/// A metro ride: underground the phone's "position" is a Wi-Fi or cell guess
+/// that can sit streets away while claiming good accuracy (rider report,
+/// beta 10: off-route banner, progress frozen). So GPS is not used here:
+/// the metro's own live position when the feed has it ([vehicleLat]),
+/// else the timetable moved by the live delay. Never off route; never
+/// leaves the ride by itself (surfacing near the exit, or "Sono sceso",
+/// hands over to the walk).
+LiveTripState undergroundLive(
+  LiveTripState s,
+  DateTime now, {
+  DateTime? serviceStart,
+  int delaySeconds = 0,
+  double? vehicleLat,
+  double? vehicleLon,
+  int warnStops = 1,
+}) {
+  if (s.finished) return s;
+  final calm = s.copyWith(offRoute: false, clearOffRouteSince: true);
+  if (vehicleLat != null && vehicleLon != null) {
+    final next = advanceLive(
+        calm,
+        LiveFix(
+            lat: vehicleLat,
+            lon: vehicleLon,
+            accuracy: 10,
+            speed: 10, // it is a train: do not read this as "got off"
+            at: now),
+        warnStops: warnStops);
+    if (next.legIndex == s.legIndex) {
+      return next.copyWith(
+          estimated: true, offRoute: false, clearOffRouteSince: true);
+    }
+    // The train reached the stop: stay on the ride, "scendi ora" said.
+    final end = s.leg.metres;
+    return calm.copyWith(
+      along: end,
+      vertex: s.leg.lastVertex,
+      metresToEnd: 0,
+      stopsRemaining: 0,
+      estimated: true,
+      cue: next.cue,
+      cueSeq: next.cueSeq,
+    );
+  }
+  return scheduleEstimate(calm, now,
+      serviceStart: serviceStart,
+      delaySeconds: delaySeconds,
+      warnStops: warnStops);
+}
+
+/// True while the current leg is a metro ride.
+bool isUnderground(LiveTripState s) {
+  if (!s.riding || s.legIndex >= s.journey.legs.length) return false;
+  final o = s.journey.legs[s.legIndex].options.firstOrNull;
+  return o != null && o.routeType == RouteType.metro;
+}
+
+/// Surfaced at the exit: a good fix this close to the alight stop.
+const liveSurfacedMetres = 150.0;
+
 /// Sensors, haptics and the wakelock around the pure rules above.
 ///
 /// ponytail: no sensor fusion is done — one fix in, one progress out. A Kalman
@@ -812,6 +889,9 @@ class LiveTripController extends StateNotifier<LiveTripState?>
 
   /// The latest device fix, or null when none arrived yet.
   LiveFix? get lastFix => _lastPos;
+
+  /// When [start] ran: the summary's trip time counts from here.
+  DateTime? _startedAt;
 
   void start(Journey journey) {
     final ix = _ref.read(transitIndexProvider).valueOrNull;
@@ -839,6 +919,8 @@ class LiveTripController extends StateNotifier<LiveTripState?>
       stopsRemaining: first.stopVertex.length,
     );
     _lastCueSeq = 0;
+    _startedAt = DateTime.now();
+    _ref.read(tripSummaryProvider.notifier).state = null;
     WidgetsBinding.instance.addObserver(this);
     _notified = null;
     // Android 13+: the trip notification needs the user's yes (asked once).
@@ -868,7 +950,17 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     if (s == null) return;
     final next = nextLeg(s, at: DateTime.now());
     state = next;
-    if (next.finished) stop();
+    if (next.finished) _finish(next);
+  }
+
+  /// Arrived: the summary replaces the strip, then everything stops.
+  void _finish(LiveTripState s) {
+    final now = DateTime.now();
+    _ref.read(tripSummaryProvider.notifier).state = tripSummary(s,
+        startedAt: _startedAt ?? now,
+        arrivedAt: now,
+        destination: _ref.read(tripPlanProvider).query.to?.name);
+    stop();
   }
 
   @override
@@ -968,6 +1060,20 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     );
     _lastPos = fix;
     if (fix.accuracy <= livePoorAccuracy) _lastGood = fix;
+    if (isUnderground(s)) {
+      final est = _underground(s, now);
+      // Out of the station: a real fix near the exit hands over to the walk.
+      final surfaced = fix.accuracy <= 30 &&
+          haversineMetres(fix.lat, fix.lon, s.leg.lat.last, s.leg.lon.last) <=
+              liveSurfacedMetres &&
+          est.stopsRemaining <= 1;
+      _apply(surfaced
+          ? advanceLive(nextLeg(est, at: now), fix,
+              walkSpeed: _ref.read(settingsProvider).walkSpeed,
+              warnStops: _ref.read(settingsProvider).alightWarnStops)
+          : est.copyWith(lastFix: now));
+      return;
+    }
     final vehicle = _vehicleFor(s);
     final next = advanceLive(
       s,
@@ -983,6 +1089,11 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   void _onStale() {
     final s = state;
     if (s == null) return;
+    // Underground the timetable moves the trip on, fixes or not.
+    if (isUnderground(s)) {
+      _apply(_underground(s, DateTime.now()));
+      return;
+    }
     final date = s.journey.date;
     _apply(
       staleLive(
@@ -1021,7 +1132,34 @@ class LiveTripController extends StateNotifier<LiveTripState?>
       unawaited(vibrateCue(next.cue!,
           sound: _ref.read(settingsProvider).alightSound));
     }
-    if (next.finished) stop();
+    if (next.finished) _finish(next);
+  }
+
+  /// [undergroundLive] with the metro's live position when the feed has it:
+  /// the train of the ride's line, heading its way, nearest where the
+  /// timetable puts the rider's train.
+  LiveTripState _underground(LiveTripState s, DateTime now) {
+    final date = s.journey.date;
+    final start = DateTime(date.year, date.month, date.day);
+    final delay = _knownDelay(s) ?? 0;
+    final ix = _ref.read(transitIndexProvider).valueOrNull;
+    final leg = s.journey.legs[s.legIndex];
+    final elapsed = now
+        .difference(serviceDayTime(start, leg.departure + delay))
+        .inSeconds;
+    final fraction = leg.arrival <= leg.departure
+        ? 0.0
+        : (elapsed / (leg.arrival - leg.departure)).clamp(0.0, 1.0).toDouble();
+    final train = ix == null
+        ? null
+        : trainNearSchedule(ix, _ref.read(realtimeProvider).vehicles.values,
+            leg, fraction);
+    return undergroundLive(s, now,
+        serviceStart: start,
+        delaySeconds: delay,
+        vehicleLat: train?.lat,
+        vehicleLon: train?.lon,
+        warnStops: _ref.read(settingsProvider).alightWarnStops);
   }
 
   /// On board: the rider's vehicle - by run id when the feed has one (GTT's

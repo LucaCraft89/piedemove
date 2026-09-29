@@ -24,7 +24,7 @@ TransitIndex _index() => syntheticIndex(
       ],
     );
 
-Journey _journey() => Journey([
+Journey _journey({int type = RouteType.bus}) => Journey([
       const Leg(
         kind: LegKind.walk,
         fromStop: -1,
@@ -33,7 +33,7 @@ Journey _journey() => Journey([
         arrival: 60,
         walkMetres: 80,
       ),
-      const Leg(
+      Leg(
         kind: LegKind.ride,
         fromStop: 0,
         toStop: 3,
@@ -42,7 +42,7 @@ Journey _journey() => Journey([
         options: [
           RideOption(
             routeShortName: '2',
-            routeType: RouteType.bus,
+            routeType: type,
             pattern: 0,
             trip: 0,
             departure: 60,
@@ -52,17 +52,18 @@ Journey _journey() => Journey([
       ),
     ], DateTime(2026, 9, 19));
 
-LiveTripState _start({double? originLat, double? originLon}) {
+LiveTripState _start(
+    {double? originLat, double? originLon, int type = RouteType.bus}) {
   final route = buildLiveRoute(
     _index(),
     null,
-    _journey(),
+    _journey(type: type),
     originLat: originLat ?? _lat,
     originLon: originLon ?? _lon0 - 0.001,
   );
   return LiveTripState(
     route: route,
-    journey: _journey(),
+    journey: _journey(type: type),
     metresToEnd: route.legs.first.metres,
     stopsRemaining: route.legs.first.stopVertex.length,
   );
@@ -351,6 +352,56 @@ void main() {
     );
     expect(s2.estimated, isTrue);
     expect(s2.vertex, greaterThan(before));
+  });
+
+  group('metro: underground', () {
+    final start = DateTime(2026, 9, 19);
+    LiveTripState aboard() => nextLeg(_start(type: RouteType.metro),
+        at: start.add(const Duration(seconds: 60)));
+
+    test('only a metro ride is underground', () {
+      expect(isUnderground(aboard()), isTrue);
+      expect(isUnderground(_start(type: RouteType.metro)), isFalse,
+          reason: 'still walking to the station');
+      expect(isUnderground(nextLeg(_start())), isFalse);
+    });
+
+    test('no train in the feed: the timetable moves it, never off route', () {
+      final s = aboard().copyWith(offRoute: true);
+      final e = undergroundLive(s, start.add(const Duration(seconds: 240)),
+          serviceStart: start);
+      expect(e.offRoute, isFalse);
+      expect(e.estimated, isTrue);
+      expect(e.legIndex, 1);
+      expect(e.along, greaterThan(s.along));
+      // Late: the same moment is earlier along the line.
+      final late = undergroundLive(s, start.add(const Duration(seconds: 240)),
+          serviceStart: start, delaySeconds: 120);
+      expect(late.along, lessThan(e.along));
+    });
+
+    test('the train\'s live position moves the rider', () {
+      final s = aboard();
+      final e = undergroundLive(s, start.add(const Duration(seconds: 90)),
+          serviceStart: start,
+          vehicleLat: _lat,
+          vehicleLon: _lon0 + 2 * _step);
+      expect(e.legIndex, 1);
+      expect(e.stopsRemaining, 1);
+      expect(e.cue, LiveCue.oneStopLeft);
+      expect(e.offRoute, isFalse);
+    });
+
+    test('the train at the exit says "scendi ora" but stays on the ride', () {
+      final e = undergroundLive(aboard(), start.add(const Duration(minutes: 7)),
+          serviceStart: start,
+          vehicleLat: _lat,
+          vehicleLon: _lon0 + 3 * _step);
+      expect(e.legIndex, 1);
+      expect(e.finished, isFalse);
+      expect(e.stopsRemaining, 0);
+      expect(e.cue, LiveCue.alightNow);
+    });
   });
 
   test('manual board and alight always work', () {

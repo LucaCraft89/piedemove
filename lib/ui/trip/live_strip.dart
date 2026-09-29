@@ -409,19 +409,19 @@ class _StatTiles extends StatelessWidget {
     final left = stats.arrival.difference(now).inSeconds;
     return Row(
       children: [
-        _Tile(
+        StatTile(
           icon: Icons.flag_outlined,
           value: hhmm(stats.arrival),
           label: stats.arrivalLive ? 'arrivo' : 'arrivo (orario)',
         ),
         const SizedBox(width: 8),
-        _Tile(
+        StatTile(
           icon: Icons.timer_outlined,
           value: left <= 0 ? 'ora' : durationLabel(left),
           label: 'mancano',
         ),
         const SizedBox(width: 8),
-        _Tile(
+        StatTile(
           icon: Icons.straighten,
           value: metresLabel(stats.metresLeft),
           label: 'da fare',
@@ -431,8 +431,10 @@ class _StatTiles extends StatelessWidget {
   }
 }
 
-class _Tile extends StatelessWidget {
-  const _Tile({required this.icon, required this.value, required this.label});
+/// One figure with its icon and caption, a third of the strip wide.
+class StatTile extends StatelessWidget {
+  const StatTile(
+      {super.key, required this.icon, required this.value, required this.label});
 
   final IconData icon;
   final String value;

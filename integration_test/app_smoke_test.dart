@@ -14,9 +14,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:piedemove/data/providers.dart';
+import 'package:piedemove/location/trip_summary.dart';
 import 'package:piedemove/main.dart' as app;
 import 'package:piedemove/places/favourites.dart';
 import 'package:piedemove/places/photon.dart';
+import 'package:piedemove/realtime/link.dart';
+import 'package:piedemove/realtime/store.dart';
+import 'package:piedemove/routing/journey.dart';
 import 'package:piedemove/ui/home/home_page.dart';
 import 'package:piedemove/ui/settings/settings_page.dart' show openSettings;
 import 'package:piedemove/ui/sheets/nearby_sheet.dart' show stopsNear;
@@ -80,6 +84,28 @@ Future<void> logRendered(ProviderContainer c, String layer) async {
     // ignore: avoid_print
     print('PM_RENDERED $layer failed: $e');
   }
+}
+
+/// Live vehicles per mode, and route ids the index does not know: tells
+/// whether GTT's feed carries the metro (its position replaces GPS
+/// underground) and under which route id.
+void logVehicles(ProviderContainer c) {
+  final ix = c.read(transitIndexProvider).valueOrNull;
+  final vehicles = c.read(realtimeProvider).vehicles.values;
+  if (ix == null) return;
+  final modes = <int, int>{};
+  final unknown = <String>{};
+  for (final v in vehicles) {
+    final r = routeIndexOf(ix, v);
+    if (r == null) {
+      unknown.add(v.routeId ?? '?');
+    } else {
+      modes[ix.routeTypes[r]] = (modes[ix.routeTypes[r]] ?? 0) + 1;
+    }
+  }
+  // ignore: avoid_print
+  print('PM_VEHICLES ${vehicles.length} byType=$modes '
+      'unknown=${unknown.take(20).toList()}');
 }
 
 void main() {
@@ -174,9 +200,29 @@ void main() {
     await logRendered(container, 'pm-stop-clusters');
     await logRendered(container, 'pm-stop-cluster-pies');
     await logRendered(container, 'pm-pins'); // start + destination
+    logVehicles(container);
 
     plan.select(0);
     await step(t, '06-trip-detail');
+
+    // The end of a live trip: its summary, as the planned journey would end.
+    final ridden = result.balanced.first;
+    final arrived = DateTime.now();
+    container.read(tripSummaryProvider.notifier).state = TripSummary(
+      destination: 'Via Cristalliera',
+      startedAt: arrived.subtract(Duration(seconds: ridden.durationSeconds)),
+      arrivedAt: arrived,
+      plannedArrival: arrived.subtract(const Duration(minutes: 2)),
+      walkMetres: ridden.walkMetres,
+      rides: [
+        for (final l in ridden.legs)
+          if (l.kind == LegKind.ride)
+            [for (final o in l.options) (o.routeShortName, o.routeType)],
+      ],
+    );
+    await step(t, '07-arrival');
+    await t.tap(find.text('Fine'));
+    await t.pump();
 
     // Settings: the live-trip options and the offline map (beta 8).
     unawaited(openSettings(t.element(find.byType(HomePage))));
@@ -192,8 +238,8 @@ void main() {
         .first;
     await t.scrollUntilVisible(find.text('2 fermate prima'), 200,
         scrollable: list);
-    await step(t, '07-settings-live');
+    await step(t, '08-settings-live');
     await t.scrollUntilVisible(find.text('Scarica'), 200, scrollable: list);
-    await step(t, '08-settings-offline');
+    await step(t, '09-settings-offline');
   }, timeout: const Timeout(Duration(minutes: 20)));
 }

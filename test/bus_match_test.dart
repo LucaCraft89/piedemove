@@ -80,4 +80,27 @@ void main() {
     expect(riderVehicle(ix, vs, ride, _lat + 0.01, _lon0), isNull,
         reason: 'nothing within reach of the rider');
   });
+
+  test('underground: the train nearest where the timetable puts us', () {
+    const long = Leg(
+      kind: LegKind.ride,
+      fromStop: 0,
+      toStop: 5,
+      departure: 0,
+      arrival: 300,
+      options: [
+        RideOption(routeShortName: '10', routeType: RouteType.bus, pattern: 0,
+            trip: 0, departure: 0, arrival: 300),
+      ],
+    );
+    final vs = [
+      _bus('ahead', r10, _lon0 + 4.5 * _step, 90),
+      _bus('ours', r10, _lon0 + 2.2 * _step, 90),
+      _bus('back', r10, _lon0 + 2.0 * _step, 270),
+    ];
+    // Halfway along s0..s5 is 2.5 steps.
+    expect(trainNearSchedule(ix, vs, long, 0.5)!.id, 'ours');
+    expect(trainNearSchedule(ix, vs, long, 0.9)!.id, 'ahead');
+    expect(trainNearSchedule(ix, const [], long, 0.5), isNull);
+  });
 }
