@@ -30,6 +30,7 @@ import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/routing/journey.dart';
 import 'package:piedemove/settings/settings.dart';
 import 'package:piedemove/location/bus_match.dart';
+import 'package:piedemove/location/trip_summary.dart';
 import 'package:piedemove/location/haptics.dart';
 import 'package:piedemove/location/trip_notification.dart';
 import 'package:piedemove/ui/trip/trip_plan.dart';
@@ -889,6 +890,9 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   /// The latest device fix, or null when none arrived yet.
   LiveFix? get lastFix => _lastPos;
 
+  /// When [start] ran: the summary's trip time counts from here.
+  DateTime? _startedAt;
+
   void start(Journey journey) {
     final ix = _ref.read(transitIndexProvider).valueOrNull;
     if (ix == null) return;
@@ -915,6 +919,8 @@ class LiveTripController extends StateNotifier<LiveTripState?>
       stopsRemaining: first.stopVertex.length,
     );
     _lastCueSeq = 0;
+    _startedAt = DateTime.now();
+    _ref.read(tripSummaryProvider.notifier).state = null;
     WidgetsBinding.instance.addObserver(this);
     _notified = null;
     // Android 13+: the trip notification needs the user's yes (asked once).
@@ -944,7 +950,17 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     if (s == null) return;
     final next = nextLeg(s, at: DateTime.now());
     state = next;
-    if (next.finished) stop();
+    if (next.finished) _finish(next);
+  }
+
+  /// Arrived: the summary replaces the strip, then everything stops.
+  void _finish(LiveTripState s) {
+    final now = DateTime.now();
+    _ref.read(tripSummaryProvider.notifier).state = tripSummary(s,
+        startedAt: _startedAt ?? now,
+        arrivedAt: now,
+        destination: _ref.read(tripPlanProvider).query.to?.name);
+    stop();
   }
 
   @override
@@ -1116,7 +1132,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
       unawaited(vibrateCue(next.cue!,
           sound: _ref.read(settingsProvider).alightSound));
     }
-    if (next.finished) stop();
+    if (next.finished) _finish(next);
   }
 
   /// [undergroundLive] with the metro's live position when the feed has it:
