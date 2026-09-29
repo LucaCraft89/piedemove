@@ -354,6 +354,40 @@ void main() {
     expect(s2.vertex, greaterThan(before));
   });
 
+  group('screen off on a walk (beta 11 report)', () {
+    final start = DateTime(2026, 9, 19);
+
+    test('no fix for a long while: the walk holds, marked a guess', () {
+      final s = _start().copyWith(lastFix: start);
+      final e = staleLive(s, start.add(const Duration(minutes: 30)),
+          serviceStart: start);
+      expect(e.estimated, isTrue);
+      expect(e.along, s.along);
+      expect(e.legIndex, 0);
+    });
+
+    test('a guess that ran ahead gives way to the next good fix', () {
+      // A ride estimated to its last stop while the rider is at the second.
+      var s = advanceLive(_start(), _fix(_lat, _lon0, speed: 6));
+      s = staleLive(s.copyWith(lastFix: start), start.add(const Duration(minutes: 7)),
+          serviceStart: start);
+      expect(s.estimated, isTrue);
+      expect(s.stopsRemaining, 0);
+      s = advanceLive(s, _fix(_lat, _lon0 + _step, speed: 6));
+      expect(s.estimated, isFalse);
+      expect(s.stopsRemaining, 2);
+      expect(s.legIndex, 1);
+    });
+
+    test('a real position still never rewinds', () {
+      var s = advanceLive(_start(), _fix(_lat, _lon0, speed: 6));
+      s = advanceLive(s, _fix(_lat, _lon0 + 3 * _step, speed: 6));
+      final left = s.stopsRemaining;
+      s = advanceLive(s, _fix(_lat, _lon0 + _step, speed: 6));
+      expect(s.stopsRemaining, left);
+    });
+  });
+
   group('metro: underground', () {
     final start = DateTime(2026, 9, 19);
     LiveTripState aboard() => nextLeg(_start(type: RouteType.metro),
