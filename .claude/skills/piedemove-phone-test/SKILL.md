@@ -63,7 +63,9 @@ POST_NOTIFICATIONS, WAKE_LOCK. Needs a phone to verify (emulator: no).
   their end).
 - **Poor GPS** (accuracy > 50 m, or no fix for 20 s — metro, tunnels): fall back
   to the vehicle's live position if known, else schedule-based estimation,
-  labelled **"posizione stimata"**.
+  labelled **"posizione stimata"**. Walk legs are never moved by the clock
+  (the rider may not have left; screen-off GPS pauses when standing still).
+  A good fix after a guess may rewind progress: the guess never outranks it.
 - **Metro ride** (`isUnderground`, beta 10 report): GPS is ignored entirely -
   underground Wi-Fi/cell fixes claim good accuracy streets away. Progress comes
   from the train (`trainNearSchedule`: same line and heading, nearest the

@@ -421,7 +421,14 @@ LiveTripState advanceLive(
   }
 
   // Forward-only projection onto the segments from the last progress on.
-  final proj = projectAhead(leg, lat, lon, state.along);
+  var proj = projectAhead(leg, lat, lon, state.along);
+  if (s.estimated && !estimated && proj.distance > liveOnRouteCutoff) {
+    // The last progress was a guess (no fix for a while, screen off): a good
+    // fix now outranks it, even behind it. Without this, a guess that ran
+    // ahead held the trip there for good (rider report, beta 11).
+    final whole = projectAhead(leg, lat, lon, 0, maxAhead: leg.metres);
+    if (whole.distance <= liveOnRouteCutoff) proj = whole;
+  }
   var along = proj.along;
   var best = _vertexAt(leg, along);
   var bestMetres = proj.distance;
@@ -776,6 +783,10 @@ LiveTripState scheduleEstimate(
   final leg = s.leg;
   var state = s.copyWith(estimated: true);
   if (serviceStart == null || leg.arrival <= leg.departure) return state;
+  // A walk goes at the rider's pace, not the timetable's: they may not have
+  // set off yet. Guessing moved the walk to its end with the screen off
+  // (rider report, beta 11); hold it and say the position is a guess.
+  if (leg.kind == LegKind.walk) return state;
   // Schedule-based estimate: linear along the leg between its two times.
   // A late run is behind its timetable: estimate from the expected times, or
   // "scendi ora" fires while the bus is still a stop or two away.
