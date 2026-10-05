@@ -90,6 +90,11 @@ class RealtimeState {
         health: health ?? this.health,
       );
 
+  /// The home chip for [staleFeeds]: which data is missing, in a rider's
+  /// words, or null when all is live. GTT's alert feed alone answering 500
+  /// read as "live data broken" while buses and delays were live (beta 11).
+  String? staleLabel([DateTime? now]) => staleFeedsLabel(staleFeeds(now));
+
   /// Feeds that have gone quiet, for the home feed-health chip.
   List<RtFeedKind> staleFeeds([DateTime? now]) {
     final at = now ?? DateTime.now();
@@ -319,3 +324,18 @@ final delayLookupProvider = Provider<DelayLookup?>((ref) {
   final rt = ref.watch(realtimeProvider);
   return buildDelayLookup(ix, rt);
 });
+
+String? staleFeedsLabel(List<RtFeedKind> stale) {
+  final v = stale.contains(RtFeedKind.vehicles);
+  final d = stale.contains(RtFeedKind.tripUpdates);
+  final a = stale.contains(RtFeedKind.alerts);
+  if (v && d && a) return 'Dati in tempo reale non disponibili';
+  final live = switch ((v, d)) {
+    (true, true) => 'Posizioni e ritardi fermi',
+    (true, false) => 'Posizioni dei mezzi ferme',
+    (false, true) => 'Ritardi fermi: orari programmati',
+    _ => null,
+  };
+  if (!a) return live;
+  return live == null ? 'Avvisi GTT non disponibili' : '$live · niente avvisi';
+}

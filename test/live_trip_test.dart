@@ -388,6 +388,32 @@ void main() {
     });
   });
 
+  group('missed bus', () {
+    final day = DateTime(2026, 9, 19);
+    // The ride leaves at 60 s past midnight.
+    final dep = day.add(const Duration(seconds: 60));
+
+    test('asked only once the bus is 90 s gone and the rider is not aboard',
+        () {
+      final walking = _start();
+      expect(nextRideLeg(walking)?.kind, LegKind.ride);
+      expect(missedRide(walking, dep.add(const Duration(seconds: 60)), dep),
+          isFalse);
+      expect(missedRide(walking, dep.add(const Duration(seconds: 120)), dep),
+          isTrue);
+      final aboard = nextLeg(walking);
+      expect(missedRide(aboard, dep.add(const Duration(minutes: 5)), dep),
+          isFalse);
+      expect(nextRideLeg(aboard), isNull);
+    });
+
+    test('a late bus moves the moment: watched with its delay', () {
+      final late = dep.add(const Duration(minutes: 4));
+      expect(missedRide(_start(), dep.add(const Duration(minutes: 3)), late),
+          isFalse);
+    });
+  });
+
   group('metro: underground', () {
     final start = DateTime(2026, 9, 19);
     LiveTripState aboard() => nextLeg(_start(type: RouteType.metro),

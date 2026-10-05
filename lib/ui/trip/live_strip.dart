@@ -19,6 +19,7 @@ import 'package:piedemove/realtime/store.dart'
     show delayLookupProvider, realtimeProvider, unavailableLookupProvider;
 import 'package:piedemove/routing/departures.dart' show Departure;
 import 'package:piedemove/routing/journey.dart';
+import 'package:piedemove/settings/settings.dart' show settingsProvider;
 import 'package:piedemove/ui/theme/tokens.dart';
 import 'package:piedemove/ui/trip/live_stats.dart';
 import 'package:piedemove/ui/trip/trip_format.dart';
@@ -36,6 +37,22 @@ String liveLabel(LiveTripState s) {
     return 'Scendi a $name tra ${s.stopsRemaining} fermate';
   }
   return walkStripText(s);
+}
+
+/// Walking to the stop, and at the rider's pace the bus leaves first:
+/// `Affrettati: il 2 parte tra 2 min, a piedi ne servono 4`. Null when there
+/// is time, or once at the stop. [walkSpeed] in m/s, along the street.
+String? hurryLabel(LiveTripState s, Departure? next, DateTime now,
+    {double walkSpeed = 1.2}) {
+  if (next == null || s.reachedBoardStop || s.riding || s.isLastLeg) return null;
+  if (s.journey.legs[s.legIndex + 1].kind != LegKind.ride) return null;
+  final walkSecs = s.metresToEnd / walkSpeed;
+  final leaveSecs = next.time.difference(now).inSeconds;
+  if (leaveSecs < 0 || walkSecs <= leaveSecs + 30) return null;
+  final leave = (leaveSecs / 60).ceil();
+  final walk = (walkSecs / 60).ceil();
+  return 'Affrettati: il ${next.routeShortName} parte '
+      '${leave <= 0 ? 'ora' : 'tra $leave min'}, a piedi ne servono $walk';
 }
 
 /// At the boarding stop, before boarding: `Aspetta il 10 per FALCHERA`, with
@@ -141,6 +158,7 @@ class _LiveStripState extends ConsumerState<LiveStrip> {
     if (live == null) return const SizedBox.shrink();
     final ix = ref.watch(transitIndexProvider).valueOrNull;
     final controller = ref.read(liveTripProvider.notifier);
+    final missed = ref.watch(missedRideProvider);
     final theme = Theme.of(context);
     final now = DateTime.now();
     final stats = ix == null
@@ -155,6 +173,8 @@ class _LiveStripState extends ConsumerState<LiveStrip> {
         live.route.legs[live.legIndex + 1].kind == LegKind.ride;
     // At the stop: the walk is done, what matters is the bus.
     final waiting = waitingLabel(live, ix, coming: stats?.next);
+    final hurry = hurryLabel(live, stats?.next, now,
+        walkSpeed: ref.watch(settingsProvider.select((s) => s.walkSpeed)));
     // Where the bus is, by live position (line + heading + place on route).
     final nextRide = live.riding
         ? -1
@@ -202,7 +222,17 @@ class _LiveStripState extends ConsumerState<LiveStrip> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  if (live.offRoute)
+                  if (missed != null)
+                    _MissedBanner(
+                      lines: missed,
+                      next: stats?.next == null
+                          ? null
+                          : 'Il prossimo ${untilLabel(stats!.next!.time, now)}',
+                      onReplan: () => unawaited(controller.replanFromHere()),
+                      onWait: () => controller.waitForNext(stats?.next?.time),
+                      onBoarded: controller.manualAdvance,
+                    )
+                  else if (live.offRoute)
                     _RecalculateBanner(
                       onRecalculate: () => _recalculate(live, controller),
                     ),
@@ -225,6 +255,16 @@ class _LiveStripState extends ConsumerState<LiveStrip> {
                                   detail,
                                   style: theme.textTheme.bodyLarge?.copyWith(
                                       color: theme.colorScheme.onSurfaceVariant),
+                                ),
+                              ),
+                            if (hurry != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Text(
+                                  hurry,
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                      color: theme.colorScheme.error,
+                                      fontWeight: FontWeight.w700),
                                 ),
                               ),
                             if (bus != null)
@@ -473,6 +513,61 @@ class StatTile extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// "Hai perso il 2?" - asked, never assumed: the GPS may not have seen the
+/// rider board yet.
+class _MissedBanner extends StatelessWidget {
+  const _MissedBanner({
+    required this.lines,
+    required this.next,
+    required this.onReplan,
+    required this.onWait,
+    required this.onBoarded,
+  });
+
+  final String lines;
+  final String? next;
+  final VoidCallback onReplan;
+  final VoidCallback onWait;
+  final VoidCallback onBoarded;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final on = theme.colorScheme.onErrorContainer;
+    return Container(
+      margin: const EdgeInsets.only(bottom: Gap.element),
+      padding: const EdgeInsets.all(Gap.element),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.errorContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('Hai perso il $lines?',
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(color: on, fontWeight: FontWeight.w700)),
+          if (next != null)
+            Text(next!, style: theme.textTheme.bodyMedium?.copyWith(color: on)),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              FilledButton(
+                  onPressed: onReplan, child: const Text('Sì, ricalcola')),
+              OutlinedButton(
+                  onPressed: onWait, child: const Text('Aspetto il prossimo')),
+              TextButton(onPressed: onBoarded, child: const Text('Sono salito')),
+            ],
+          ),
+        ],
       ),
     );
   }

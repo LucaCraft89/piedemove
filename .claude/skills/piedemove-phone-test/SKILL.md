@@ -73,6 +73,12 @@ POST_NOTIFICATIONS, WAKE_LOCK. Needs a phone to verify (emulator: no).
   route; the ride ends by "Sono sceso" or a <= 30 m fix within 150 m of the
   exit once <= 1 stop is left. CI logs `PM_VEHICLES` (per route type) to show
   whether GTT's feed carries the metro.
+- **Missed bus** (beta 12): walking to / waiting for a ride and the watched
+  run (planned, + live delay at the board stop) left 90 s ago -> buzz and the
+  strip asks "Hai perso il N?": "Sì, ricalcola" (`replanFromHere`: from the
+  last good fix, now, goes live on the best result), "Aspetto il prossimo"
+  (`waitForNext`: watch the next vehicle of the ride's lines instead),
+  "Sono salito" (manual board). Never switched without asking.
 - **Off route / missed connection**: more than 150 m from the leg path for 30 s
   while riding, or the boarding vehicle has departed -> a one-tap **"Ricalcola"**
   banner. **Never recalculate silently.**

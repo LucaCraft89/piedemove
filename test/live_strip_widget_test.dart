@@ -7,6 +7,7 @@ import 'package:piedemove/data/providers.dart';
 import 'package:piedemove/data/transit_index.dart';
 import 'package:piedemove/location/live_trip.dart';
 import 'package:piedemove/realtime/store.dart';
+import 'package:piedemove/routing/departures.dart';
 import 'package:piedemove/routing/journey.dart';
 import 'package:piedemove/ui/theme/app_theme.dart';
 import 'package:piedemove/ui/trip/live_strip.dart';
@@ -68,7 +69,7 @@ void main() {
   final walking = LiveTripState(
       route: route, journey: journey, metresToEnd: route.legs[0].metres);
 
-  Future<void> pump(WidgetTester t, LiveTripState s) async {
+  Future<void> pump(WidgetTester t, LiveTripState s, {String? missed}) async {
     t.view.physicalSize = const Size(1080, 2340);
     t.view.devicePixelRatio = 3; // a 360 dp wide phone
     addTearDown(t.view.reset);
@@ -78,6 +79,7 @@ void main() {
         delayLookupProvider.overrideWith((ref) => (trip, pos) => 120),
         unavailableLookupProvider.overrideWith((ref) => null),
         liveTripProvider.overrideWith((ref) => _Live(ref, s)),
+        missedRideProvider.overrideWith((ref) => missed),
       ],
       child: MaterialApp(
         theme: darkTheme(),
@@ -110,5 +112,40 @@ void main() {
     expect(find.text('fermate'), findsOneWidget);
     expect(find.text('Sono sceso'), findsOneWidget);
     expect(t.takeException(), isNull);
+  });
+
+  testWidgets('missed the bus: asked, three answers, fits the strip',
+      (t) async {
+    await pump(t, walking.copyWith(reachedBoardStop: true), missed: '2');
+    expect(find.text('Hai perso il 2?'), findsOneWidget);
+    expect(find.text('Sì, ricalcola'), findsOneWidget);
+    expect(find.text('Aspetto il prossimo'), findsOneWidget);
+    expect(find.textContaining('Il prossimo tra'), findsOneWidget);
+    expect(t.takeException(), isNull);
+    await t.tap(find.text('Aspetto il prossimo'));
+    await t.pump();
+    expect(find.text('Hai perso il 2?'), findsNothing);
+  });
+
+  test('hurry: the bus leaves before the walk is done', () {
+    final day = DateTime(now.year, now.month, now.day);
+    Departure inMinutes(int m) => Departure(
+          stop: 0,
+          pattern: 0,
+          trip: 0,
+          routeShortName: '2',
+          routeType: RouteType.bus,
+          headsign: 'X',
+          scheduled: now.difference(day).inSeconds + m * 60,
+          delaySeconds: null,
+          date: day,
+        );
+    final far = walking.copyWith(metresToEnd: 600); // ~9 min at 1.2 m/s
+    expect(hurryLabel(far, inMinutes(3), now),
+        'Affrettati: il 2 parte tra 3 min, a piedi ne servono 9');
+    expect(hurryLabel(far, inMinutes(12), now), isNull, reason: 'time enough');
+    expect(hurryLabel(far.copyWith(reachedBoardStop: true), inMinutes(3), now),
+        isNull);
+    expect(hurryLabel(far, null, now), isNull);
   });
 }

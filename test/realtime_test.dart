@@ -209,4 +209,19 @@ void main() {
     const state = RealtimeState();
     expect(state.staleFeeds(), RtFeedKind.values);
   });
+
+  test('the chip says which live data is missing', () {
+    expect(staleFeedsLabel(const []), isNull);
+    expect(staleFeedsLabel(const [RtFeedKind.alerts]),
+        'Avvisi GTT non disponibili',
+        reason: 'GTT alerts 500 while buses are live (beta 11 report)');
+    expect(staleFeedsLabel(const [RtFeedKind.tripUpdates]),
+        'Ritardi fermi: orari programmati');
+    expect(staleFeedsLabel(const [RtFeedKind.vehicles, RtFeedKind.alerts]),
+        'Posizioni dei mezzi ferme · niente avvisi');
+    expect(staleFeedsLabel(RtFeedKind.values),
+        'Dati in tempo reale non disponibili');
+    expect(const RealtimeState().staleLabel(),
+        'Dati in tempo reale non disponibili');
+  });
 }

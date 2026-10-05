@@ -33,6 +33,7 @@ import 'package:piedemove/location/bus_match.dart';
 import 'package:piedemove/location/trip_summary.dart';
 import 'package:piedemove/location/haptics.dart';
 import 'package:piedemove/location/trip_notification.dart';
+import 'package:piedemove/places/photon.dart' show Place;
 import 'package:piedemove/ui/trip/trip_plan.dart';
 
 /// Distances the rules turn on (§12), all metres.
@@ -868,6 +869,27 @@ LiveTripState undergroundLive(
       warnStops: warnStops);
 }
 
+/// A bus that left this long ago without the rider is asked about.
+const liveMissedAfter = Duration(seconds: 90);
+
+/// Walking to (or waiting at) the stop of the next ride, and the run being
+/// watched - the planned one, or the next after "Aspetto il prossimo" -
+/// left its stop [liveMissedAfter] ago ([departure]: expected, with the
+/// live delay). The rider is asked, never switched silently: they may be
+/// aboard with the GPS not noticing yet.
+bool missedRide(LiveTripState s, DateTime now, DateTime departure) {
+  if (s.finished || s.riding || s.isLastLeg) return false;
+  if (s.journey.legs[s.legIndex + 1].kind != LegKind.ride) return false;
+  return now.difference(departure) > liveMissedAfter;
+}
+
+/// The ride the rider is heading for, while not on it yet.
+Leg? nextRideLeg(LiveTripState s) {
+  if (s.finished || s.riding || s.isLastLeg) return null;
+  final l = s.journey.legs[s.legIndex + 1];
+  return l.kind == LegKind.ride ? l : null;
+}
+
 /// True while the current leg is a metro ride.
 bool isUnderground(LiveTripState s) {
   if (!s.riding || s.legIndex >= s.journey.legs.length) return false;
@@ -904,6 +926,10 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   /// When [start] ran: the summary's trip time counts from here.
   DateTime? _startedAt;
 
+  /// After "Aspetto il prossimo": the departure now watched instead of the
+  /// planned one, for the leg it was given on.
+  (int, DateTime)? _watchNext;
+
   void start(Journey journey) {
     final ix = _ref.read(transitIndexProvider).valueOrNull;
     if (ix == null) return;
@@ -930,6 +956,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
       stopsRemaining: first.stopVertex.length,
     );
     _lastCueSeq = 0;
+    _watchNext = null;
     _startedAt = DateTime.now();
     _ref.read(tripSummaryProvider.notifier).state = null;
     WidgetsBinding.instance.addObserver(this);
@@ -952,6 +979,8 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     unawaited(_wake(false));
     unawaited(cancelTripNotification());
     _notified = null;
+    _watchNext = null;
+    _ref.read(missedRideProvider.notifier).state = null;
     state = null;
   }
 
@@ -960,6 +989,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     final s = state;
     if (s == null) return;
     final next = nextLeg(s, at: DateTime.now());
+    _ref.read(missedRideProvider.notifier).state = null;
     state = next;
     if (next.finished) _finish(next);
   }
@@ -1100,6 +1130,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   void _onStale() {
     final s = state;
     if (s == null) return;
+    _checkMissed(s, DateTime.now());
     // Underground the timetable moves the trip on, fixes or not.
     if (isUnderground(s)) {
       _apply(_underground(s, DateTime.now()));
@@ -1118,6 +1149,74 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   }
 
   /// The run's latest reported delay, if the trip-update feed has one.
+  /// Asks "Hai perso il …?" once the watched departure is well past.
+  void _checkMissed(LiveTripState s, DateTime now) {
+    final ride = nextRideLeg(s);
+    final prompt = _ref.read(missedRideProvider.notifier);
+    if (ride == null) {
+      if (prompt.state != null) prompt.state = null;
+      return;
+    }
+    final watched = _watchNext;
+    final departure = watched != null && watched.$1 == s.legIndex
+        ? watched.$2
+        : s.journey.timeOf(ride.departure + (_boardDelay(ride) ?? 0));
+    final missed = missedRide(s, now, departure);
+    final names = {for (final o in ride.options) o.routeShortName}.join(', ');
+    if (missed && prompt.state == null) {
+      prompt.state = names;
+      unawaited(vibrateCue(LiveCue.oneStopLeft,
+          sound: _ref.read(settingsProvider).alightSound));
+    } else if (!missed && prompt.state != null) {
+      prompt.state = null;
+    }
+  }
+
+  /// The live delay of the planned run at the ride's board stop.
+  int? _boardDelay(Leg ride) {
+    final ix = _ref.read(transitIndexProvider).valueOrNull;
+    final delays = _ref.read(delayLookupProvider);
+    final o = ride.options.firstOrNull;
+    if (ix == null || delays == null || o == null) return null;
+    for (var p = 0; p < ix.patternLength(o.pattern); p++) {
+      if (ix.patternStopAt(o.pattern, p) == ride.fromStop) {
+        return delays(o.trip, p);
+      }
+    }
+    return null;
+  }
+
+  /// "Aspetto il prossimo": keep the trip, watch [next] (the next vehicle
+  /// of the ride's lines, null when unknown: ten minutes from now).
+  void waitForNext(DateTime? next) {
+    final s = state;
+    if (s == null) return;
+    _watchNext = (
+      s.legIndex,
+      next ?? DateTime.now().add(const Duration(minutes: 10)),
+    );
+    _ref.read(missedRideProvider.notifier).state = null;
+  }
+
+  /// "Sì, ricalcola": plan again from here, now, and go on live with the
+  /// best answer (the results stay on screen when there is none).
+  Future<void> replanFromHere() async {
+    final fix = _lastGood ?? _lastPos;
+    stop();
+    final plan = _ref.read(tripPlanProvider.notifier);
+    if (fix != null) {
+      plan.setFrom(Place(
+          name: 'La mia posizione', address: '', lat: fix.lat, lon: fix.lon));
+    }
+    plan.setWhen(WhenMode.now);
+    await plan.plan();
+    final trip = _ref.read(tripPlanProvider);
+    final best = trip.result?.forTab(trip.tab).firstOrNull;
+    if (best == null || state != null) return;
+    plan.select(0);
+    start(best);
+  }
+
   int? _knownDelay(LiveTripState s) {
     final tripId = s.leg.tripId;
     if (tripId == null) return null;
@@ -1214,6 +1313,10 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     }
   }
 }
+
+/// "Hai perso il 2?": the line names of the ride the rider seems to have
+/// missed, or null. Set by the live trip, answered on the strip.
+final missedRideProvider = StateProvider<String?>((ref) => null);
 
 final liveTripProvider =
     StateNotifierProvider<LiveTripController, LiveTripState?>(
