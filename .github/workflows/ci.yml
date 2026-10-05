@@ -25,6 +25,37 @@ jobs:
       PIEDEMOVE_REQUIRE_INDEX: '1'
     steps:
       - uses: actions/checkout@v4
+      # What GTT's live feeds answer right now (status, size, age of the
+      # data). Informational: GTT being down must not fail the build.
+      - name: Probe GTT live feeds
+        continue-on-error: true
+        run: |
+          for f in vehicle_position trip_update alerts; do
+            url="https://percorsieorari.gtt.to.it/das_gtfsrt/$f.aspx"
+            curl -sS -m 20 -A 'PiedeMove-CI' -o "/tmp/$f.pb" \
+              -w "PM_FEED $f http=%{http_code} bytes=%{size_download} time=%{time_total}s\n" "$url" || echo "PM_FEED $f failed"
+            # Header timestamp: field 1 (header) > field 3 (timestamp), varint.
+            python3 - "$f" <<'PY' || true
+          import sys, time
+          b = open(f"/tmp/{sys.argv[1]}.pb", "rb").read()
+          def varint(b, i):
+              v = s = 0
+              while True:
+                  c = b[i]; i += 1; v |= (c & 0x7f) << s; s += 7
+                  if c < 0x80: return v, i
+          if not b or b[0] != 0x0a:
+              print("PM_FEED", sys.argv[1], "not a feed:", b[:80]); sys.exit()
+          n, i = varint(b, 1); end = i + n
+          while i < end:
+              k, i = varint(b, i)
+              if k == (3 << 3):
+                  ts, i = varint(b, i)
+                  print("PM_FEED", sys.argv[1], "header age", int(time.time()) - ts, "s"); break
+              elif k & 7 == 0: _, i = varint(b, i)
+              elif k & 7 == 2: l, i = varint(b, i); i += l
+              else: break
+          PY
+          done
       # The PM_* secrets must hold the key installed copies were signed with
       # (its public certificate fingerprint is android/release-cert-sha256.txt):
       # a wrong secret would publish an APK that cannot update the app.
