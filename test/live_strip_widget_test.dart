@@ -7,6 +7,7 @@ import 'package:piedemove/data/providers.dart';
 import 'package:piedemove/data/transit_index.dart';
 import 'package:piedemove/location/live_trip.dart';
 import 'package:piedemove/realtime/store.dart';
+import 'package:piedemove/routing/departures.dart';
 import 'package:piedemove/routing/journey.dart';
 import 'package:piedemove/ui/theme/app_theme.dart';
 import 'package:piedemove/ui/trip/live_strip.dart';
@@ -124,5 +125,27 @@ void main() {
     await t.tap(find.text('Aspetto il prossimo'));
     await t.pump();
     expect(find.text('Hai perso il 2?'), findsNothing);
+  });
+
+  test('hurry: the bus leaves before the walk is done', () {
+    final day = DateTime(now.year, now.month, now.day);
+    Departure inMinutes(int m) => Departure(
+          stop: 0,
+          pattern: 0,
+          trip: 0,
+          routeShortName: '2',
+          routeType: RouteType.bus,
+          headsign: 'X',
+          scheduled: now.difference(day).inSeconds + m * 60,
+          delaySeconds: null,
+          date: day,
+        );
+    final far = walking.copyWith(metresToEnd: 600); // ~9 min at 1.2 m/s
+    expect(hurryLabel(far, inMinutes(3), now),
+        'Affrettati: il 2 parte tra 3 min, a piedi ne servono 9');
+    expect(hurryLabel(far, inMinutes(12), now), isNull, reason: 'time enough');
+    expect(hurryLabel(far.copyWith(reachedBoardStop: true), inMinutes(3), now),
+        isNull);
+    expect(hurryLabel(far, null, now), isNull);
   });
 }

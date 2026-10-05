@@ -19,6 +19,7 @@ import 'package:piedemove/realtime/store.dart'
     show delayLookupProvider, realtimeProvider, unavailableLookupProvider;
 import 'package:piedemove/routing/departures.dart' show Departure;
 import 'package:piedemove/routing/journey.dart';
+import 'package:piedemove/settings/settings.dart' show settingsProvider;
 import 'package:piedemove/ui/theme/tokens.dart';
 import 'package:piedemove/ui/trip/live_stats.dart';
 import 'package:piedemove/ui/trip/trip_format.dart';
@@ -36,6 +37,22 @@ String liveLabel(LiveTripState s) {
     return 'Scendi a $name tra ${s.stopsRemaining} fermate';
   }
   return walkStripText(s);
+}
+
+/// Walking to the stop, and at the rider's pace the bus leaves first:
+/// `Affrettati: il 2 parte tra 2 min, a piedi ne servono 4`. Null when there
+/// is time, or once at the stop. [walkSpeed] in m/s, along the street.
+String? hurryLabel(LiveTripState s, Departure? next, DateTime now,
+    {double walkSpeed = 1.2}) {
+  if (next == null || s.reachedBoardStop || s.riding || s.isLastLeg) return null;
+  if (s.journey.legs[s.legIndex + 1].kind != LegKind.ride) return null;
+  final walkSecs = s.metresToEnd / walkSpeed;
+  final leaveSecs = next.time.difference(now).inSeconds;
+  if (leaveSecs < 0 || walkSecs <= leaveSecs + 30) return null;
+  final leave = (leaveSecs / 60).ceil();
+  final walk = (walkSecs / 60).ceil();
+  return 'Affrettati: il ${next.routeShortName} parte '
+      '${leave <= 0 ? 'ora' : 'tra $leave min'}, a piedi ne servono $walk';
 }
 
 /// At the boarding stop, before boarding: `Aspetta il 10 per FALCHERA`, with
@@ -156,6 +173,8 @@ class _LiveStripState extends ConsumerState<LiveStrip> {
         live.route.legs[live.legIndex + 1].kind == LegKind.ride;
     // At the stop: the walk is done, what matters is the bus.
     final waiting = waitingLabel(live, ix, coming: stats?.next);
+    final hurry = hurryLabel(live, stats?.next, now,
+        walkSpeed: ref.watch(settingsProvider.select((s) => s.walkSpeed)));
     // Where the bus is, by live position (line + heading + place on route).
     final nextRide = live.riding
         ? -1
@@ -236,6 +255,16 @@ class _LiveStripState extends ConsumerState<LiveStrip> {
                                   detail,
                                   style: theme.textTheme.bodyLarge?.copyWith(
                                       color: theme.colorScheme.onSurfaceVariant),
+                                ),
+                              ),
+                            if (hurry != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Text(
+                                  hurry,
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                      color: theme.colorScheme.error,
+                                      fontWeight: FontWeight.w700),
                                 ),
                               ),
                             if (bus != null)
