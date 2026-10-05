@@ -87,7 +87,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     final stage = ref.watch(indexStageProvider);
     // Only the count matters here: watching the whole store rebuilt the home
     // page (and the map under it) on every realtime poll.
-    final stale = ref.watch(realtimeProvider.select((r) => r.staleFeeds().length));
+    final stale = ref.watch(realtimeProvider.select((r) => r.staleLabel()));
     final trip = ref.watch(tripPlanProvider);
     final live = ref.watch(liveTripProvider);
     // A newer beta on GitHub (daily check, silent when offline).
@@ -143,10 +143,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                           update.version;
                       openUrl(update.apkUrl);
                     }),
-                  if (stale == RtFeedKind.values.length)
-                    const _Chip('Dati in tempo reale non disponibili')
-                  else if (stale > 0)
-                    const _Chip('Alcuni dati in tempo reale sono fermi'),
+                  if (stale != null) _Chip(stale),
                 ],
               ),
             ),
