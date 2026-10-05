@@ -68,7 +68,7 @@ void main() {
   final walking = LiveTripState(
       route: route, journey: journey, metresToEnd: route.legs[0].metres);
 
-  Future<void> pump(WidgetTester t, LiveTripState s) async {
+  Future<void> pump(WidgetTester t, LiveTripState s, {String? missed}) async {
     t.view.physicalSize = const Size(1080, 2340);
     t.view.devicePixelRatio = 3; // a 360 dp wide phone
     addTearDown(t.view.reset);
@@ -78,6 +78,7 @@ void main() {
         delayLookupProvider.overrideWith((ref) => (trip, pos) => 120),
         unavailableLookupProvider.overrideWith((ref) => null),
         liveTripProvider.overrideWith((ref) => _Live(ref, s)),
+        missedRideProvider.overrideWith((ref) => missed),
       ],
       child: MaterialApp(
         theme: darkTheme(),
@@ -110,5 +111,18 @@ void main() {
     expect(find.text('fermate'), findsOneWidget);
     expect(find.text('Sono sceso'), findsOneWidget);
     expect(t.takeException(), isNull);
+  });
+
+  testWidgets('missed the bus: asked, three answers, fits the strip',
+      (t) async {
+    await pump(t, walking.copyWith(reachedBoardStop: true), missed: '2');
+    expect(find.text('Hai perso il 2?'), findsOneWidget);
+    expect(find.text('Sì, ricalcola'), findsOneWidget);
+    expect(find.text('Aspetto il prossimo'), findsOneWidget);
+    expect(find.textContaining('Il prossimo tra'), findsOneWidget);
+    expect(t.takeException(), isNull);
+    await t.tap(find.text('Aspetto il prossimo'));
+    await t.pump();
+    expect(find.text('Hai perso il 2?'), findsNothing);
   });
 }

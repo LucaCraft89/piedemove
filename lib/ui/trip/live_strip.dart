@@ -141,6 +141,7 @@ class _LiveStripState extends ConsumerState<LiveStrip> {
     if (live == null) return const SizedBox.shrink();
     final ix = ref.watch(transitIndexProvider).valueOrNull;
     final controller = ref.read(liveTripProvider.notifier);
+    final missed = ref.watch(missedRideProvider);
     final theme = Theme.of(context);
     final now = DateTime.now();
     final stats = ix == null
@@ -202,7 +203,17 @@ class _LiveStripState extends ConsumerState<LiveStrip> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  if (live.offRoute)
+                  if (missed != null)
+                    _MissedBanner(
+                      lines: missed,
+                      next: stats?.next == null
+                          ? null
+                          : 'Il prossimo ${untilLabel(stats!.next!.time, now)}',
+                      onReplan: () => unawaited(controller.replanFromHere()),
+                      onWait: () => controller.waitForNext(stats?.next?.time),
+                      onBoarded: controller.manualAdvance,
+                    )
+                  else if (live.offRoute)
                     _RecalculateBanner(
                       onRecalculate: () => _recalculate(live, controller),
                     ),
@@ -473,6 +484,61 @@ class StatTile extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// "Hai perso il 2?" - asked, never assumed: the GPS may not have seen the
+/// rider board yet.
+class _MissedBanner extends StatelessWidget {
+  const _MissedBanner({
+    required this.lines,
+    required this.next,
+    required this.onReplan,
+    required this.onWait,
+    required this.onBoarded,
+  });
+
+  final String lines;
+  final String? next;
+  final VoidCallback onReplan;
+  final VoidCallback onWait;
+  final VoidCallback onBoarded;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final on = theme.colorScheme.onErrorContainer;
+    return Container(
+      margin: const EdgeInsets.only(bottom: Gap.element),
+      padding: const EdgeInsets.all(Gap.element),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.errorContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('Hai perso il $lines?',
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(color: on, fontWeight: FontWeight.w700)),
+          if (next != null)
+            Text(next!, style: theme.textTheme.bodyMedium?.copyWith(color: on)),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              FilledButton(
+                  onPressed: onReplan, child: const Text('Sì, ricalcola')),
+              OutlinedButton(
+                  onPressed: onWait, child: const Text('Aspetto il prossimo')),
+              TextButton(onPressed: onBoarded, child: const Text('Sono salito')),
+            ],
+          ),
+        ],
       ),
     );
   }
