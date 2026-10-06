@@ -37,8 +37,6 @@ import 'package:piedemove/places/photon.dart' show Place;
 import 'package:piedemove/ui/trip/trip_plan.dart';
 
 /// Distances the rules turn on (§12), all metres.
-const liveBoardRadius = 40.0;
-
 /// Having been this close to the boarding stop arms the path rule below.
 const liveBoardLatchRadius = 60.0;
 
@@ -47,6 +45,24 @@ const liveBoardLatchRadius = 60.0;
 /// before the phone reports a speed, so "at the stop and moving" alone almost
 /// never fired on the road (rider report, beta 5).
 const liveBoardedAlong = 60.0;
+
+/// Aboard means moving along the ride's path faster than a person runs, over
+/// at least [liveVehicleSpan]: sprinting after a bus at the stop, or along its
+/// street, read as boarding it (rider report). m/s, ~27 km/h. A bus or tram
+/// pulling out of a stop gets there within ~10-15 s; a rider chasing it does
+/// not hold it for 6 s.
+const liveVehicleSpeed = 7.5;
+const liveVehicleSpan = Duration(seconds: 6);
+
+/// And still advancing at this (m/s) since the previous fix: a GPS jump that
+/// stays put afterwards is not a ride.
+const liveBoardStepSpeed = 2.0;
+
+/// Consecutive fixes that must agree before the walk becomes the ride.
+const liveBoardVotes = 2;
+
+/// How far back the boarding evidence reaches.
+const liveBoardTrailFor = Duration(seconds: 30);
 const liveAlightRadius = 60.0;
 const liveWalkEndRadius = 25.0;
 const liveOnRouteCutoff = 60.0;
@@ -113,6 +129,24 @@ class LiveLeg {
   String get endName => stopNames.isEmpty ? '' : stopNames.last;
 }
 
+/// One good fix on the ride's path while walking to it.
+typedef BoardSample = ({DateTime at, double along});
+
+/// Pure: does [trail] (oldest first, newest = now) show vehicle motion - over
+/// some span of at least [liveVehicleSpan] ending now, [liveVehicleSpeed] or
+/// more along the path? Any span counts, so a bus that crept out of the stop
+/// and then sped up qualifies as soon as it has sped up.
+bool movingLikeAVehicleOn(List<BoardSample> trail) {
+  if (trail.length < 2) return false;
+  final now = trail.last;
+  for (var k = trail.length - 2; k >= 0; k--) {
+    final dt = now.at.difference(trail[k].at).inMilliseconds / 1000;
+    if (dt < liveVehicleSpan.inMilliseconds / 1000) continue;
+    if ((now.along - trail[k].along) / dt >= liveVehicleSpeed) return true;
+  }
+  return false;
+}
+
 /// The journey, flattened once when the trip starts.
 @immutable
 class LiveRoute {
@@ -159,6 +193,8 @@ class LiveTripState {
     this.cueSeq = 0,
     this.reachedBoardStop = false,
     this.boardWaitAlong = -1,
+    this.boardTrail = const [],
+    this.boardVotes = 0,
     this.legStartedAt,
   });
 
@@ -204,6 +240,13 @@ class LiveTripState {
   /// alight pole put the rider "60 m past it" on GPS noise alone. -1 = none.
   final double boardWaitAlong;
 
+  /// Walking to a ride: recent good fixes on the ride's path, as metres
+  /// along it, oldest first ([liveBoardTrailFor]). The boarding evidence.
+  final List<BoardSample> boardTrail;
+
+  /// Consecutive fixes that looked aboard ([liveBoardVotes] to board).
+  final int boardVotes;
+
   /// When the current leg began (the fix that switched to it). On a ride it
   /// picks the run actually boarded, which may not be the planned one.
   final DateTime? legStartedAt;
@@ -227,6 +270,8 @@ class LiveTripState {
     int? cueSeq,
     bool? reachedBoardStop,
     double? boardWaitAlong,
+    List<BoardSample>? boardTrail,
+    int? boardVotes,
     DateTime? legStartedAt,
     bool clearOffRouteSince = false,
     bool clearCue = false,
@@ -249,6 +294,8 @@ class LiveTripState {
     cueSeq: cueSeq ?? this.cueSeq,
     reachedBoardStop: reachedBoardStop ?? this.reachedBoardStop,
     boardWaitAlong: boardWaitAlong ?? this.boardWaitAlong,
+    boardTrail: boardTrail ?? this.boardTrail,
+    boardVotes: boardVotes ?? this.boardVotes,
     legStartedAt: legStartedAt ?? this.legStartedAt,
   );
 }
@@ -392,9 +439,9 @@ int _positionOf(TransitIndex ix, int pattern, int stop, {int after = 0}) {
 /// Advances [s] with one fix. Pure, monotone, and never recalculates the
 /// journey: the worst it does is raise [LiveTripState.offRoute].
 ///
-/// [vehicleLat]/[vehicleLon] is the matched vehicle when one is known — used
-/// to confirm boarding, and as the position of last resort when the fix is
-/// poor. `walkSpeed` is the rider's own setting, in m/s.
+/// [vehicleLat]/[vehicleLon] is the matched vehicle when one is known — the
+/// position of last resort when the fix is poor. It never boards the rider:
+/// standing next to the bus is also what just missing it looks like. `walkSpeed` is the rider's own setting, in m/s.
 LiveTripState advanceLive(
   LiveTripState s,
   LiveFix fix, {
@@ -481,10 +528,6 @@ LiveTripState advanceLive(
       leg.kind == LegKind.walk &&
       !state.isLastLeg &&
       state.route.legs[state.legIndex + 1].kind == LegKind.ride;
-  final nearVehicle =
-      vehicleLat != null &&
-      vehicleLon != null &&
-      haversineMetres(lat, lon, vehicleLat, vehicleLon) <= liveBoardRadius;
   final movingLikeAVehicle = fix.speed > walkSpeed * 1.6;
 
   if (boarding) {
@@ -501,23 +544,41 @@ LiveTripState advanceLive(
       state = state.copyWith(boardWaitAlong: onRide.along);
     }
     // Aboard: on the ride's path, 60 m past the stop *and* past where the
-    // rider waited, not at walking pace. A known speed must look like a
-    // vehicle; an unknown one is accepted only after being at the stop.
+    // rider waited, moving faster than anyone runs for 6 s, still advancing,
+    // on two fixes in a row. Speed is measured along the path from the fixes'
+    // own times, not the phone's speed: a rider sprinting to the stop, or
+    // after a bus that left, hit the old "1.6 x walking pace" at once.
     // A good fix (not the vehicle stand-in); "estimated" is no guard here:
     // past the stop the rider is off the walk leg, which is what sets it.
-    final speedOk =
-        fix.speed < 0 ? state.reachedBoardStop : movingLikeAVehicle;
     if (fix.accuracy <= livePoorAccuracy &&
-        onRide.distance <= liveOnRouteCutoff &&
-        onRide.along >= liveBoardedAlong &&
-        onRide.along >= math.max(0.0, state.boardWaitAlong) + liveBoardedAlong &&
-        speedOk) {
-      // Straight onto the ride, progress placed by this same fix.
-      return advanceLive(nextLeg(state), fix,
-          vehicleLat: vehicleLat,
-          vehicleLon: vehicleLon,
-          walkSpeed: walkSpeed,
-          warnStops: warnStops);
+        onRide.distance <= liveOnRouteCutoff) {
+      final sample = (at: fix.at, along: onRide.along);
+      final prev = state.boardTrail.isEmpty ? null : state.boardTrail.last;
+      final trail = [
+        for (final t in state.boardTrail)
+          if (fix.at.difference(t.at) <= liveBoardTrailFor) t,
+        sample,
+      ];
+      final stepSeconds =
+          prev == null ? 0 : fix.at.difference(prev.at).inMilliseconds / 1000;
+      final advancing = prev != null &&
+          stepSeconds > 0 &&
+          (sample.along - prev.along) / stepSeconds >= liveBoardStepSpeed;
+      final past = onRide.along >= liveBoardedAlong &&
+          onRide.along >=
+              math.max(0.0, state.boardWaitAlong) + liveBoardedAlong;
+      final votes = past && advancing && movingLikeAVehicleOn(trail)
+          ? state.boardVotes + 1
+          : 0;
+      state = state.copyWith(boardTrail: trail, boardVotes: votes);
+      if (votes >= liveBoardVotes) {
+        // Straight onto the ride, progress placed by this same fix.
+        return advanceLive(nextLeg(state), fix,
+            vehicleLat: vehicleLat,
+            vehicleLon: vehicleLon,
+            walkSpeed: walkSpeed,
+            warnStops: warnStops);
+      }
     }
   }
 
@@ -534,11 +595,10 @@ LiveTripState advanceLive(
 
   final advance = switch (leg.kind) {
     LegKind.ride => straightToEnd <= liveAlightRadius,
-    LegKind.walk =>
-      boarding
-          ? straightToEnd <= liveBoardRadius &&
-                (nearVehicle || movingLikeAVehicle)
-          : straightToEnd <= liveWalkEndRadius,
+    // To a ride, only the path rule above (or "Sono salito") boards: being
+    // at the stop fast, or next to the bus, is also what chasing it looks
+    // like.
+    LegKind.walk => !boarding && straightToEnd <= liveWalkEndRadius,
   };
   if (advance) {
     final next = nextLeg(state);
@@ -733,6 +793,8 @@ LiveTripState nextLeg(LiveTripState s, {DateTime? at}) {
     clearCue: true,
     reachedBoardStop: false,
     boardWaitAlong: -1,
+    boardTrail: const [],
+    boardVotes: 0,
     legStartedAt: at ?? s.lastFix,
   );
 }
