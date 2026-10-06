@@ -2,6 +2,8 @@
 /// the pure half: geometry build, progress, cues, off route, poor GPS.
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:piedemove/data/transit_index.dart';
 import 'package:piedemove/location/live_trip.dart';
@@ -84,10 +86,46 @@ LiveFix _fix(
       at: at ?? DateTime(2026, 9, 19, 9),
     );
 
+/// Seconds after 9:00 on the test day.
+DateTime _t(num seconds) => DateTime(2026, 9, 19, 9)
+    .add(Duration(milliseconds: (seconds * 1000).round()));
+
+/// Degrees of longitude per metre on the test parallel.
+const _lonPerMetre = 1 / 78650.0;
+
+/// Feeds 1 Hz fixes along the test line (east), [along] metres past lon
+/// [from] at each second [t0]..[t1]; returns the state and the second it
+/// boarded (null when it never did).
+(LiveTripState, int?) _feed(
+  LiveTripState s,
+  double Function(int t) along, {
+  required int t0,
+  required int t1,
+  double from = _lon0,
+  double speed = -1,
+}) {
+  int? boardedAt;
+  for (var t = t0; t <= t1; t++) {
+    final was = s.legIndex;
+    s = advanceLive(
+        s,
+        _fix(_lat, from + along(t) * _lonPerMetre,
+            speed: speed, at: _t(t)));
+    if (boardedAt == null && s.legIndex > was && s.riding) boardedAt = t;
+  }
+  return (s, boardedAt);
+}
+
+/// A bus pulling out at [t0]: 1 m/s² up to 11 m/s (~40 km/h).
+double Function(int) _busFrom(int t0, {double start = 0}) => (t) {
+      final dt = math.max(0, t - t0).toDouble();
+      return start + (dt <= 11 ? 0.5 * dt * dt : 60.5 + 11 * (dt - 11));
+    };
+
 void main() {
   group('audit fixes', () {
     LiveTripState riding() =>
-        advanceLive(_start(), _fix(_lat, _lon0, speed: 6)); // boarded
+        advanceLive(nextLeg(_start()), _fix(_lat, _lon0, speed: 6)); // boarded
 
     test('arriving at the alight stop vibrates "scendi ora"', () {
       var s = riding();
@@ -142,8 +180,8 @@ void main() {
 
   test('a ride leg counts the stops left and cues once each', () {
     var s = _start();
-    // Boarding: at the stop, moving like a vehicle.
-    s = advanceLive(s, _fix(_lat, _lon0, speed: 6));
+    // Aboard ("Sono salito"), at the stop.
+    s = advanceLive(nextLeg(s), _fix(_lat, _lon0, speed: 6));
     expect(s.legIndex, 1);
     expect(s.stopsRemaining, 3);
 
@@ -206,55 +244,135 @@ void main() {
     expect(s.legIndex, 1);
     // Standing at B, GPS noise 40 m further along line 9's street, walking
     // pace: still walking - and never boarded by noise.
-    s = advanceLive(s, _fix(_lat, 7.6605, speed: 0.8));
-    s = advanceLive(s, _fix(_lat, 7.6601, speed: 0.2));
+    s = advanceLive(s, _fix(_lat, 7.6605, speed: 0.8, at: _t(1)));
+    s = advanceLive(s, _fix(_lat, 7.6601, speed: 0.2, at: _t(2)));
     expect(s.legIndex, 1);
-    // Line 9 comes; the rider is on it, 120 m past where they waited.
-    s = advanceLive(s, _fix(_lat, 7.6615, speed: 8));
-    s = advanceLive(s, _fix(_lat, 7.6625, speed: 8));
-    expect(s.legIndex, 2);
-    expect(s.riding, isTrue);
+    // Walks back to T and waits for line 9.
+    s = advanceLive(s, _fix(_lat, 7.6596, speed: 1, at: _t(30)));
+    expect(s.legIndex, 1);
+    expect(s.reachedBoardStop, isTrue);
+    // Line 9 comes; the rider is on it, pulling out of T.
+    final (on9, boardedAt) =
+        _feed(s, _busFrom(300), t0: 290, t1: 330, from: 7.6596);
+    expect(on9.legIndex, 2);
+    expect(on9.riding, isTrue);
+    expect(boardedAt, isNotNull);
   });
 
-  test('walking up to the stop does not board without vehicle speed', () {
+  test('next to the matched vehicle at the stop is not aboard yet', () {
+    // Reaching the bus at the stop is also what just missing it looks like.
     var s = _start();
-    s = advanceLive(s, _fix(_lat, _lon0, speed: 1.1));
-    expect(s.legIndex, 0, reason: 'still walking');
-
-    s = advanceLive(s, _fix(_lat, _lon0, speed: 1.1),
+    s = advanceLive(s, _fix(_lat, _lon0, speed: 1.1, at: _t(0)));
+    s = advanceLive(s, _fix(_lat, _lon0, speed: 3, at: _t(1)),
         vehicleLat: _lat, vehicleLon: _lon0);
-    expect(s.legIndex, 1, reason: 'the matched vehicle is right there');
+    expect(s.legIndex, 0);
   });
 
   group('boarding on the road (beta 5 report: never detected)', () {
-    test('wait at the stop, then the next fix is already down the line', () {
+    test('wait at the stop, the bus pulls out: aboard within seconds', () {
       var s = _start();
       // Standing at the stop: no speed, not boarded, but the stop is reached.
-      s = advanceLive(s, _fix(_lat, _lon0 + 0.0001, speed: 0));
+      for (var t = 0; t < 30; t++) {
+        s = advanceLive(s, _fix(_lat, _lon0 + 0.0001, speed: 0, at: _t(t)));
+      }
       expect(s.legIndex, 0);
       expect(s.reachedBoardStop, isTrue);
-      // The bus left the 40 m circle between fixes; the phone reports no
-      // speed. 120 m along the line: aboard, progress placed there.
-      s = advanceLive(s, _fix(_lat, _lon0 + 0.0015, speed: -1));
-      expect(s.legIndex, 1);
-      expect(s.riding, isTrue);
-      expect(s.along, greaterThan(100));
+      // Phone reports no speed: the fixes' own times and places decide.
+      final (r, boardedAt) = _feed(s, _busFrom(30), t0: 30, t1: 70);
+      expect(r.legIndex, 1);
+      expect(r.riding, isTrue);
+      expect(boardedAt! - 30, lessThanOrEqualTo(15));
+      expect(r.along, greaterThan(100));
     });
 
-    test('never at the stop: needs vehicle speed on the line', () {
+    test('sparse fixes: the bus is already 120 m down the line', () {
+      var s = _start();
+      s = advanceLive(s, _fix(_lat, _lon0 + 0.0001, speed: 0, at: _t(0)));
+      s = advanceLive(s, _fix(_lat, _lon0 + 0.0016, speed: -1, at: _t(12)));
+      expect(s.legIndex, 0, reason: 'one fix is not enough');
+      s = advanceLive(s, _fix(_lat, _lon0 + 0.0030, speed: -1, at: _t(22)));
+      expect(s.legIndex, 1);
+      expect(s.along, greaterThan(200));
+    });
+
+    test('a GPS jump while waiting is not a ride', () {
+      var s = _start();
+      for (var t = 0; t < 10; t++) {
+        s = advanceLive(s, _fix(_lat, _lon0, speed: 0, at: _t(t)));
+      }
+      // 80 m down the line in a second, then it sits there.
+      for (var t = 10; t < 20; t++) {
+        s = advanceLive(s, _fix(_lat, _lon0 + 80 * _lonPerMetre,
+            speed: -1, accuracy: 30, at: _t(t)));
+      }
+      expect(s.legIndex, 0);
+    });
+
+    test('never at the stop: needs vehicle motion on the line', () {
       var s = _start();
       // Walking along the line past where the stop is, at walking pace.
-      s = advanceLive(s, _fix(_lat, _lon0 + 0.0015, speed: 1.2));
-      expect(s.legIndex, 0, reason: 'a walker on the pavement is not aboard');
-      s = advanceLive(s, _fix(_lat, _lon0 + 0.0016, speed: 7));
-      expect(s.legIndex, 1, reason: 'moving like a bus, on its line');
+      final (walked, b1) =
+          _feed(s, (t) => 1.3 * t, t0: 0, t1: 120, speed: 1.3);
+      expect(b1, isNull, reason: 'a walker on the pavement is not aboard');
+      // Caught it at a stop further on: a bus from there.
+      s = walked;
+      final (r, b2) = _feed(s, _busFrom(130, start: 1.3 * 120),
+          t0: 121, t1: 160, speed: 9);
+      expect(b2, isNotNull, reason: 'moving like a bus, on its line');
+      expect(r.riding, isTrue);
     });
 
     test('at the stop but off the line (another street) stays walking', () {
       var s = _start();
-      s = advanceLive(s, _fix(_lat, _lon0, speed: 0));
-      s = advanceLive(s, _fix(_lat + 0.003, _lon0 + 0.0015, speed: 7));
+      s = advanceLive(s, _fix(_lat, _lon0, speed: 0, at: _t(0)));
+      for (var t = 1; t < 30; t++) {
+        s = advanceLive(s, _fix(_lat + 0.003, _lon0 + t * 11 * _lonPerMetre,
+            speed: 11, at: _t(t)));
+      }
       expect(s.legIndex, 0);
+    });
+  });
+
+  group('running is not riding (rider report: sprinting "boarded")', () {
+    test('sprinting up to the stop does not board', () {
+      var s = _start(); // walk starts ~79 m before the stop, on the line
+      final (r, b) = _feed(s, (t) => math.min(0, -79 + 7.0 * t),
+          t0: 0, t1: 30, speed: 7);
+      expect(b, isNull);
+      expect(r.legIndex, 0);
+    });
+
+    test('chasing a bus that left, along its street, does not board', () {
+      var s = _start();
+      for (var t = 0; t < 10; t++) {
+        s = advanceLive(s, _fix(_lat, _lon0, speed: 0, at: _t(t)));
+      }
+      // A hard 7 m/s for 20 s - faster and longer than most people manage.
+      final (r, b) = _feed(s, (t) => 7.0 * (t - 10), t0: 10, t1: 30, speed: 7);
+      expect(b, isNull);
+      expect(r.legIndex, 0);
+      // ...gives up, walks back: still waiting for the next one.
+      expect(r.reachedBoardStop, isTrue);
+    });
+
+    test('sprinting toward the stop against the line does not board', () {
+      // From 300 m down the line, running back to the stop.
+      var s = _start(originLon: _lon0 + 300 * _lonPerMetre);
+      final (r, b) = _feed(s, (t) => math.max(0, 300 - 7.0 * t),
+          t0: 0, t1: 50, speed: 7);
+      expect(b, isNull);
+      expect(r.legIndex, 0);
+    });
+
+    test('movingLikeAVehicleOn: sustained, not a burst', () {
+      List<BoardSample> trail(List<double> along) => [
+            for (var i = 0; i < along.length; i++) (at: _t(i), along: along[i]),
+          ];
+      expect(movingLikeAVehicleOn(trail([0, 8, 16, 24, 32, 40, 48])), isTrue);
+      expect(movingLikeAVehicleOn(trail([0, 7, 14, 21, 28, 35, 42])), isFalse);
+      // Fast, but only over 3 s: not enough to tell.
+      expect(movingLikeAVehicleOn(trail([0, 10, 20, 30])), isFalse);
+      expect(movingLikeAVehicleOn(trail([5])), isFalse);
     });
 
     test('speed from two fixes when the phone reports none', () {
@@ -270,7 +388,7 @@ void main() {
   });
 
   test('the early warning can come two stops before', () {
-    var s = advanceLive(_start(), _fix(_lat, _lon0, speed: 6), warnStops: 2);
+    var s = advanceLive(nextLeg(_start()), _fix(_lat, _lon0, speed: 6), warnStops: 2);
     expect(s.stopsRemaining, 3);
     s = advanceLive(s, _fix(_lat, _lon0 + _step, speed: 6), warnStops: 2);
     expect(s.stopsRemaining, 2);
@@ -285,7 +403,7 @@ void main() {
     expect(liveNotificationText(s), startsWith('A piedi verso Fermata 0 (il 2)'));
     s = s.copyWith(reachedBoardStop: true);
     expect(liveNotificationText(s), 'Aspetta il 2 a Fermata 0');
-    s = advanceLive(_start(), _fix(_lat, _lon0, speed: 6));
+    s = advanceLive(nextLeg(_start()), _fix(_lat, _lon0, speed: 6));
     expect(liveNotificationText(s), 'Scendi a Fermata 3 tra 3 fermate');
     s = s.copyWith(stopsRemaining: 1);
     expect(liveNotificationText(s), 'Scendi alla prossima: Fermata 3');
@@ -295,7 +413,7 @@ void main() {
 
   test('progress is monotone: a fix behind the rider does not rewind', () {
     var s = _start();
-    s = advanceLive(s, _fix(_lat, _lon0, speed: 6));
+    s = advanceLive(nextLeg(s), _fix(_lat, _lon0, speed: 6));
     s = advanceLive(s, _fix(_lat, _lon0 + 2 * _step, speed: 6));
     final forward = s.vertex;
     s = advanceLive(s, _fix(_lat, _lon0 + _step, speed: 6));
@@ -304,7 +422,7 @@ void main() {
 
   test('a poor fix holds the position and says it is estimated', () {
     var s = _start();
-    s = advanceLive(s, _fix(_lat, _lon0, speed: 6));
+    s = advanceLive(nextLeg(s), _fix(_lat, _lon0, speed: 6));
     final held = s.vertex;
     s = advanceLive(s, _fix(_lat + 0.01, _lon0, accuracy: 120, speed: 6));
     expect(s.estimated, isTrue);
@@ -324,7 +442,7 @@ void main() {
   test('off route only after 150 m for 30 s, and never recalculates', () {
     final t0 = DateTime(2026, 9, 19, 9);
     var s = _start();
-    s = advanceLive(s, _fix(_lat, _lon0, speed: 6, at: t0));
+    s = advanceLive(nextLeg(s), _fix(_lat, _lon0, speed: 6, at: t0));
     s = advanceLive(s, _fix(_lat + 0.004, _lon0 + _step, speed: 6, at: t0));
     expect(s.offRoute, isFalse, reason: 'far, but not yet for long enough');
 
@@ -343,7 +461,7 @@ void main() {
     final start = DateTime(2026, 9, 19);
     final t0 = start.add(const Duration(seconds: 60));
     var s = _start();
-    s = advanceLive(s, _fix(_lat, _lon0, speed: 6, at: t0));
+    s = advanceLive(nextLeg(s), _fix(_lat, _lon0, speed: 6, at: t0));
     final before = s.vertex;
     final s2 = staleLive(
       s,
@@ -368,7 +486,7 @@ void main() {
 
     test('a guess that ran ahead gives way to the next good fix', () {
       // A ride estimated to its last stop while the rider is at the second.
-      var s = advanceLive(_start(), _fix(_lat, _lon0, speed: 6));
+      var s = advanceLive(nextLeg(_start()), _fix(_lat, _lon0, speed: 6));
       s = staleLive(s.copyWith(lastFix: start), start.add(const Duration(minutes: 7)),
           serviceStart: start);
       expect(s.estimated, isTrue);
@@ -380,7 +498,7 @@ void main() {
     });
 
     test('a real position still never rewinds', () {
-      var s = advanceLive(_start(), _fix(_lat, _lon0, speed: 6));
+      var s = advanceLive(nextLeg(_start()), _fix(_lat, _lon0, speed: 6));
       s = advanceLive(s, _fix(_lat, _lon0 + 3 * _step, speed: 6));
       final left = s.stopsRemaining;
       s = advanceLive(s, _fix(_lat, _lon0 + _step, speed: 6));

@@ -54,10 +54,9 @@ POST_NOTIFICATIONS, WAKE_LOCK. Needs a phone to verify (emulator: no).
   GTFS-RT position stays a separate concept.
 - Persistent compact strip: "Scendi a &lt;stop&gt; tra N fermate", or "tra N m" on
   walk legs (distance to leg end).
-- **Boarding**: advance walk -> ride when the rider is within 40 m of the
-  boarding stop *and* either near the matched live vehicle or moving faster than
-  walking speed along the leg. Always offer manual **"Sono salito" / "Sono
-  sceso"**.
+- **Boarding**: advance walk -> ride only by the path rule (see "Running is
+  not riding" below), never by being at the stop fast or next to the bus.
+  Always offer manual **"Sono salito" / "Sono sceso"**.
 - **Alighting**: vibrate when one stop remains and again at the alight stop.
   Advance to the next leg within 60 m of the alight stop (walk legs: 25 m of
   their end).
@@ -171,6 +170,42 @@ glides it in `meGlideSteps` (6) over `meGlide` (600 ms) from where it is on
 screen (`_meAt`), jumps past `meGlideMaxMetres` (300 m) or on first draw; a
 new fix cancels the running glide at once (`_meGlideGen` bumped at entry,
 only when the fix changed - a bump on every rebuild left the dot short).
+
+## Running is not riding (2026-10 rider report: "sprinting boarded the bus")
+
+Walking to a ride used to board at 1.6 x walking pace (~1.9 m/s): within
+40 m of the stop at that speed, or 60 m down the line at it - any jog did.
+Also "next to the matched vehicle at the stop" boarded. Both removed. Now a
+good fix on the ride's path boards only when, on **two fixes in a row**:
+60 m past the stop and past `boardWaitAlong`; still advancing >= 2 m/s since
+the previous fix; and `movingLikeAVehicleOn(boardTrail)` - over some span of
+>= 6 s ending now, >= 7.5 m/s (27 km/h) **measured along the path from the
+fixes' own timestamps**, not the phone's speed. A bus pulling out (1 m/s²)
+qualifies ~13 s after leaving; a 7 m/s sprint for 20 s does not; a GPS jump
+that stays put fails "advancing". `boardTrail` keeps 30 s of samples, reset
+by `nextLeg`. Replays: `test/live_trip_test.dart` "running is not riding".
+Trade-off: a bus stuck in traffic boards late (manual button). Alighting
+still uses `fix.speed > 1.6 x walk` to hold the ride near the stop - a
+rider who jumps off and sprints before the bus has stopped stays on the
+ride until they slow down (not seen yet; watch for it).
+
+## Heading beam (2026-10 rider request: "point like Google Maps")
+
+`MainActivity.Compass` -> EventChannel `piedemove/heading` ({deg, acc}):
+`TYPE_ROTATION_VECTOR` (gyro-fused), else geomagnetic RV, else accel+mag.
+Facing = screen-top + back-camera horizontal projections summed (flat and
+upright both work, display rotation handled), light vector smoothing,
+true north via `GeomagneticField` (Dart sends the fix on
+`piedemove/heading_cfg`, refreshed after ~50 km), <= ~12 Hz, >= 1° change.
+acc = RV values[4] (radians -> deg) else the sensor accuracy status
+(15/30/50/90°). Dart: `lib/location/compass.dart` - `CompassController`
+(foreground only), pure `meHeading`: GPS course at >= 4 m/s (in a vehicle
+the magnetometer reads the metal), else compass, beam = 2 x acc clamped
+30-100°, else course while moving. `me_layer.dart` draws 5 fading cone
+sprites (`pm-me-beam-30..100`, 192 px, `meBeamSize` 84 -> ~40 dp radius);
+map_view `ref.listen`s the compass (no rebuild) and redraws the dot in
+place, one queued redraw at a time. **Not yet on a phone**: beam size and
+look, north accuracy, landscape, the fallbacks.
 
 ## Changes between rides (beta 6 report: "says I boarded the next bus")
 

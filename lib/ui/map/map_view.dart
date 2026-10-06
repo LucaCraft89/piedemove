@@ -22,6 +22,7 @@ import 'package:piedemove/data/transit_index.dart';
 import 'package:piedemove/geo/lines_io.dart';
 import 'package:piedemove/realtime/gtfs_rt.dart';
 import 'package:piedemove/realtime/store.dart';
+import 'package:piedemove/location/compass.dart';
 import 'package:piedemove/location/device_location.dart';
 import 'package:piedemove/location/live_trip.dart';
 import 'package:piedemove/routing/journey.dart';
@@ -196,6 +197,10 @@ class _MapViewState extends ConsumerState<MapView> {
   /// Bumped per fix: a glide still running for an older fix stops.
   int _meGlideGen = 0;
 
+  /// The beam as last drawn, and whether a compass-only redraw is queued.
+  MeHeading? _meBeamDrawn;
+  bool _meBeamQueued = false;
+
   /// The place currently pinned by search, as last drawn.
   (Place?, Place?, Place?)? _pins;
 
@@ -314,6 +319,11 @@ class _MapViewState extends ConsumerState<MapView> {
     if (_styleReady) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _updateMe(me));
     }
+    // The compass turns the beam between fixes (~12 Hz at most): listened
+    // to, not watched, so it never rebuilds the map widget.
+    ref.listen(compassProvider, (_, _) {
+      if (_styleReady && _meAdded) _updateMeBeam();
+    });
 
     // Pins: the searched place, and the planned trip's start and end while
     // no journey is open (an open journey draws its own Partenza/Arrivo).
@@ -1340,6 +1350,7 @@ class _MapViewState extends ConsumerState<MapView> {
     // must do so now, not when its turn in the chain comes.
     if (_meAdded && identical(p, _meQueued)) return _meChain;
     _meQueued = p;
+    if (p != null) ref.read(compassProvider.notifier).updateLocation(p);
     final glide = ++_meGlideGen;
     return _meChain = _meChain.then((_) => _updateMeNow(p, glide));
   }
@@ -1366,12 +1377,13 @@ class _MapViewState extends ConsumerState<MapView> {
         for (final at
             in meGlidePoints(from.$1, from.$2, p.latitude, p.longitude)) {
           if (glide != _meGlideGen || !_meAdded) return;
-          await c.setGeoJsonSource(meSource, meFeatures(p, at: at));
+          await c.setGeoJsonSource(
+              meSource, meFeatures(p, at: at, heading: _meBeam(p)));
           _meAt = at;
           await Future<void>.delayed(step);
         }
       } else {
-        await c.setGeoJsonSource(meSource, meFeatures(p));
+        await c.setGeoJsonSource(meSource, meFeatures(p, heading: _meBeam(p)));
         _meAt = p == null ? null : (p.latitude, p.longitude);
       }
       if (mounted) ref.read(mapStatusProvider.notifier).clear('me');
@@ -1384,6 +1396,40 @@ class _MapViewState extends ConsumerState<MapView> {
             .set('me', 'Posizione sulla mappa non disponibile');
       }
     }
+  }
+
+  /// Compass beam for [p] (GPS course in a vehicle), remembered as drawn.
+  MeHeading? _meBeam(Position? p) {
+    if (!mounted) return _meBeamDrawn;
+    return _meBeamDrawn = meHeading(p, ref.read(compassProvider));
+  }
+
+  /// The compass moved: redraw the dot where it is with the new beam. One
+  /// redraw queued at a time; it reads the latest reading when it runs, and
+  /// a glide in progress picks the reading up on its own.
+  void _updateMeBeam() {
+    if (_meBeamQueued || !_meAdded) return;
+    final next = meHeading(_meDrawn, ref.read(compassProvider));
+    final was = _meBeamDrawn;
+    if (was != null &&
+        next != null &&
+        meBeamImageFor(was.spread) == meBeamImageFor(next.spread) &&
+        ((was.degrees - next.degrees + 540) % 360 - 180).abs() < 1) {
+      return;
+    }
+    if (was == null && next == null) return;
+    _meBeamQueued = true;
+    _meChain = _meChain.then((_) async {
+      _meBeamQueued = false;
+      final c = _controller, p = _meDrawn, at = _meAt;
+      if (c == null || !_meAdded || p == null || !mounted) return;
+      try {
+        await c.setGeoJsonSource(
+            meSource, meFeatures(p, at: at, heading: _meBeam(p)));
+      } catch (e) {
+        debugPrint('pm: position beam failed: $e');
+      }
+    });
   }
 
   /// Layers added after the dot would cover it: put it back on top.
