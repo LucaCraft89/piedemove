@@ -30,6 +30,7 @@ import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/routing/journey.dart';
 import 'package:piedemove/settings/settings.dart';
 import 'package:piedemove/location/bus_match.dart';
+import 'package:piedemove/location/trip_log.dart';
 import 'package:piedemove/location/trip_summary.dart';
 import 'package:piedemove/location/haptics.dart';
 import 'package:piedemove/location/trip_notification.dart';
@@ -1041,6 +1042,9 @@ class LiveTripController extends StateNotifier<LiveTripState?>
       stopsRemaining: first.stopVertex.length,
     );
     _lastCueSeq = 0;
+    _log.clear();
+    _log.add('start: ${_legsSummary(ix, journey)}');
+    _lastLogFix = null;
     _watchNext = null;
     _startedAt = DateTime.now();
     _ref.read(tripSummaryProvider.notifier).state = null;
@@ -1055,6 +1059,18 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   }
 
   void stop() {
+    if (state != null) {
+      // Read only if running: the log must not start the feeds.
+      final rt = _ref.exists(realtimeProvider)
+          ? _ref.read(realtimeProvider)
+          : const RealtimeState();
+      final now = DateTime.now();
+      _log.add('stop at leg ${state!.legIndex}${state!.finished ? ' (arrived)' : ''}; feeds: ${[
+        for (final k in RtFeedKind.values)
+          '${k.name} ${rt.health[k]?.lastSuccess == null ? 'never' : '${now.difference(rt.health[k]!.lastSuccess!).inSeconds}s'}${rt.health[k]?.lastError == null ? '' : ' (${rt.health[k]!.lastError})'}'
+      ].join(', ')}');
+      unawaited(_log.save());
+    }
     _sub?.cancel();
     _sub = null;
     _stale?.cancel();
@@ -1077,6 +1093,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     final s = state;
     if (s == null) return;
     final next = nextLeg(s, at: DateTime.now());
+    _log.add('manual: ${advanceLabel(s)} (leg ${s.legIndex} -> ${next.legIndex})');
     _ref.read(missedRideProvider.notifier).state = null;
     state = next;
     if (next.finished) {
@@ -1196,6 +1213,14 @@ class LiveTripController extends StateNotifier<LiveTripState?>
       at: now,
     );
     _lastPos = fix;
+    if (_lastLogFix == null ||
+        now.difference(_lastLogFix!) >= const Duration(seconds: 10)) {
+      _lastLogFix = now;
+      _log.add('fix ${logPos(fix.lat, fix.lon)} acc ${fix.accuracy.round()} m '
+          'speed ${fix.speed.toStringAsFixed(1)} m/s; leg ${s.legIndex} '
+          '${s.leg.kind.name} along ${s.along.round()}/${s.leg.metres.round()} m'
+          '${s.estimated ? ' est' : ''}${isUnderground(s) ? ' underground' : ''}');
+    }
     if (fix.accuracy <= livePoorAccuracy) _lastGood = fix;
     if (isUnderground(s)) {
       final est = _underground(s, now);
@@ -1261,6 +1286,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     final missed = missedRide(s, now, departure);
     final names = {for (final o in ride.options) o.routeShortName}.join(', ');
     if (missed && prompt.state == null) {
+      _log.add('asked: missed $names (left ${departure.toIso8601String().substring(11, 16)})');
       prompt.state = names;
       unawaited(vibrateCue(LiveCue.oneStopLeft,
           sound: _ref.read(settingsProvider).alightSound));
@@ -1291,6 +1317,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     final key = (risk.lines, risk.planned);
     if (key != _riskBuzzed) {
       _riskBuzzed = key;
+      _log.add('connection at risk: ${connectionRiskLabel(risk)}');
       unawaited(vibrateCue(LiveCue.oneStopLeft,
           sound: _ref.read(settingsProvider).alightSound));
     }
@@ -1303,6 +1330,21 @@ class LiveTripController extends StateNotifier<LiveTripState?>
 
   /// The planned run last buzzed about.
   Object? _riskBuzzed;
+
+  TripLog get _log => _ref.read(tripLogProvider);
+
+  /// When a fix was last written to the log (one every 10 s).
+  DateTime? _lastLogFix;
+
+  /// `walk 80 m > 2 PORTA NUOVA 08:00 -> BARDONECCHIA 08:14 > walk 300 m`.
+  static String _legsSummary(TransitIndex ix, Journey j) => [
+        for (final l in j.legs)
+          l.kind == LegKind.walk
+              ? 'walk ${l.walkMetres.round()} m'
+              : '${{for (final o in l.options) o.routeShortName}.join('/')} '
+                  '${ix.stopNames[l.fromStop]} ${hhmm(j.timeOf(l.departure))} -> '
+                  '${ix.stopNames[l.toStop]} ${hhmm(j.timeOf(l.arrival))}',
+      ].join(' > ');
 
   /// The live delay of the planned run at the ride's board stop.
   int? _boardDelay(Leg ride) {
@@ -1349,6 +1391,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   /// A button in the notification: the same as on the strip.
   void _onNotificationAction(String action) {
     if (state == null) return;
+    _log.add('notification button: $action');
     switch (action) {
       case 'advance':
         manualAdvance();
@@ -1362,6 +1405,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   void waitForNext(DateTime? next) {
     final s = state;
     if (s == null) return;
+    _log.add('answer: waiting for the next one');
     _watchNext = (
       s.legIndex,
       next ?? DateTime.now().add(const Duration(minutes: 10)),
@@ -1372,6 +1416,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   /// "Sì, ricalcola": plan again from here, now, and go on live with the
   /// best answer (the results stay on screen when there is none).
   Future<void> replanFromHere() async {
+    _log.add('answer: missed it, replanning');
     final fix = _lastGood ?? _lastPos;
     stop();
     final plan = _ref.read(tripPlanProvider.notifier);
@@ -1401,6 +1446,16 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   }
 
   void _apply(LiveTripState next) {
+    final before = state;
+    if (before != null) {
+      if (next.legIndex != before.legIndex) {
+        _log.add('leg ${before.legIndex} -> ${next.legIndex} (auto)');
+      }
+      if (next.offRoute != before.offRoute) _log.add('off route: ${next.offRoute}');
+      if (next.cue != null && next.cueSeq != before.cueSeq) {
+        _log.add('cue ${next.cue!.name}');
+      }
+    }
     state = next;
     _notify(next);
     if (next.cue != null && next.cueSeq != _lastCueSeq) {
