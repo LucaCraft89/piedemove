@@ -19,6 +19,7 @@ import 'package:piedemove/location/device_location.dart';
 import 'package:piedemove/location/live_trip.dart';
 import 'package:piedemove/places/photon.dart';
 import 'package:piedemove/realtime/store.dart';
+import 'package:piedemove/realtime/strikes.dart';
 import 'package:piedemove/ui/map/map_focus.dart';
 import 'package:piedemove/ui/map/map_style.dart';
 import 'package:piedemove/ui/map/map_view.dart';
@@ -88,6 +89,12 @@ class _HomePageState extends ConsumerState<HomePage> {
     // Only the count matters here: watching the whole store rebuilt the home
     // page (and the map under it) on every realtime poll.
     final stale = ref.watch(realtimeProvider.select((r) => r.staleLabel()));
+    // A strike in force now or within two days: one banner, the earliest.
+    final strike = ref.watch(realtimeProvider.select((r) {
+      final now = DateTime.now();
+      final s = nextStrike(r.alerts, now);
+      return s == null ? null : (s.$1.id, strikeLabel(s.$2, now));
+    }));
     final trip = ref.watch(tripPlanProvider);
     final live = ref.watch(liveTripProvider);
     // A newer beta on GitHub (daily check, silent when offline).
@@ -144,6 +151,12 @@ class _HomePageState extends ConsumerState<HomePage> {
                       openUrl(update.apkUrl);
                     }),
                   if (stale != null) _Chip(stale),
+                  if (strike != null)
+                    _StrikeChip(
+                      label: strike.$2,
+                      onTap: () =>
+                          openEntity(context, ref, AlertRef(strike.$1)),
+                    ),
                 ],
               ),
             ),
@@ -605,6 +618,52 @@ class ShortcutChip extends ConsumerWidget {
                 Text(place == null ? '$label +' : label,
                     style: Theme.of(context).textTheme.labelLarge),
               ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The strike banner: the error colours, a tap opens the alert with the
+/// guaranteed bands GTT lists in its text.
+class _StrikeChip extends StatelessWidget {
+  const _StrikeChip({required this.label, required this.onTap});
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(top: Gap.element),
+      child: Material(
+        color: scheme.errorContainer,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          child: ConstrainedBox(
+            constraints:
+                const BoxConstraints(minHeight: kMinInteractiveDimension),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: Gap.element, vertical: 6),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.campaign, size: 18, color: scheme.onErrorContainer),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text('$label · fasce garantite',
+                        style: TextStyle(
+                            color: scheme.onErrorContainer,
+                            fontWeight: FontWeight.w600)),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
