@@ -42,6 +42,13 @@ class MainActivity : FlutterActivity() {
     }
     private var tripActionsRegistered = false
 
+    /// The widget was tapped: ask Dart for fresh departures (home_page.dart).
+    private val widgetRefresh = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            appChannel?.invokeMethod("widgetRefresh", null)
+        }
+    }
+
     /// Casa / Lavoro tapped on the home-screen widget, until Dart takes it.
     private var widgetAction: String? = null
 
@@ -60,6 +67,7 @@ class MainActivity : FlutterActivity() {
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         if (tripActionsRegistered) {
             unregisterReceiver(tripActions)
+            unregisterReceiver(widgetRefresh)
             tripActionsRegistered = false
         }
         appChannel = null
@@ -71,11 +79,15 @@ class MainActivity : FlutterActivity() {
         captureWidgetAction(intent)
         if (!tripActionsRegistered) {
             val filter = IntentFilter(TRIP_ACTION)
+            val refresh = IntentFilter(NextDeparturesWidget.APP_REFRESH)
             if (Build.VERSION.SDK_INT >= 33) {
                 registerReceiver(tripActions, filter, Context.RECEIVER_NOT_EXPORTED)
+                registerReceiver(widgetRefresh, refresh, Context.RECEIVER_NOT_EXPORTED)
             } else {
                 @Suppress("UnspecifiedRegisterReceiverFlag")
                 registerReceiver(tripActions, filter)
+                @Suppress("UnspecifiedRegisterReceiverFlag")
+                registerReceiver(widgetRefresh, refresh)
             }
             tripActionsRegistered = true
         }

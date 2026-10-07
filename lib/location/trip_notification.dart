@@ -8,6 +8,8 @@ library;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'package:piedemove/app/native_calls.dart';
+
 const _app = MethodChannel('piedemove/app');
 
 Future<void> requestNotificationPermission() => _call('requestNotifications');
@@ -25,18 +27,10 @@ Future<void> showTripNotification(String title, String text,
 Future<void> cancelTripNotification() => _call('tripNotificationCancel');
 
 /// Button taps: `advance` or `stop`. One handler, the live trip's.
-void onTripNotificationAction(void Function(String action) handler) {
-  try {
-    _app.setMethodCallHandler((call) async {
-      if (call.method == 'notificationAction' && call.arguments is String) {
-        handler(call.arguments as String);
-      }
-      return null;
+void onTripNotificationAction(void Function(String action) handler) =>
+    onNativeCall('notificationAction', (a) {
+      if (a is String) handler(a);
     });
-  } catch (e) {
-    debugPrint('pm: notification actions unavailable: $e');
-  }
-}
 
 Future<void> _call(String method, [Map<String, Object?>? args]) async {
   try {

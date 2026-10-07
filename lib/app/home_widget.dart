@@ -34,11 +34,14 @@ String widgetPayload(String? stopName, List<Departure> departures, DateTime now)
       ],
     });
 
-/// Hands the payload to the widget; a no-op when it did not change.
+/// Hands the payload to the widget; a no-op when only its time changed,
+/// unless [force] (the widget asked for a refresh).
 String? _last;
-Future<void> publishWidget(String payload) async {
-  if (payload == _last) return;
-  _last = payload;
+final _at = RegExp(r'"at":\d+');
+Future<void> publishWidget(String payload, {bool force = false}) async {
+  final key = payload.replaceFirst(_at, '');
+  if (!force && key == _last) return;
+  _last = key;
   try {
     await _app.invokeMethod<Object?>('widget', {'json': payload});
   } catch (e) {
