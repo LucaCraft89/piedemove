@@ -224,4 +224,60 @@ void main() {
     expect(const RealtimeState().staleLabel(),
         'Dati in tempo reale non disponibili');
   });
+
+  group('alerts kept between runs (GTT alert service down, Oct 2026)', () {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    final strike = Uint8List.fromList([
+      ..._bytes(2, [
+        ..._string(1, 'a1'),
+        ..._bytes(5, [
+          ..._bytes(5, _string(2, 'route-2')),
+          ..._translated(10, 'Sciopero', 'it'),
+        ]),
+      ]),
+    ]);
+
+    test('a failing feed at start still shows the last good alerts, dated',
+        () async {
+      final cache = _MemoryAlertCache()..saved = (strike, DateTime(2026, 9, 28, 14, 5));
+      final c = RealtimeController(
+        fetch: (url) async => throw Exception('HTTP 500'),
+        alertCache: cache,
+        autoStart: false,
+      );
+      await pumpEventQueue();
+      expect(c.state.alerts.single.header, 'Sciopero');
+      final h = c.state.health[RtFeedKind.alerts]!;
+      expect(h.cached, isTrue);
+      await c.pollOnce(RtFeedKind.alerts);
+      expect(c.state.alerts, hasLength(1), reason: 'a failed poll keeps them');
+      expect(c.state.health[RtFeedKind.alerts]!.lastError, contains('500'));
+      expect(c.state.staleLabel(), 'Dati in tempo reale non disponibili');
+      c.dispose();
+    });
+
+    test('a good answer replaces them and is saved', () async {
+      final cache = _MemoryAlertCache();
+      final c = RealtimeController(
+        fetch: (url) async => strike,
+        alertCache: cache,
+        autoStart: false,
+      );
+      await c.pollOnce(RtFeedKind.alerts);
+      await pumpEventQueue();
+      expect(cache.saved?.$1, strike);
+      expect(c.state.health[RtFeedKind.alerts]!.cached, isFalse);
+      c.dispose();
+    });
+  });
+}
+
+class _MemoryAlertCache implements AlertCache {
+  (Uint8List, DateTime)? saved;
+
+  @override
+  Future<(Uint8List, DateTime)?> load() async => saved;
+
+  @override
+  Future<void> save(Uint8List bytes, DateTime at) async => saved = (bytes, at);
 }

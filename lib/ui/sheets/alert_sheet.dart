@@ -158,6 +158,22 @@ class AlertBody extends ConsumerWidget {
   }
 }
 
+/// While GTT's alert service is not answering, the list says how old it is:
+/// `Servizio avvisi GTT non raggiungibile · avvisi del 28/09 14:05`. Null
+/// when the feed answered in the last 15 minutes.
+String? alertsAsOfLabel(FeedHealth? health, DateTime now) {
+  final last = health?.lastSuccess;
+  if (last != null &&
+      !health!.cached &&
+      now.difference(last) <= const Duration(minutes: 15)) {
+    return null;
+  }
+  if (last == null) return 'Servizio avvisi GTT non raggiungibile';
+  String two(int n) => n.toString().padLeft(2, '0');
+  return 'Servizio avvisi GTT non raggiungibile · avvisi del '
+      '${two(last.day)}/${two(last.month)} ${two(last.hour)}:${two(last.minute)}';
+}
+
 /// The alert list behind the home "Avvisi" pill.
 void showAlertList(BuildContext context, WidgetRef ref) {
   showModalBottomSheet<void>(
@@ -178,10 +194,12 @@ void showAlertList(BuildContext context, WidgetRef ref) {
         child: Consumer(
           builder: (context, ref, _) {
             final now = DateTime.now();
+            final rt = ref.watch(realtimeProvider);
             final alerts = [
-              for (final a in ref.watch(realtimeProvider).alerts)
+              for (final a in rt.alerts)
                 if (a.activeAt(now)) a,
             ];
+            final asOf = alertsAsOfLabel(rt.health[RtFeedKind.alerts], now);
             return ListView(
               controller: controller,
               padding: const EdgeInsets.all(Gap.screen),
@@ -191,6 +209,13 @@ void showAlertList(BuildContext context, WidgetRef ref) {
                   title: 'Avvisi',
                   onClose: () => Navigator.of(context).pop(),
                 ),
+                if (asOf != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: Gap.element),
+                    child: Text(asOf,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(context).colorScheme.error)),
+                  ),
                 if (alerts.isEmpty)
                   const Padding(
                     padding: EdgeInsets.only(top: Gap.element),
