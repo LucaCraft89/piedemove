@@ -25,6 +25,10 @@ void main() {
     expect(compareVersions('1.0.0-beta.1', '0.9.0'), greaterThan(0));
     expect(compareVersions('v0.9.0-beta.7', '0.9.0-beta.7'), 0);
     expect(compareVersions('lines-latest', '0.9.0-beta.1'), lessThan(0));
+    // Point betas: after their beta, before the next one.
+    expect(compareVersions('0.9.0-beta.14.1', '0.9.0-beta.14'), greaterThan(0));
+    expect(compareVersions('0.9.0-beta.15', '0.9.0-beta.14.1'), greaterThan(0));
+    expect(compareVersions('0.9.0', '0.9.0-beta.14.1'), greaterThan(0));
   });
 
   test('the newest release with an APK; drafts and data tags ignored', () {
