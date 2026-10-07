@@ -1,0 +1,36 @@
+<p>A Torino gli studenti universitari viaggiano gratis sui mezzi GTT con la carta PieMove. Se ogni corsa non costa nulla, l'unico vero prezzo di un viaggio è <b>la strada a piedi</b>. PiedeMove pianifica per i tuoi piedi, non solo per l'orologio.</p>
+
+<p><b>Pensa ai tuoi piedi</b></p>
+<ul>
+<li>Tutte le linee che fanno ogni tratta, in un solo badge (10 · 16 · 42)</li>
+<li>Cambi a due passi tra fermate vicine, anche quelli che l'orario non dice</li>
+<li>Preferisce un'attesa o un cambio in più a un chilometro a piedi; ordinamento bilanciato o più veloce, limite a piedi, la tua velocità</li>
+<li>Tratti a piedi sui veri percorsi pedonali di OpenStreetMap, con "≈" quando sono stimati</li>
+</ul>
+
+<p><b>Viaggia con te</b></p>
+<ul>
+<li>Viaggio live con vibrazioni forti per "scendi ora", anche a schermo spento</li>
+<li>Notifica con avanzamento e pulsanti Sono salito / Sono sceso / Termina a telefono bloccato</li>
+<li>"Hai perso il 2?" se il bus parte senza di te, "Affrettati" se non ce la fai, "Coincidenza a rischio" quando un ritardo ti fa perdere il cambio</li>
+<li>In metro: orario e ritardo in tempo reale al posto del GPS sottoterra</li>
+<li>Schermata di arrivo con tempo, metri a piedi e strada risparmiata</li>
+</ul>
+
+<p><b>Sa cosa succede</b></p>
+<ul>
+<li>Posizioni dei mezzi GTT, ritardi, corse soppresse e avvisi in tempo reale</li>
+<li>Avviso di sciopero con le fasce garantite</li>
+<li>Pianifica sull'orario anche quando i dati in tempo reale mancano</li>
+</ul>
+
+<p><b>Per tutti i giorni</b></p>
+<ul>
+<li>Casa / Lavoro a un tocco, partenze in diretta dalle fermate preferite, widget per la Home</li>
+<li>Mappa offline di tutta l'area GTT</li>
+<li>I tuoi viaggi: metri a piedi e strada risparmiata, mese per mese</li>
+</ul>
+
+<p><b>Privato per scelta.</b> Tutto avviene sul telefono: niente account, niente statistiche, nessun server. L'orario è costruito sul telefono dai dati aperti GTT; i luoghi vengono da Photon (OpenStreetMap), la mappa da OpenFreeMap.</p>
+
+<p>Dati: GTT S.p.A. (uso non commerciale con attribuzione; l'app è gratuita e senza pubblicità), Regione Piemonte (CC BY 4.0), © contributori OpenStreetMap (ODbL). Non affiliata a GTT.</p>

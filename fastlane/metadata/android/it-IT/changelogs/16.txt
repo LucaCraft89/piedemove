@@ -1,0 +1,1 @@
+Notifica con pulsanti Sono salito / Sono sceso / Termina e avanzamento; "Coincidenza a rischio" quando un ritardo ti fa perdere il cambio; widget per la Home con prossime partenze e Casa / Lavoro; avviso scioperi; statistiche a piedi ("I tuoi viaggi"); benvenuto al primo avvio; "Segnala un problema" con il registro del viaggio; meno falsi allarmi sui dati.
