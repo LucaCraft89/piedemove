@@ -159,6 +159,12 @@ jobs:
           echo 'org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g' >> ~/.gradle/gradle.properties
       - name: Build the debug APK
         run: flutter build apk --debug
+      # The release build too (R8, shrunk resources, the packaging that
+      # ships): the smoke script installs it first, so an APK Android refuses
+      # ("package invalid") fails here instead of on a phone. Debug-key signed
+      # here; the release job re-checks the real key.
+      - name: Build the release APK (install check)
+        run: flutter build apk --release
       - uses: actions/download-artifact@v4
         with:
           name: index
