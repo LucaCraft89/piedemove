@@ -42,6 +42,21 @@ class MainActivity : FlutterActivity() {
     }
     private var tripActionsRegistered = false
 
+    /// Casa / Lavoro tapped on the home-screen widget, until Dart takes it.
+    private var widgetAction: String? = null
+
+    private fun captureWidgetAction(intent: Intent?) {
+        intent?.getStringExtra(NextDeparturesWidget.EXTRA_ACTION)?.let {
+            widgetAction = it
+            intent.removeExtra(NextDeparturesWidget.EXTRA_ACTION)
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        captureWidgetAction(intent)
+    }
+
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         if (tripActionsRegistered) {
             unregisterReceiver(tripActions)
@@ -53,6 +68,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        captureWidgetAction(intent)
         if (!tripActionsRegistered) {
             val filter = IntentFilter(TRIP_ACTION)
             if (Build.VERSION.SDK_INT >= 33) {
@@ -106,6 +122,14 @@ class MainActivity : FlutterActivity() {
                             call.argument<String>("primary"),
                         ),
                     )
+                    "widget" -> {
+                        NextDeparturesWidget.save(this, call.argument<String>("json") ?: "")
+                        result.success(true)
+                    }
+                    "takeWidgetAction" -> {
+                        result.success(widgetAction)
+                        widgetAction = null
+                    }
                     "tripNotificationCancel" -> {
                         notificationManager().cancel(TRIP_NOTIFICATION_ID)
                         result.success(true)

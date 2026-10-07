@@ -24,6 +24,10 @@ import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/realtime/strikes.dart';
 import 'package:piedemove/ui/map/map_focus.dart';
 import 'package:piedemove/ui/map/map_style.dart';
+import 'package:piedemove/app/home_widget.dart';
+import 'package:piedemove/data/transit_index.dart' show cleanStopName;
+import 'package:piedemove/routing/departures.dart' show nextDepartures;
+import 'package:piedemove/places/favourites.dart';
 import 'package:piedemove/ui/intro/intro_page.dart';
 import 'package:piedemove/ui/map/map_view.dart';
 import 'package:piedemove/ui/nav/entity.dart';
@@ -49,18 +53,72 @@ class HomePage extends ConsumerStatefulWidget {
   ConsumerState<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends ConsumerState<HomePage> {
+class _HomePageState extends ConsumerState<HomePage>
+    with WidgetsBindingObserver {
   bool _centred = false;
+  Timer? _widgetTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       // First run: the intro first, where the location permission is asked
       // with its reason, not at launch.
       if (!await introSeen() && mounted) await openIntro(context);
       if (mounted) unawaited(ref.read(locationProvider.notifier).start());
+      await _widgetAction();
     });
+    // The home-screen widget: rewritten every minute while the app is open.
+    _widgetTimer =
+        Timer.periodic(const Duration(minutes: 1), (_) => _publishWidget());
+  }
+
+  @override
+  void dispose() {
+    _widgetTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) unawaited(_widgetAction());
+    if (state == AppLifecycleState.paused) _publishWidget();
+  }
+
+  /// The widget's next departures: the first favourite stop's, live.
+  void _publishWidget() {
+    final ix = ref.read(transitIndexProvider).valueOrNull;
+    if (ix == null) return;
+    final now = DateTime.now();
+    final stop = [
+      for (final key in ref.read(favouritesProvider))
+        if (key.startsWith('stop:')) ix.stopIndexById[key.substring(5)],
+    ].whereType<int>().firstOrNull;
+    unawaited(publishWidget(stop == null
+        ? widgetPayload(null, const [], now)
+        : widgetPayload(
+            cleanStopName(ix.stopNames[stop]),
+            nextDepartures(ix, stop, now, widgetDepartures,
+                delays: ref.read(delayLookupProvider),
+                unavailable: ref.read(unavailableLookupProvider)),
+            now)));
+  }
+
+  /// Casa/Lavoro tapped on the widget: plan that trip from here, now.
+  Future<void> _widgetAction() async {
+    final action = await takeWidgetAction();
+    if (action == null || !mounted) return;
+    final shortcut = Shortcut.values.where((s) => s.name == action).firstOrNull;
+    final place =
+        shortcut == null ? null : ref.read(shortcutPlacesProvider)[shortcut];
+    if (place == null) return;
+    // The position may need a moment after launch.
+    for (var i = 0; i < 20 && ref.read(myPositionProvider) == null; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+    if (mounted) planToPlace(context, ref, place);
   }
 
   Future<void> _recentre() async {
@@ -527,6 +585,27 @@ class _PillRow extends ConsumerWidget {
   }
 }
 
+/// Plans from the rider's position to [to], now (Casa/Lavoro, the widget).
+void planToPlace(BuildContext context, WidgetRef ref, Place to) {
+  final me = ref.read(myPositionProvider);
+  final plan = ref.read(tripPlanProvider.notifier)
+    ..setTo(to)
+    ..setWhen(WhenMode.now);
+  if (me != null) {
+    plan.setFrom(Place(
+        name: 'La mia posizione',
+        address: '',
+        lat: me.latitude,
+        lon: me.longitude));
+  }
+  if (ref.read(tripPlanProvider).query.from == null) {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Posizione non disponibile: scegli da dove parti.')));
+    return;
+  }
+  plan.plan();
+}
+
 /// Casa / Lavoro: tap plans from here to it now; the first tap (or a long
 /// press) picks the place.
 class ShortcutChip extends ConsumerWidget {
@@ -546,25 +625,7 @@ class ShortcutChip extends ConsumerWidget {
       }
     }
 
-    void go(Place to) {
-      final me = ref.read(myPositionProvider);
-      final plan = ref.read(tripPlanProvider.notifier)
-        ..setTo(to)
-        ..setWhen(WhenMode.now);
-      if (me != null) {
-        plan.setFrom(Place(
-            name: 'La mia posizione',
-            address: '',
-            lat: me.latitude,
-            lon: me.longitude));
-      }
-      if (ref.read(tripPlanProvider).query.from == null) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Posizione non disponibile: scegli da dove parti.')));
-        return;
-      }
-      plan.plan();
-    }
+    void go(Place to) => planToPlace(context, ref, to);
 
     Future<void> manage() async {
       final action = await showModalBottomSheet<String>(
