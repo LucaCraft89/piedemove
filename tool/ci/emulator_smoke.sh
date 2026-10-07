@@ -27,6 +27,19 @@ if [ -f "$REL" ]; then
   fi
 fi
 
+# The newest published release, as users download it: logged, never fatal
+# (the network or GitHub may be down; this checks what is already out).
+pub=$(curl -fsSL https://api.github.com/repos/LucaCraft89/piedemove/releases \
+  | python3 -c "import json,sys; r=[a['browser_download_url'] for x in json.load(sys.stdin) for a in x['assets'] if a['name'].endswith('.apk') and not a['name'].endswith('-arm64.apk')]; print(r[0] if r else '')" 2>/dev/null)
+if [ -n "$pub" ] && curl -fsSL -o /tmp/published.apk "$pub"; then
+  if adb install -r /tmp/published.apk > "$OUT/published-install.txt" 2>&1; then
+    echo "PM_PUBLISHED installs: $pub"
+  else
+    echo "PM_PUBLISHED does NOT install: $pub: $(tail -1 "$OUT/published-install.txt")"
+  fi
+  adb uninstall "$PKG" >/dev/null 2>&1 || true
+fi
+
 # Install first so the app's data dir exists, then seed the index the check
 # job built (the app would otherwise download ~250 MB and build it on device).
 adb install -r build/app/outputs/flutter-apk/app-debug.apk
