@@ -25,6 +25,7 @@ import 'package:piedemove/realtime/strikes.dart';
 import 'package:piedemove/ui/map/map_focus.dart';
 import 'package:piedemove/ui/map/map_style.dart';
 import 'package:piedemove/app/home_widget.dart';
+import 'package:piedemove/app/native_calls.dart';
 import 'package:piedemove/data/transit_index.dart' show cleanStopName;
 import 'package:piedemove/routing/departures.dart' show nextDepartures;
 import 'package:piedemove/places/favourites.dart';
@@ -69,9 +70,15 @@ class _HomePageState extends ConsumerState<HomePage>
       if (mounted) unawaited(ref.read(locationProvider.notifier).start());
       await _widgetAction();
     });
-    // The home-screen widget: rewritten every minute while the app is open.
+    // The home-screen widget: written as soon as there is something to show
+    // (timetable, favourites, a position), every minute while the app is
+    // open, and when the widget is tapped (it asks for a refresh).
     _widgetTimer =
         Timer.periodic(const Duration(minutes: 1), (_) => _publishWidget());
+    ref.listenManual(transitIndexProvider, (_, _) => _publishWidget());
+    ref.listenManual(favouritesProvider, (_, _) => _publishWidget());
+    ref.listenManual(myPositionProvider, (_, _) => _publishWidget());
+    onNativeCall('widgetRefresh', (_) => _publishWidget(force: true));
   }
 
   @override
@@ -87,16 +94,22 @@ class _HomePageState extends ConsumerState<HomePage>
     if (state == AppLifecycleState.paused) _publishWidget();
   }
 
-  /// The widget's next departures: the first favourite stop's, live.
-  void _publishWidget() {
+  /// The widget's next departures, live: the first favourite stop's, else
+  /// the stop nearest the rider.
+  void _publishWidget({bool force = false}) {
+    if (!mounted) return;
     final ix = ref.read(transitIndexProvider).valueOrNull;
     if (ix == null) return;
     final now = DateTime.now();
+    final me = ref.read(myPositionProvider);
     final stop = [
-      for (final key in ref.read(favouritesProvider))
-        if (key.startsWith('stop:')) ix.stopIndexById[key.substring(5)],
-    ].whereType<int>().firstOrNull;
-    unawaited(publishWidget(stop == null
+          for (final key in ref.read(favouritesProvider))
+            if (key.startsWith('stop:')) ix.stopIndexById[key.substring(5)],
+        ].whereType<int>().firstOrNull ??
+        (me == null
+            ? null
+            : stopsNear(ix, me.latitude, me.longitude).firstOrNull?.$1);
+    unawaited(publishWidget(force: force, stop == null
         ? widgetPayload(null, const [], now)
         : widgetPayload(
             cleanStopName(ix.stopNames[stop]),

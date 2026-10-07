@@ -20,10 +20,24 @@ class NextDeparturesWidget : AppWidgetProvider() {
         for (id in ids) manager.updateAppWidget(id, views(context))
     }
 
+    /// A tap on the widget: redraw from the stored departures at once (the
+    /// ones gone drop out) and, when the app is running, ask it for fresh
+    /// live ones (MainActivity forwards WIDGET_REFRESH to Dart).
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == ACTION_REFRESH) {
+            refresh(context)
+            context.sendBroadcast(Intent(APP_REFRESH).setPackage(context.packageName))
+            return
+        }
+        super.onReceive(context, intent)
+    }
+
     companion object {
         private const val PREFS = "piedemove_widget"
         private const val KEY = "data"
         const val EXTRA_ACTION = "pm_widget_action"
+        const val ACTION_REFRESH = "com.piedemove.piedemove.WIDGET_TAP"
+        const val APP_REFRESH = "com.piedemove.piedemove.WIDGET_REFRESH"
 
         fun save(context: Context, json: String) {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -56,9 +70,19 @@ class NextDeparturesWidget : AppWidgetProvider() {
             return String.format("%02d:%02d", c.get(Calendar.HOUR_OF_DAY), c.get(Calendar.MINUTE))
         }
 
+        private fun refreshTap(context: Context): PendingIntent =
+            PendingIntent.getBroadcast(
+                context,
+                13,
+                Intent(context, NextDeparturesWidget::class.java).setAction(ACTION_REFRESH),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+
         fun views(context: Context): RemoteViews {
             val v = RemoteViews(context.packageName, R.layout.widget_departures)
-            v.setOnClickPendingIntent(R.id.widget_root, open(context, null, 10))
+            // The body refreshes; the stop name opens the app.
+            v.setOnClickPendingIntent(R.id.widget_root, refreshTap(context))
+            v.setOnClickPendingIntent(R.id.widget_stop, open(context, null, 10))
             v.setOnClickPendingIntent(R.id.widget_home, open(context, "home", 11))
             v.setOnClickPendingIntent(R.id.widget_work, open(context, "work", 12))
             val rows = intArrayOf(R.id.widget_row1, R.id.widget_row2, R.id.widget_row3)
@@ -79,7 +103,11 @@ class NextDeparturesWidget : AppWidgetProvider() {
                     v.setTextViewText(R.id.widget_row2, "per vederne qui le partenze")
                     return v
                 }
-                v.setTextViewText(R.id.widget_stop, stop)
+                val at = j.optLong("at", 0L)
+                v.setTextViewText(
+                    R.id.widget_stop,
+                    if (at > 0) "$stop · ${hhmm(at)}" else stop,
+                )
                 val deps = j.optJSONArray("deps")
                 val now = System.currentTimeMillis()
                 var shown = 0
