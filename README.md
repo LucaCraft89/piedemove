@@ -5,7 +5,7 @@
 <h1 align="center">PiedeMove</h1>
 
 <p align="center">
-  <b>Turin's public-transport planner for people who ride for free.</b><br>
+  <b>Turin's public-transport planner for university students who ride for free.</b><br>
   Fewer steps, not fewer minutes.
 </p>
 
@@ -23,9 +23,10 @@
 
 ## The idea
 
-With a free-pass (*libera circolazione*) every ride costs nothing, so the only
-real price of a trip is the **walking**. Mainstream planners optimise for
-minutes and happily send you on a 600 m walk to save two of them.
+University students in Turin travel on GTT for free with the **PieMove
+card**: every ride costs nothing, so the only real price of a trip is the
+**walking**. Mainstream planners optimise for minutes and happily send you on
+a 600 m walk to save two of them.
 
 PiedeMove turns that around:
 
