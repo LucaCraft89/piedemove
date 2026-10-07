@@ -1,0 +1,1 @@
+Installazione più robusta e download più leggero (codice nativo compresso nell'APK); un APK solo arm64 accanto a quello universale; l'APK di rilascio viene installato su un emulatore prima di ogni versione.

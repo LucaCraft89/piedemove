@@ -1,0 +1,1 @@
+Sturdier install and a smaller download (native code compressed in the APK); an arm64-only APK next to the universal one; the release APK is installed on an emulator before every release.
