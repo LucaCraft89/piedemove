@@ -31,6 +31,21 @@ void main() {
     expect(compareVersions('0.9.0', '0.9.0-beta.14.1'), greaterThan(0));
   });
 
+  test('the update is the universal APK, not a per-ABI one', () {
+    final r = newestRelease([
+      {
+        'tag_name': 'v0.9.0-beta.16',
+        'html_url': 'https://x/v0.9.0-beta.16',
+        'assets': [
+          {'browser_download_url': 'https://x/piedemove-0.9.0-beta.16-arm64.apk'},
+          {'browser_download_url': 'https://x/piedemove-0.9.0-beta.16-armv7.apk'},
+          {'browser_download_url': 'https://x/piedemove-0.9.0-beta.16.apk'},
+        ],
+      },
+    ])!;
+    expect(r.apkUrl, 'https://x/piedemove-0.9.0-beta.16.apk');
+  });
+
   test('the newest release with an APK; drafts and data tags ignored', () {
     final r = newestRelease([
       _release('lines-latest', apk: false),

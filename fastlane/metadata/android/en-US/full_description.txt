@@ -1,0 +1,36 @@
+<p>University students in Turin ride GTT for free with the PieMove card. When every ride costs nothing, the only real price of a trip is the <b>walking</b>. PiedeMove plans for your feet, not just the clock.</p>
+
+<p><b>Plans for your feet</b></p>
+<ul>
+<li>Every line that can make each hop, in one badge (10 · 16 · 42)</li>
+<li>Short footpath transfers between nearby stops that the timetable never mentions</li>
+<li>Trades waiting and changes for less walking; balanced and fastest orderings, a walking cap, your walking speed</li>
+<li>Walking legs on real OpenStreetMap footpaths, marked "≈" when estimated</li>
+</ul>
+
+<p><b>Rides with you</b></p>
+<ul>
+<li>Live trip with strong "get off now" vibrations, also with the screen off</li>
+<li>Notification with progress and Sono salito / Sono sceso / Termina buttons on the lock screen</li>
+<li>"Hai perso il 2?" when the bus leaves without you, "Affrettati" when you will not make it, "Coincidenza a rischio" when a delay breaks your change</li>
+<li>Metro mode: the timetable and the live delay instead of useless underground GPS</li>
+<li>Arrival screen with time, walking and the walking you saved</li>
+</ul>
+
+<p><b>Knows what is happening</b></p>
+<ul>
+<li>GTT live vehicle positions, delays, cancellations and service alerts</li>
+<li>Strike banner with the guaranteed service bands</li>
+<li>Planning keeps working on the timetable when live data is down</li>
+</ul>
+
+<p><b>Fits your day</b></p>
+<ul>
+<li>Casa / Lavoro one tap away, live board for favourite stops, home-screen widget</li>
+<li>Offline map of the whole GTT area</li>
+<li>Your trips: walking and walking spared, month by month</li>
+</ul>
+
+<p><b>Private by design.</b> Everything runs on the phone: no account, no analytics, no backend. The timetable is built on the device from GTT open data; places come from Photon (OpenStreetMap), the map from OpenFreeMap.</p>
+
+<p>Data: GTT S.p.A. (non-commercial use, attributed; the app is free and ad-free), Regione Piemonte (CC BY 4.0), © OpenStreetMap contributors (ODbL). Not affiliated with GTT. Italian interface.</p>

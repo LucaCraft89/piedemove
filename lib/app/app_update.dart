@@ -81,12 +81,18 @@ AppRelease? newestRelease(List<dynamic> releases, {bool stableOnly = false}) {
     if (r['draft'] == true) continue;
     if (stableOnly && r['prerelease'] == true) continue;
     final tag = (r['tag_name'] as String?) ?? '';
-    final apk = (r['assets'] as List? ?? const [])
+    final apks = (r['assets'] as List? ?? const [])
         .whereType<Map>()
         .map((a) => a['browser_download_url'] as String?)
         .whereType<String>()
         .where((u) => u.endsWith('.apk'))
-        .firstOrNull;
+        .toList();
+    // The universal APK runs on every phone; the per-ABI ones (-arm64,
+    // -armv7) are smaller downloads for stores and manual installs.
+    final apk = apks
+            .where((u) => !u.endsWith('-arm64.apk') && !u.endsWith('-armv7.apk'))
+            .firstOrNull ??
+        apks.firstOrNull;
     if (apk == null) continue;
     final version = tag.startsWith('v') ? tag.substring(1) : tag;
     if (stableOnly && isPrerelease(version)) continue;

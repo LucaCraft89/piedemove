@@ -17,7 +17,9 @@
   <a href="LICENSE"><img alt="MIT licence (code)" src="https://img.shields.io/badge/code-MIT-blue"></a>
 </p>
 
-<!-- SCREENSHOTS -->
+<p align="center">
+  <img src="docs/assets/screens.png" width="100%" alt="Trip results with walking per leg, trip detail, the arrival screen and a line on the map">
+</p>
 
 ---
 

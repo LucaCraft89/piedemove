@@ -1,0 +1,1 @@
+Notification with Sono salito / Sono sceso / Termina buttons and a progress bar; "Coincidenza a rischio" when a delay breaks your change; home-screen widget with next departures and Casa / Lavoro; strike banner; walking stats ("I tuoi viaggi"); first-run intro; "Segnala un problema" with the trip log; fewer false live-data alarms.
