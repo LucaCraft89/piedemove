@@ -24,7 +24,10 @@ void main() {
   testWidgets('a card per favourite with its next vehicles', (t) async {
     SharedPreferences.setMockInitialValues({});
     final now = DateTime.now();
-    final secs = now.hour * 3600 + now.minute * 60;
+    // To the second, and every time half a minute off a minute boundary: the
+    // board reads the clock again a moment later, and with whole minutes a
+    // test started at hh:mm:59.9 saw 2' and 12' (CI, beta 16 run).
+    final secs = now.hour * 3600 + now.minute * 60 + now.second;
     final ix = syntheticIndex(
       stops: [
         ('A', 'PORTA NUOVA', 45.06, 7.678),
@@ -33,11 +36,11 @@ void main() {
       ],
       patterns: [
         ('10', RouteType.bus, ['A', 'C'], [
-          [secs + 240, secs + 900],
-          [secs + 840, secs + 1500],
+          [secs + 270, secs + 900],
+          [secs + 870, secs + 1500],
         ]),
         ('4', RouteType.tram, ['B', 'C'], [
-          [secs + 360, secs + 1000],
+          [secs + 390, secs + 1000],
         ]),
       ],
       serviceStartDay: TransitIndex.epochDay(now) - 1,
@@ -63,11 +66,10 @@ void main() {
     await t.pump();
     expect(find.text('PORTA NUOVA'), findsOneWidget);
     expect(find.text('POLITECNICO'), findsOneWidget);
-    // Minutes round down, and a few ms pass before the build: 4 or 3.
-    Finder mins(List<String> any) => find.byWidgetPredicate(
-        (w) => w is Text && any.contains(w.data));
-    expect(mins(["4'", "3'"]), findsOneWidget, reason: 'line 10 in 4 min');
-    expect(mins(["14'", "13'"]), findsOneWidget, reason: 'and the one after');
+    // Minutes round down: 4.5 min is 4', whatever ms pass before the build.
+    expect(find.text("4'"), findsOneWidget, reason: 'line 10 in 4 min');
+    expect(find.text("14'"), findsOneWidget, reason: 'and the one after');
+    expect(find.text("6'"), findsOneWidget, reason: 'tram 4 at POLITECNICO');
     expect(t.takeException(), isNull);
   });
 }
