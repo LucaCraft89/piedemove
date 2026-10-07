@@ -40,6 +40,7 @@ const _maxBackoff = Duration(minutes: 5);
 
 /// A realtime request that has not answered in this long is a failed poll.
 const rtFetchTimeout = Duration(seconds: 15);
+const rtAlertsFetchTimeout = Duration(seconds: 45);
 
 /// Data older than this, with every poll since failing, is dropped rather than
 /// shown as live: vehicles move, delays change.
@@ -65,10 +66,13 @@ class FeedHealth {
   final int? status;
   final int? bytes;
 
-  /// Stale once three intervals have passed without a good answer.
-  bool staleAt(DateTime now, Duration interval) =>
-      lastSuccess == null ||
-      now.difference(lastSuccess!) > interval * 3;
+  /// Stale once three intervals have passed without a good answer, or as
+  /// soon as a first request failed. A first answer still on its way is not
+  /// stale: at launch the chip said "non disponibili" for feeds that were
+  /// simply loading (the 150 KB alerts feed takes a few seconds).
+  bool staleAt(DateTime now, Duration interval) => lastSuccess == null
+      ? lastError != null
+      : now.difference(lastSuccess!) > interval * 3;
 }
 
 @immutable
@@ -134,7 +138,10 @@ typedef FeedFetch = Future<Uint8List> Function(String url);
 Future<Uint8List> _httpFetch(String url) async {
   // Without a timeout a stalled socket never reaches `finally`, and that feed
   // stops polling for the rest of the session.
-  final response = await http.get(Uri.parse(url)).timeout(rtFetchTimeout);
+  // The alerts feed is ~150 KB (the others 25-100 KB) and polled every 5 min:
+  // 15 s was too short on a slow connection (CI emulator, Oct 2026).
+  final limit = url == Feeds.gttAlerts ? rtAlertsFetchTimeout : rtFetchTimeout;
+  final response = await http.get(Uri.parse(url)).timeout(limit);
   if (response.statusCode != 200) {
     throw http.ClientException('HTTP ${response.statusCode}', Uri.parse(url));
   }

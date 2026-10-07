@@ -4,7 +4,11 @@ import android.Manifest
 import android.app.Notification
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.graphics.drawable.Icon
 import android.content.pm.PackageManager
 import android.hardware.GeomagneticField
 import android.hardware.Sensor
@@ -27,15 +31,61 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+    private var appChannel: MethodChannel? = null
+
+    /// Taps on the trip notification's buttons, forwarded to the live trip
+    /// (lib/location/trip_notification.dart) - screen off, phone locked.
+    private val tripActions = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            appChannel?.invokeMethod("notificationAction", intent.getStringExtra("action"))
+        }
+    }
+    private var tripActionsRegistered = false
+
+    /// Casa / Lavoro tapped on the home-screen widget, until Dart takes it.
+    private var widgetAction: String? = null
+
+    private fun captureWidgetAction(intent: Intent?) {
+        intent?.getStringExtra(NextDeparturesWidget.EXTRA_ACTION)?.let {
+            widgetAction = it
+            intent.removeExtra(NextDeparturesWidget.EXTRA_ACTION)
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        captureWidgetAction(intent)
+    }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        if (tripActionsRegistered) {
+            unregisterReceiver(tripActions)
+            tripActionsRegistered = false
+        }
+        appChannel = null
+        super.cleanUpFlutterEngine(flutterEngine)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        captureWidgetAction(intent)
+        if (!tripActionsRegistered) {
+            val filter = IntentFilter(TRIP_ACTION)
+            if (Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(tripActions, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("UnspecifiedRegisterReceiverFlag")
+                registerReceiver(tripActions, filter)
+            }
+            tripActionsRegistered = true
+        }
         // Live trip cues (lib/location/haptics.dart): a full-strength waveform
         // with alarm usage, so "get off now" is felt in a pocket on a bus and
         // is not muted by the touch-feedback setting like a haptic tap is.
         // App info and links (lib/app/app_update.dart): the installed version
         // for the update check, and the browser for the APK download.
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "piedemove/app")
-            .setMethodCallHandler { call, result ->
+        appChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "piedemove/app")
+        appChannel!!.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "version" -> result.success(
                         try {
@@ -68,8 +118,18 @@ class MainActivity : FlutterActivity() {
                         showTripNotification(
                             call.argument<String>("title") ?: "",
                             call.argument<String>("text") ?: "",
+                            call.argument<Int>("progress") ?: -1,
+                            call.argument<String>("primary"),
                         ),
                     )
+                    "widget" -> {
+                        NextDeparturesWidget.save(this, call.argument<String>("json") ?: "")
+                        result.success(true)
+                    }
+                    "takeWidgetAction" -> {
+                        result.success(widgetAction)
+                        widgetAction = null
+                    }
                     "tripNotificationCancel" -> {
                         notificationManager().cancel(TRIP_NOTIFICATION_ID)
                         result.success(true)
@@ -282,7 +342,23 @@ class MainActivity : FlutterActivity() {
     /// channel as geolocator's GeolocatorLocationService) with the trip's
     /// current instruction; a tap brings the app back. Skipped until the
     /// service has created its channel, so nothing lingers without it.
-    private fun showTripNotification(title: String, text: String): Boolean {
+    private fun tripAction(action: String, code: Int): PendingIntent =
+        PendingIntent.getBroadcast(
+            this,
+            code,
+            Intent(TRIP_ACTION).setPackage(packageName).putExtra("action", action),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+
+    /// [progress] 0..100 of the trip's length, -1 for none; [primary] the
+    /// label of the "advance" button (Sono salito / Sono sceso / Sono
+    /// arrivato), null for none. "Termina" is always there.
+    private fun showTripNotification(
+        title: String,
+        text: String,
+        progress: Int,
+        primary: String?,
+    ): Boolean {
         val nm = notificationManager()
         if (Build.VERSION.SDK_INT >= 26 &&
             nm.getNotificationChannel(TRIP_NOTIFICATION_CHANNEL) == null
@@ -302,7 +378,7 @@ class MainActivity : FlutterActivity() {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
         }
-        val notification = builder
+        builder
             .setContentTitle(title)
             .setContentText(text)
             .setStyle(Notification.BigTextStyle().bigText(text))
@@ -310,7 +386,17 @@ class MainActivity : FlutterActivity() {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(open)
-            .build()
+        if (progress in 0..100) builder.setProgress(100, progress, false)
+        val icon = Icon.createWithResource(this, R.drawable.ic_stat_piedemove)
+        if (primary != null) {
+            builder.addAction(
+                Notification.Action.Builder(icon, primary, tripAction("advance", 1)).build(),
+            )
+        }
+        builder.addAction(
+            Notification.Action.Builder(icon, "Termina", tripAction("stop", 2)).build(),
+        )
+        val notification = builder.build()
         return try {
             nm.notify(TRIP_NOTIFICATION_ID, notification)
             true
@@ -323,6 +409,7 @@ class MainActivity : FlutterActivity() {
         // geolocator_android's GeolocatorLocationService constants.
         private const val TRIP_NOTIFICATION_ID = 75415
         private const val TRIP_NOTIFICATION_CHANNEL = "geolocator_channel_01"
+        private const val TRIP_ACTION = "com.piedemove.piedemove.TRIP_ACTION"
     }
 
     /// The user's notification sound, once ("scendi ora" with sound on).

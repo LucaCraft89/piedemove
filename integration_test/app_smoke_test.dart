@@ -103,6 +103,14 @@ void logVehicles(ProviderContainer c) {
       modes[ix.routeTypes[r]] = (modes[ix.routeTypes[r]] ?? 0) + 1;
     }
   }
+  final health = c.read(realtimeProvider).health;
+  // ignore: avoid_print
+  print('PM_FEEDS ${[
+    for (final k in RtFeedKind.values)
+      '${k.name}: ${health[k]?.lastSuccess == null ? 'no answer' : 'ok'}'
+          '${health[k]?.bytes == null ? '' : ' ${health[k]!.bytes} B'}'
+          '${health[k]?.lastError == null ? '' : ' error ${health[k]!.lastError}'}'
+  ].join('; ')}');
   // ignore: avoid_print
   print('PM_VEHICLES ${vehicles.length} byType=$modes '
       'unknown=${unknown.take(20).toList()}');
@@ -116,6 +124,13 @@ void main() {
     WidgetController.hitTestWarningShouldBeFatal = true;
     app.main();
     await t.pump();
+    // First run: the intro (a fresh emulator install always has it).
+    if (await pumpUntil(t, () => find.text('Salta').evaluate().isNotEmpty,
+        timeout: const Duration(seconds: 10))) {
+      await step(t, '00-intro');
+      await t.tap(find.text('Salta'));
+      await t.pumpAndSettle();
+    }
     final container =
         ProviderScope.containerOf(t.element(find.byType(HomePage)));
 
@@ -214,6 +229,7 @@ void main() {
       arrivedAt: arrived,
       plannedArrival: arrived.subtract(const Duration(minutes: 2)),
       walkMetres: ridden.walkMetres,
+      directWalkMetres: 3200, // shows the "a piedi invece di" line
       rides: [
         for (final l in ridden.legs)
           if (l.kind == LegKind.ride)

@@ -188,7 +188,7 @@ Feed facts as built on 2026-09-19 (`feed_version` 20260919):
   `StopTimeUpdate.schedule_relationship` SKIPPED (5 = 1) are decoded;
   `unavailableLookupProvider` feeds departures and the planner (today's runs
   only). Every alert `active_period` counts. Realtime fetches time out after
-  15 s; vehicles older than 3 min / delays older than 10 min with every poll
+  15 s (alerts 45 s, ~150 KB); vehicles older than 3 min / delays older than 10 min with every poll
   failing since are dropped, not shown as live. Alerts are the exception:
   the last good feed is saved (`FileAlertCache`, `<support>/rt/alerts.pb` +
   `alerts.at`) and restored at start (`FeedHealth.cached`); the alert list

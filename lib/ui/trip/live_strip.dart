@@ -159,6 +159,7 @@ class _LiveStripState extends ConsumerState<LiveStrip> {
     final ix = ref.watch(transitIndexProvider).valueOrNull;
     final controller = ref.read(liveTripProvider.notifier);
     final missed = ref.watch(missedRideProvider);
+    final risk = live.riding ? ref.watch(connectionRiskProvider) : null;
     final theme = Theme.of(context);
     final now = DateTime.now();
     final stats = ix == null
@@ -167,10 +168,6 @@ class _LiveStripState extends ConsumerState<LiveStrip> {
             now: now,
             delays: ref.watch(delayLookupProvider),
             unavailable: ref.watch(unavailableLookupProvider));
-    final boarding =
-        live.leg.kind == LegKind.walk &&
-        !live.isLastLeg &&
-        live.route.legs[live.legIndex + 1].kind == LegKind.ride;
     // At the stop: the walk is done, what matters is the bus.
     final waiting = waitingLabel(live, ix, coming: stats?.next);
     final hurry = hurryLabel(live, stats?.next, now,
@@ -232,6 +229,8 @@ class _LiveStripState extends ConsumerState<LiveStrip> {
                       onWait: () => controller.waitForNext(stats?.next?.time),
                       onBoarded: controller.manualAdvance,
                     )
+                  else if (risk != null)
+                    _RiskBanner(text: connectionRiskLabel(risk))
                   else if (live.offRoute)
                     _RecalculateBanner(
                       onRecalculate: () => _recalculate(live, controller),
@@ -308,13 +307,7 @@ class _LiveStripState extends ConsumerState<LiveStrip> {
                         // Always available: the sensors are a help, not a gate.
                         child: FilledButton.tonal(
                           onPressed: controller.manualAdvance,
-                          child: Text(
-                            live.leg.kind == LegKind.ride
-                                ? 'Sono sceso'
-                                : boarding
-                                ? 'Sono salito'
-                                : 'Sono arrivato',
-                          ),
+                          child: Text(advanceLabel(live)),
                         ),
                       ),
                       if (live.leg.kind == LegKind.walk && waiting == null)
@@ -567,6 +560,37 @@ class _MissedBanner extends StatelessWidget {
               TextButton(onPressed: onBoarded, child: const Text('Sono salito')),
             ],
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// "Coincidenza a rischio": the next ride's planned run leaves before the
+/// rider gets there. Information only - the stop shows the next one anyway.
+class _RiskBanner extends StatelessWidget {
+  const _RiskBanner({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final on = theme.colorScheme.onErrorContainer;
+    return Container(
+      margin: const EdgeInsets.only(bottom: Gap.element),
+      padding: const EdgeInsets.all(Gap.element),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.errorContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Coincidenza a rischio',
+              style: theme.textTheme.titleSmall
+                  ?.copyWith(color: on, fontWeight: FontWeight.w700)),
+          Text(text, style: theme.textTheme.bodyMedium?.copyWith(color: on)),
         ],
       ),
     );

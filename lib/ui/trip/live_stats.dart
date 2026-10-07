@@ -13,6 +13,7 @@ import 'package:piedemove/data/transit_index.dart';
 import 'package:piedemove/location/live_trip.dart';
 import 'package:piedemove/routing/departures.dart';
 import 'package:piedemove/routing/journey.dart';
+import 'package:piedemove/ui/trip/trip_format.dart' show hhmm;
 
 class LiveStats {
   const LiveStats({
@@ -210,4 +211,78 @@ String? delayLabel(int? delay) {
   if (delay.abs() < 60) return 'in orario';
   final m = (delay / 60).round();
   return m > 0 ? '+$m min' : '$m min';
+}
+
+/// Riding towards a change that the live times say will not work: the
+/// expected arrival here plus the planned walk is after the next ride's
+/// planned run leaves. Seen from the bus, not at the stop.
+class ConnectionRisk {
+  const ConnectionRisk({
+    required this.lines,
+    required this.ready,
+    required this.planned,
+    this.next,
+  });
+
+  /// The next ride's line names, `2` or `2, 22`.
+  final String lines;
+
+  /// When the rider can be at its stop: arrival here plus the walk.
+  final DateTime ready;
+
+  /// The planned run's expected departure (with its live delay).
+  final DateTime planned;
+
+  /// The first vehicle of those lines the rider can still catch, if any
+  /// within the hour.
+  final Departure? next;
+}
+
+ConnectionRisk? connectionRisk(
+  LiveTripState s,
+  TransitIndex ix, {
+  required DateTime now,
+  DelayLookup? delays,
+  UnavailableLookup? unavailable,
+}) {
+  if (!s.riding || s.finished) return null;
+  final legs = s.journey.legs;
+  final k = legs.indexWhere((l) => l.kind == LegKind.ride, s.legIndex + 1);
+  if (k < 0) return null;
+  final arrive = liveStats(s, ix,
+          now: now, delays: delays, unavailable: unavailable)
+      .alightAt;
+  if (arrive == null) return null;
+  var walk = 0;
+  for (var j = s.legIndex + 1; j < k; j++) {
+    walk += legs[j].arrival - legs[j].departure;
+  }
+  final ready = arrive.add(Duration(seconds: walk));
+  final ride = legs[k];
+  final o = ride.options.firstOrNull;
+  if (o == null) return null;
+  final pos = _positions(ix, o.pattern, ride);
+  final delay = pos == null ? 0 : (delays?.call(o.trip, pos.$1) ?? 0);
+  final planned = s.journey.timeOf(ride.departure + delay);
+  if (!ready.isAfter(planned)) return null;
+  final patterns = {for (final x in ride.options) x.pattern};
+  final next = nextDepartures(ix, ride.fromStop, ready, 40,
+          delays: delays, unavailable: unavailable, horizonSeconds: 3600)
+      .where((d) => patterns.contains(d.pattern))
+      .firstOrNull;
+  return ConnectionRisk(
+    lines: {for (final x in ride.options) x.routeShortName}.join(', '),
+    ready: ready,
+    planned: planned,
+    next: next,
+  );
+}
+
+/// `Il 2 delle 13:13 parte prima che arrivi (13:14) · il prossimo 13:23`.
+String connectionRiskLabel(ConnectionRisk r) {
+  final next = r.next == null
+      ? 'nessun altro entro un\'ora'
+      : 'il prossimo ${hhmm(r.next!.time)}';
+  return 'Il ${r.lines} delle ${hhmm(r.planned)} parte prima che arrivi '
+      '(${hhmm(r.ready)}) · $next';
 }

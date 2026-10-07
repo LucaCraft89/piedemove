@@ -506,6 +506,19 @@ void main() {
     });
   });
 
+  test('notification: button and progress follow the trip', () {
+    var s = _start();
+    expect(advanceLabel(s), 'Sono salito');
+    expect(tripProgress(s), 0);
+    s = nextLeg(s); // aboard at s0
+    expect(advanceLabel(s), 'Sono sceso');
+    final atBoard = tripProgress(s);
+    expect(atBoard, inInclusiveRange(10, 25), reason: 'the walk is behind');
+    s = advanceLive(s, _fix(_lat, _lon0 + 2 * _step, speed: 6));
+    expect(tripProgress(s), greaterThan(atBoard));
+    expect(tripProgress(nextLeg(s)), 100);
+  });
+
   group('missed bus', () {
     final day = DateTime(2026, 9, 19);
     // The ride leaves at 60 s past midnight.
