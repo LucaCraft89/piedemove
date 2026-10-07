@@ -34,6 +34,8 @@ import 'package:piedemove/location/trip_summary.dart';
 import 'package:piedemove/location/haptics.dart';
 import 'package:piedemove/location/trip_notification.dart';
 import 'package:piedemove/places/photon.dart' show Place;
+import 'package:piedemove/ui/trip/live_stats.dart';
+import 'package:piedemove/ui/trip/trip_format.dart' show hhmm, metresLabel;
 import 'package:piedemove/ui/trip/trip_plan.dart';
 
 /// Distances the rules turn on (§12), all metres.
@@ -642,6 +644,26 @@ String liveNotificationText(LiveTripState s) {
   return walkStripText(s);
 }
 
+/// The advance button's label, on the strip and in the notification.
+String advanceLabel(LiveTripState s) {
+  if (s.riding) return 'Sono sceso';
+  final boarding = !s.isLastLeg && s.route.legs[s.legIndex + 1].kind == LegKind.ride;
+  return boarding ? 'Sono salito' : 'Sono arrivato';
+}
+
+/// Share of the trip's length behind the rider, 0..100, for the
+/// notification's progress bar.
+int tripProgress(LiveTripState s) {
+  var total = 0.0, done = 0.0;
+  for (final (i, l) in s.route.legs.indexed) {
+    total += l.metres;
+    if (i < s.legIndex) done += l.metres;
+  }
+  if (s.finished) return 100;
+  done += s.along.clamp(0.0, s.leg.metres);
+  return total <= 0 ? 0 : (done * 100 / total).round().clamp(0, 100);
+}
+
 /// Result of [projectAhead].
 typedef Projection = ({double along, double distance});
 
@@ -979,8 +1001,9 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   LiveFix? _lastPos;
   LiveFix? _lastGood;
 
-  /// Text last put in the trip notification.
-  String? _notified;
+  /// What was last put in the trip notification (title, text, progress,
+  /// button), so it is rewritten only when it changes.
+  Object? _notified;
 
   /// The latest device fix, or null when none arrived yet.
   LiveFix? get lastFix => _lastPos;
@@ -1025,6 +1048,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     _notified = null;
     // Android 13+: the trip notification needs the user's yes (asked once).
     unawaited(requestNotificationPermission());
+    onTripNotificationAction(_onNotificationAction);
     _listen();
     _stale = Timer.periodic(const Duration(seconds: 5), (_) => _onStale());
     unawaited(_wake(true));
@@ -1053,7 +1077,11 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     final next = nextLeg(s, at: DateTime.now());
     _ref.read(missedRideProvider.notifier).state = null;
     state = next;
-    if (next.finished) _finish(next);
+    if (next.finished) {
+      _finish(next);
+    } else {
+      _notify(next);
+    }
   }
 
   /// Arrived: the summary replaces the strip, then everything stops.
@@ -1252,6 +1280,43 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     return null;
   }
 
+  /// The notification says what the strip says, when it changes: the
+  /// instruction, arrival and distance left, a progress bar (2 % steps) and
+  /// the advance button, usable with the phone locked.
+  void _notify(LiveTripState s) {
+    if (s.finished) return;
+    final title = liveNotificationText(s);
+    var text = liveNotificationTitle;
+    final ix = _ref.read(transitIndexProvider).valueOrNull;
+    if (ix != null) {
+      final stats = liveStats(s, ix,
+          now: DateTime.now(),
+          delays: _ref.read(delayLookupProvider),
+          unavailable: _ref.read(unavailableLookupProvider));
+      text = 'Arrivo ${hhmm(stats.arrival)}'
+          '${stats.arrivalLive ? '' : ' (orario)'}'
+          ' · mancano ${metresLabel(stats.metresLeft)}';
+    }
+    final progress = tripProgress(s) ~/ 2 * 2;
+    final primary = advanceLabel(s);
+    final key = (title, text, progress, primary);
+    if (key == _notified) return;
+    _notified = key;
+    unawaited(showTripNotification(title, text,
+        progress: progress, primary: primary));
+  }
+
+  /// A button in the notification: the same as on the strip.
+  void _onNotificationAction(String action) {
+    if (state == null) return;
+    switch (action) {
+      case 'advance':
+        manualAdvance();
+      case 'stop':
+        stop();
+    }
+  }
+
   /// "Aspetto il prossimo": keep the trip, watch [next] (the next vehicle
   /// of the ride's lines, null when unknown: ten minutes from now).
   void waitForNext(DateTime? next) {
@@ -1297,12 +1362,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
 
   void _apply(LiveTripState next) {
     state = next;
-    // The notification says what the strip says, when it changes.
-    final text = liveNotificationText(next);
-    if (!next.finished && text != _notified) {
-      _notified = text;
-      unawaited(showTripNotification(liveNotificationTitle, text));
-    }
+    _notify(next);
     if (next.cue != null && next.cueSeq != _lastCueSeq) {
       _lastCueSeq = next.cueSeq;
       unawaited(vibrateCue(next.cue!,

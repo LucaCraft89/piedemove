@@ -167,10 +167,6 @@ class _LiveStripState extends ConsumerState<LiveStrip> {
             now: now,
             delays: ref.watch(delayLookupProvider),
             unavailable: ref.watch(unavailableLookupProvider));
-    final boarding =
-        live.leg.kind == LegKind.walk &&
-        !live.isLastLeg &&
-        live.route.legs[live.legIndex + 1].kind == LegKind.ride;
     // At the stop: the walk is done, what matters is the bus.
     final waiting = waitingLabel(live, ix, coming: stats?.next);
     final hurry = hurryLabel(live, stats?.next, now,
@@ -308,13 +304,7 @@ class _LiveStripState extends ConsumerState<LiveStrip> {
                         // Always available: the sensors are a help, not a gate.
                         child: FilledButton.tonal(
                           onPressed: controller.manualAdvance,
-                          child: Text(
-                            live.leg.kind == LegKind.ride
-                                ? 'Sono sceso'
-                                : boarding
-                                ? 'Sono salito'
-                                : 'Sono arrivato',
-                          ),
+                          child: Text(advanceLabel(live)),
                         ),
                       ),
                       if (live.leg.kind == LegKind.walk && waiting == null)
