@@ -1,0 +1,10 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Keeps location fixes coming with the screen off during a live trip. -->
+        <service
+            android:name="com.piedemove.fosslocation.FossLocationService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+    </application>
+</manifest>

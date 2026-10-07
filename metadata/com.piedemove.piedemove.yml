@@ -1,0 +1,49 @@
+# Draft F-Droid build recipe (for a merge request to fdroiddata). Builds the
+# `fdroid` branch: no Google Play Services (local geolocator on Android's
+# LocationManager, MapLibre without its Google location engine), no
+# GTT-derived files in the APK, no self-update. See FDROID.md.
+Categories:
+  - Navigation
+License: MIT
+AuthorName: LucaCraft89
+SourceCode: https://github.com/LucaCraft89/piedemove
+IssueTracker: https://github.com/LucaCraft89/piedemove/issues
+Changelog: https://github.com/LucaCraft89/piedemove/releases
+
+AntiFeatures:
+  NonFreeNet:
+    en-US: >-
+      Live departures, delays and alerts come from GTT's GTFS-realtime feeds,
+      and line geometry derived from GTT's open data (non-commercial licence)
+      is downloaded at first launch.
+
+AutoName: PiedeMove
+
+RepoType: git
+Repo: https://github.com/LucaCraft89/piedemove.git
+
+Builds:
+  - versionName: 0.9.0-beta.15
+    versionCode: 16
+    commit: fdroid-v0.9.0-beta.15
+    output: build/app/outputs/flutter-apk/app-release.apk
+    srclibs:
+      - flutter@stable
+    rm:
+      - assets/lines.bin.gz
+      - assets/ambient.json.gz
+      - assets/connectors.json.gz
+    prebuild:
+      - export PUB_CACHE=$(pwd)/.pub-cache
+      - $$flutter$$/bin/flutter config --no-analytics
+      - $$flutter$$/bin/flutter pub get
+    scanignore:
+      - .pub-cache
+    build:
+      - export PUB_CACHE=$(pwd)/.pub-cache
+      - $$flutter$$/bin/flutter build apk --release
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags ^fdroid-v
+CurrentVersion: 0.9.0-beta.15
+CurrentVersionCode: 16

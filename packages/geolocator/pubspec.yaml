@@ -1,0 +1,22 @@
+name: geolocator
+description: >-
+  PiedeMove F-Droid build: the part of the geolocator API the app uses, on
+  Android's own LocationManager - no Google Play Services. Swapped in with
+  dependency_overrides on the fdroid branch only.
+version: 14.0.3+foss
+publish_to: none
+
+environment:
+  sdk: ^3.12.2
+  flutter: ">=3.27.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.piedemove.fosslocation
+        pluginClass: FossLocationPlugin

@@ -72,10 +72,9 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  # F-Droid build: no GTT-derived line geometry in the APK (GTT data is
+  # non-commercial); the app downloads it on first launch (lines-latest).
   assets:
-    - assets/ambient.json.gz
-    - assets/connectors.json.gz
-    - assets/lines.bin.gz
     - assets/entrances.json.gz
     - assets/walk_graph.pmwg.gz
 
@@ -114,3 +113,12 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+# F-Droid build (fdroid branch only): no Google Play Services. Location runs
+# on Android's own LocationManager (packages/geolocator, same API as the
+# geolocator package), and MapLibre without its Google location engine.
+dependency_overrides:
+  geolocator:
+    path: packages/geolocator
+  maplibre_gl:
+    path: packages/maplibre_gl

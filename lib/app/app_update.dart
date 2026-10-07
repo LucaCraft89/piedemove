@@ -121,12 +121,18 @@ Future<bool> openUrl(String url) async {
 /// The newest release when it is newer than this build, else null. Checks
 /// the network at most once per [updateCheckInterval] (the last answer is
 /// kept in between); [force] checks now.
+/// False in the F-Droid build: F-Droid delivers the updates, and an app
+/// there must not fetch APKs on its own.
+const appSelfUpdate = false;
+
 Future<AppRelease?> checkForUpdate({
   bool force = false,
   http.Client? client,
   String? current,
   DateTime Function() now = DateTime.now,
+  bool enabled = appSelfUpdate,
 }) async {
+  if (!enabled) return null;
   final installed = current ?? await installedVersion();
   if (installed == null) return null;
   SharedPreferences? prefs;

@@ -55,11 +55,13 @@ android {
 
     buildTypes {
         release {
+            // F-Droid build: without a release keystore the APK stays
+            // unsigned - F-Droid signs what it builds.
             signingConfig = if (releaseStoreFile != null) {
                 signingConfigs.getByName("release")
             } else {
-                logger.warn("piedemove: no release keystore configured, signing release with the debug key")
-                signingConfigs.getByName("debug")
+                logger.warn("piedemove: no release keystore configured, release APK left unsigned (F-Droid signs it)")
+                null
             }
         }
     }

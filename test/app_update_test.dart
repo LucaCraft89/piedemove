@@ -57,10 +57,10 @@ void main() {
 
     test('offers a newer beta, not the installed one', () async {
       final c = server([_release('v0.9.0-beta.8')]);
-      expect((await checkForUpdate(client: c, current: '0.9.0-beta.7'))!
+      expect((await checkForUpdate(enabled: true, client: c, current: '0.9.0-beta.7'))!
           .version, '0.9.0-beta.8');
       expect(
-          await checkForUpdate(
+          await checkForUpdate(enabled: true, 
               client: c, current: '0.9.0-beta.8', force: true),
           isNull);
     });
@@ -68,14 +68,14 @@ void main() {
     test('at most once a day; the last answer is kept between', () async {
       final c = server([_release('v0.9.0-beta.8')]);
       final t0 = DateTime(2026, 9, 26, 9);
-      await checkForUpdate(client: c, current: '0.9.0-beta.7', now: () => t0);
-      final again = await checkForUpdate(
+      await checkForUpdate(enabled: true, client: c, current: '0.9.0-beta.7', now: () => t0);
+      final again = await checkForUpdate(enabled: true, 
           client: c,
           current: '0.9.0-beta.7',
           now: () => t0.add(const Duration(hours: 3)));
       expect(calls, 1);
       expect(again!.version, '0.9.0-beta.8', reason: 'from the kept answer');
-      await checkForUpdate(
+      await checkForUpdate(enabled: true, 
           client: c,
           current: '0.9.0-beta.7',
           now: () => t0.add(const Duration(days: 1, minutes: 1)));
@@ -84,11 +84,11 @@ void main() {
 
     test('offline or rate limited: nothing, never a throw', () async {
       final down = MockClient((_) async => throw Exception('offline'));
-      expect(await checkForUpdate(client: down, current: '0.9.0-beta.7'),
+      expect(await checkForUpdate(enabled: true, client: down, current: '0.9.0-beta.7'),
           isNull);
       final limited = MockClient((_) async => http.Response('{}', 403));
       expect(
-          await checkForUpdate(
+          await checkForUpdate(enabled: true, 
               client: limited, current: '0.9.0-beta.7', force: true),
           isNull);
     });
@@ -107,5 +107,10 @@ void main() {
 
   test('stable 0.9.0 is newer than every 0.9.0 beta', () {
     expect(compareVersions('0.9.0', '0.9.0-beta.8'), greaterThan(0));
+  });
+
+  test('the F-Droid build never fetches an update', () async {
+    expect(appSelfUpdate, isFalse);
+    expect(await checkForUpdate(current: '0.0.1'), isNull);
   });
 }

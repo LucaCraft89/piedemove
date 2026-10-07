@@ -465,16 +465,18 @@ class _VersionRowState extends ConsumerState<_VersionRow> {
       contentPadding: EdgeInsets.zero,
       leading: const Icon(Icons.system_update_outlined),
       title: Text('Versione ${_installed ?? '…'}'),
-      subtitle: Text(found != null
-          ? 'Disponibile ${found.version}: tocca per scaricarla'
-          : _status ?? 'Tocca per cercare aggiornamenti'),
+      subtitle: Text(!appSelfUpdate
+          ? 'Gli aggiornamenti arrivano da F-Droid'
+          : found != null
+              ? 'Disponibile ${found.version}: tocca per scaricarla'
+              : _status ?? 'Tocca per cercare aggiornamenti'),
       trailing: _busy
           ? const SizedBox(
               width: 20,
               height: 20,
               child: CircularProgressIndicator(strokeWidth: 2))
           : null,
-      onTap: _busy
+      onTap: _busy || !appSelfUpdate
           ? null
           : () => found != null ? openUrl(found.apkUrl) : _check(),
     );

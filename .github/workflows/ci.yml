@@ -5,7 +5,7 @@ name: ci
 
 on:
   push:
-    branches: [main, 'claude/**', 'release/**']
+    branches: [main, fdroid, 'claude/**', 'release/**']
   pull_request:
   workflow_dispatch:
 
