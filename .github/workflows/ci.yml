@@ -3,10 +3,15 @@
 # screenshot tour. Screenshots, logcat and the test log are uploaded.
 name: ci
 
+# Text-only changes (README, notes, store listing) skip the whole run: no
+# 10-minute emulator tour for a typo. A release always touches pubspec.yaml,
+# so it never skips.
 on:
   push:
     branches: [main, 'claude/**', 'release/**']
+    paths-ignore: ['**/*.md', 'docs/**', 'fastlane/**', 'LICENSE']
   pull_request:
+    paths-ignore: ['**/*.md', 'docs/**', 'fastlane/**', 'LICENSE']
   workflow_dispatch:
 
 concurrency:
