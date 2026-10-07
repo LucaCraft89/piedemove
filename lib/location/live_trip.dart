@@ -30,6 +30,7 @@ import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/routing/journey.dart';
 import 'package:piedemove/settings/settings.dart';
 import 'package:piedemove/location/bus_match.dart';
+import 'package:piedemove/location/trip_history.dart';
 import 'package:piedemove/location/trip_log.dart';
 import 'package:piedemove/location/trip_summary.dart';
 import 'package:piedemove/location/haptics.dart';
@@ -1106,10 +1107,12 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   /// Arrived: the summary replaces the strip, then everything stops.
   void _finish(LiveTripState s) {
     final now = DateTime.now();
-    _ref.read(tripSummaryProvider.notifier).state = tripSummary(s,
+    final summary = tripSummary(s,
         startedAt: _startedAt ?? now,
         arrivedAt: now,
         destination: _ref.read(tripPlanProvider).query.to?.name);
+    _ref.read(tripSummaryProvider.notifier).state = summary;
+    unawaited(_ref.read(tripHistoryProvider.notifier).add(TripRecord.of(summary)));
     stop();
   }
 

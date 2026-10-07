@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:piedemove/location/trip_summary.dart';
+import 'package:piedemove/ui/settings/stats_page.dart' show kmLabel, openStats;
 import 'package:piedemove/ui/theme/tokens.dart';
 import 'package:piedemove/ui/trip/live_strip.dart' show StatTile;
 import 'package:piedemove/ui/trip/trip_format.dart';
@@ -95,6 +96,28 @@ class ArrivalSheet extends ConsumerWidget {
                       ),
                     ],
                   ),
+                  if (s.directWalkMetres > s.walkMetres + 200) ...[
+                    const SizedBox(height: Gap.element),
+                    InkWell(
+                      onTap: () => openStats(context),
+                      child: Row(
+                        children: [
+                          Icon(Icons.savings_outlined,
+                              size: 18, color: context.tokens.live),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'A piedi ${kmLabel(s.walkMetres)} invece di '
+                              '${kmLabel(s.directWalkMetres)}',
+                              style: theme.textTheme.bodyMedium
+                                  ?.copyWith(fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                          const Icon(Icons.chevron_right, size: 18),
+                        ],
+                      ),
+                    ),
+                  ],
                   if (s.rides.isNotEmpty) ...[
                     const SizedBox(height: Gap.element),
                     Wrap(

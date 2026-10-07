@@ -4,7 +4,9 @@ library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:piedemove/geo/distance.dart';
 import 'package:piedemove/location/live_trip.dart';
+import 'package:piedemove/routing/footpaths.dart' show walkDetourFactor;
 import 'package:piedemove/routing/journey.dart';
 
 class TripSummary {
@@ -15,6 +17,8 @@ class TripSummary {
     required this.plannedArrival,
     required this.walkMetres,
     required this.rides,
+    this.rideMetres = 0,
+    this.directWalkMetres = 0,
   });
 
   /// The planner's destination name, or null when it had none.
@@ -25,6 +29,13 @@ class TripSummary {
 
   /// Along the walking legs as drawn: approximate, always shown with "≈".
   final double walkMetres;
+
+  /// Along the rides as drawn.
+  final double rideMetres;
+
+  /// Walking the whole way instead: straight line × the street detour
+  /// factor, approximate ("≈").
+  final double directWalkMetres;
 
   /// Per ride, every line that could make it: (short name, route type).
   final List<List<(String, int)>> rides;
@@ -44,16 +55,26 @@ TripSummary tripSummary(
   required DateTime arrivedAt,
   String? destination,
 }) {
-  var walk = 0.0;
+  var walk = 0.0, ride = 0.0;
   for (final l in s.route.legs) {
-    if (l.kind == LegKind.walk) walk += l.metres;
+    if (l.kind == LegKind.walk) {
+      walk += l.metres;
+    } else {
+      ride += l.metres;
+    }
   }
+  final first = s.route.legs.first, last = s.route.legs.last;
+  final direct = haversineMetres(
+          first.lat.first, first.lon.first, last.lat.last, last.lon.last) *
+      walkDetourFactor;
   return TripSummary(
     destination: destination == null || destination.isEmpty ? null : destination,
     startedAt: startedAt,
     arrivedAt: arrivedAt,
     plannedArrival: s.journey.timeOf(s.journey.arrival),
     walkMetres: walk,
+    rideMetres: ride,
+    directWalkMetres: direct,
     rides: [
       for (final l in s.journey.legs)
         if (l.kind == LegKind.ride)

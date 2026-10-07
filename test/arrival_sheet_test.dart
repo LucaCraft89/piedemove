@@ -77,6 +77,9 @@ void main() {
       [('2', RouteType.bus), ('4', RouteType.tram)],
     ]);
     expect(s.transfers, 0);
+    expect(s.rideMetres, greaterThan(0));
+    expect(s.directWalkMetres, greaterThan(s.walkMetres),
+        reason: 'walking the whole way is longer than the walk to the stop');
     expect(punctualityLabel(0), 'in orario');
     expect(punctualityLabel(-2), '2 min in anticipo');
     expect(punctualityLabel(3), '3 min di ritardo');

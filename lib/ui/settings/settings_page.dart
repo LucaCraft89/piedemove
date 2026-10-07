@@ -18,6 +18,7 @@ import 'package:piedemove/ui/theme/tokens.dart';
 import 'package:piedemove/ui/trip/trip_plan.dart';
 import 'package:piedemove/ui/settings/about_page.dart';
 import 'package:piedemove/ui/settings/report_page.dart';
+import 'package:piedemove/ui/settings/stats_page.dart';
 import 'package:piedemove/ui/widgets/line_badge.dart';
 
 Future<void> openSettings(BuildContext context) => Navigator.of(context).push(
@@ -134,6 +135,13 @@ class SettingsPage extends ConsumerWidget {
             leading: const Icon(Icons.info_outline),
             title: const Text('Dati, licenze e privacy'),
             onTap: () => openAbout(context),
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.insights_outlined),
+            title: const Text('I tuoi viaggi'),
+            subtitle: const Text('Quanto hai camminato e quanto hai risparmiato'),
+            onTap: () => openStats(context),
           ),
           ListTile(
             contentPadding: EdgeInsets.zero,

@@ -221,6 +221,7 @@ void main() {
       arrivedAt: arrived,
       plannedArrival: arrived.subtract(const Duration(minutes: 2)),
       walkMetres: ridden.walkMetres,
+      directWalkMetres: 3200, // shows the "a piedi invece di" line
       rides: [
         for (final l in ridden.legs)
           if (l.kind == LegKind.ride)
