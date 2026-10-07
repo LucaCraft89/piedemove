@@ -6,6 +6,8 @@
 /// reopen chip. Linee stays for phase 6.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -22,6 +24,7 @@ import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/realtime/strikes.dart';
 import 'package:piedemove/ui/map/map_focus.dart';
 import 'package:piedemove/ui/map/map_style.dart';
+import 'package:piedemove/ui/intro/intro_page.dart';
 import 'package:piedemove/ui/map/map_view.dart';
 import 'package:piedemove/ui/nav/entity.dart';
 import 'package:piedemove/ui/sheets/alert_sheet.dart';
@@ -52,8 +55,12 @@ class _HomePageState extends ConsumerState<HomePage> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback(
-        (_) => ref.read(locationProvider.notifier).start());
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // First run: the intro first, where the location permission is asked
+      // with its reason, not at launch.
+      if (!await introSeen() && mounted) await openIntro(context);
+      if (mounted) unawaited(ref.read(locationProvider.notifier).start());
+    });
   }
 
   Future<void> _recentre() async {

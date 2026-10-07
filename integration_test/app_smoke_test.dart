@@ -116,6 +116,13 @@ void main() {
     WidgetController.hitTestWarningShouldBeFatal = true;
     app.main();
     await t.pump();
+    // First run: the intro (a fresh emulator install always has it).
+    if (await pumpUntil(t, () => find.text('Salta').evaluate().isNotEmpty,
+        timeout: const Duration(seconds: 10))) {
+      await step(t, '00-intro');
+      await t.tap(find.text('Salta'));
+      await t.pumpAndSettle();
+    }
     final container =
         ProviderScope.containerOf(t.element(find.byType(HomePage)));
 
