@@ -1066,7 +1066,9 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     unawaited(cancelTripNotification());
     _notified = null;
     _watchNext = null;
+    _riskBuzzed = null;
     _ref.read(missedRideProvider.notifier).state = null;
+    _ref.read(connectionRiskProvider.notifier).state = null;
     state = null;
   }
 
@@ -1225,6 +1227,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     final s = state;
     if (s == null) return;
     _checkMissed(s, DateTime.now());
+    _checkConnection(s, DateTime.now());
     // Underground the timetable moves the trip on, fixes or not.
     if (isUnderground(s)) {
       _apply(_underground(s, DateTime.now()));
@@ -1266,6 +1269,41 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     }
   }
 
+  /// The change ahead at risk (late bus, tight walk): a banner and one buzz
+  /// per planned run, seen from the bus instead of at the stop.
+  void _checkConnection(LiveTripState s, DateTime now) {
+    final ix = _ref.read(transitIndexProvider).valueOrNull;
+    final risk = ix == null
+        ? null
+        : connectionRisk(s, ix,
+            now: now,
+            delays: _ref.read(delayLookupProvider),
+            unavailable: _ref.read(unavailableLookupProvider));
+    final holder = _ref.read(connectionRiskProvider.notifier);
+    final before = holder.state;
+    if (risk == null) {
+      if (before != null) {
+        holder.state = null;
+        _notify(s);
+      }
+      return;
+    }
+    final key = (risk.lines, risk.planned);
+    if (key != _riskBuzzed) {
+      _riskBuzzed = key;
+      unawaited(vibrateCue(LiveCue.oneStopLeft,
+          sound: _ref.read(settingsProvider).alightSound));
+    }
+    holder.state = risk;
+    if (before == null ||
+        connectionRiskLabel(before) != connectionRiskLabel(risk)) {
+      _notify(s); // the notification says it too
+    }
+  }
+
+  /// The planned run last buzzed about.
+  Object? _riskBuzzed;
+
   /// The live delay of the planned run at the ride's board stop.
   int? _boardDelay(Leg ride) {
     final ix = _ref.read(transitIndexProvider).valueOrNull;
@@ -1297,6 +1335,8 @@ class LiveTripController extends StateNotifier<LiveTripState?>
           '${stats.arrivalLive ? '' : ' (orario)'}'
           ' · mancano ${metresLabel(stats.metresLeft)}';
     }
+    final risk = _ref.read(connectionRiskProvider);
+    if (risk != null && s.riding) text = connectionRiskLabel(risk);
     final progress = tripProgress(s) ~/ 2 * 2;
     final primary = advanceLabel(s);
     final key = (title, text, progress, primary);
@@ -1443,6 +1483,10 @@ class LiveTripController extends StateNotifier<LiveTripState?>
 /// "Hai perso il 2?": the line names of the ride the rider seems to have
 /// missed, or null. Set by the live trip, answered on the strip.
 final missedRideProvider = StateProvider<String?>((ref) => null);
+
+/// The change ahead that the live times say will not work, or null; set by
+/// the live trip every few seconds while riding.
+final connectionRiskProvider = StateProvider<ConnectionRisk?>((ref) => null);
 
 final liveTripProvider =
     StateNotifierProvider<LiveTripController, LiveTripState?>(
