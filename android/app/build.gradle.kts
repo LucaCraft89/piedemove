@@ -26,6 +26,15 @@ android {
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
+    // Native libraries compressed in the APK (the download was 94 MB with
+    // three ABIs stored uncompressed; IzzyOnDroid takes ~30 MB). Android
+    // unpacks them at install: a little more space on the phone, not more data.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
