@@ -1096,6 +1096,10 @@ class LiveTripController extends StateNotifier<LiveTripState?>
                 notificationTitle: liveNotificationTitle,
                 notificationText: 'Segue la tua posizione',
                 notificationChannelName: 'Viaggio live',
+                // The white footprint, not the colour launcher icon (a blob
+                // in the status bar).
+                notificationIcon: AndroidResource(
+                    name: 'ic_stat_piedemove', defType: 'drawable'),
                 enableWakeLock: true,
                 setOngoing: true,
               ),

@@ -47,7 +47,8 @@ class AppRelease {
 /// that does not parse compares as the oldest.
 int compareVersions(String a, String b) {
   List<int>? parse(String v) {
-    final m = RegExp(r'^v?(\d+)\.(\d+)\.(\d+)(?:-[a-z]+\.?(\d+))?').firstMatch(v);
+    final m = RegExp(r'^v?(\d+)\.(\d+)\.(\d+)(?:-[a-z]+\.?(\d+)(?:\.(\d+))?)?')
+        .firstMatch(v);
     if (m == null) return null;
     return [
       int.parse(m[1]!),
@@ -55,12 +56,14 @@ int compareVersions(String a, String b) {
       int.parse(m[3]!),
       // No pre-release suffix: the final release, after every beta.
       m[4] == null ? 1 << 30 : int.parse(m[4]!),
+      // A point beta (`beta.14.1`) comes after its beta (`beta.14`).
+      m[5] == null ? 0 : int.parse(m[5]!),
     ];
   }
 
   final pa = parse(a), pb = parse(b);
   if (pa == null || pb == null) return (pa == null ? 0 : 1) - (pb == null ? 0 : 1);
-  for (var i = 0; i < 4; i++) {
+  for (var i = 0; i < 5; i++) {
     if (pa[i] != pb[i]) return pa[i].compareTo(pb[i]);
   }
   return 0;

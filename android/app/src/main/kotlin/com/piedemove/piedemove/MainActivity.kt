@@ -306,7 +306,7 @@ class MainActivity : FlutterActivity() {
             .setContentTitle(title)
             .setContentText(text)
             .setStyle(Notification.BigTextStyle().bigText(text))
-            .setSmallIcon(applicationInfo.icon)
+            .setSmallIcon(R.drawable.ic_stat_piedemove)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(open)
