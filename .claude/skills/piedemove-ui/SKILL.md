@@ -428,3 +428,17 @@ for approval of look, palette and line style before phase 6.
   transfers, the ridden line groups. "Fine" clears it and the plan; "Ritorno"
   swaps from/to and plans now. Closing the trip with X/back shows nothing.
   Smoke tour step `07-arrival`.
+- **Beta 15 additions.** Intro (`lib/ui/intro/intro_page.dart`, pref
+  `pm.introSeen`, shown before the location start on first run; smoke tour
+  step `00-intro` taps "Salta"). Strike banner (`lib/realtime/strikes.dart`,
+  `_StrikeChip` on home: cause 4 or "sciopero", in force or within 48 h).
+  "I tuoi viaggi" (`lib/ui/settings/stats_page.dart`, `tripHistoryProvider`,
+  pref `pm.tripHistory`) and the arrival line "A piedi ≈ x invece di ≈ y"
+  (direct = straight line x 1.35). "Segnala un problema"
+  (`lib/ui/settings/report_page.dart`): GitHub issue link with the log tail
+  without positions (`withoutPositions`), full log only via copy. Home widget
+  (`lib/app/home_widget.dart` + `NextDeparturesWidget.kt`, layout
+  `widget_departures.xml`): the app writes 12 departures with epoch times
+  every minute and on pause; the widget shows the 3 still ahead; Casa/Lavoro
+  buttons put `pm_widget_action` on the launch intent, Dart takes it
+  (`takeWidgetAction`) on start/resume -> `planToPlace`.

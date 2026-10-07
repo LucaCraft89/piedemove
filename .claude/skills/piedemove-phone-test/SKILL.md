@@ -78,6 +78,17 @@ POST_NOTIFICATIONS, WAKE_LOCK. Needs a phone to verify (emulator: no).
   last good fix, now, goes live on the best result), "Aspetto il prossimo"
   (`waitForNext`: watch the next vehicle of the ride's lines instead),
   "Sono salito" (manual board). Never switched without asking.
+- **Notification** (beta 15): title = instruction, text = arrival + distance
+  left (or the connection warning), progress 0-100 in 2 % steps, buttons
+  `advance` (same label as the strip, `advanceLabel`) and `stop` via a
+  not-exported broadcast `com.piedemove.piedemove.TRIP_ACTION` ->
+  MainActivity -> `notificationAction` on `piedemove/app`.
+- **Connection at risk** (beta 15, `connectionRisk` in live_stats.dart):
+  riding, alight time of the boarded run (+ live delay) + planned walk vs the
+  next ride's planned run (+ its delay); one buzz per planned run, banner +
+  notification text, names the next catchable vehicle of those lines.
+- **Trip log** (`lib/location/trip_log.dart`): leg changes, cues, prompts, a
+  fix every 10 s (4 decimals), feeds at stop; saved as `logs/last_trip.txt`.
 - **Off route / missed connection**: more than 150 m from the leg path for 30 s
   while riding, or the boarding vehicle has departed -> a one-tap **"Ricalcola"**
   banner. **Never recalculate silently.**
