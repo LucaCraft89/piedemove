@@ -28,13 +28,23 @@ if [ -f build/index.bin ]; then
     && echo "seeded index.bin" || echo "could not seed index.bin: the app will build it"
 fi
 
+# The slow CI emulator's own launcher stops responding while the app runs,
+# and its "isn't responding" dialog covered every screenshot. Hide error
+# dialogs, and close any system dialog before each capture. (Our own ANRs
+# still fail the run: logcat is checked below.)
+adb shell settings put global hide_error_dialogs 1 || true
+adb shell settings put secure anr_show_background 0 || true
+
 flutter test integration_test/app_smoke_test.dart -d emulator-5554 -r expanded \
   > "$OUT/itest.log" 2>&1 &
 PID=$!
 while kill -0 "$PID" 2>/dev/null; do
   for step in $(grep -o 'PM_STEP [A-Za-z0-9_-]*' "$OUT/itest.log" | awk '{print $2}'); do
     shot="$OUT/shots/$step.png"
-    [ -f "$shot" ] || { adb exec-out screencap -p > "$shot"; echo "captured $step"; }
+    [ -f "$shot" ] || {
+      adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null 2>&1 || true
+      sleep 0.5
+      adb exec-out screencap -p > "$shot"; echo "captured $step"; }
   done
   sleep 1
 done
