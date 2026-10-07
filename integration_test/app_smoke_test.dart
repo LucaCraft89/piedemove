@@ -103,6 +103,14 @@ void logVehicles(ProviderContainer c) {
       modes[ix.routeTypes[r]] = (modes[ix.routeTypes[r]] ?? 0) + 1;
     }
   }
+  final health = c.read(realtimeProvider).health;
+  // ignore: avoid_print
+  print('PM_FEEDS ${[
+    for (final k in RtFeedKind.values)
+      '${k.name}: ${health[k]?.lastSuccess == null ? 'no answer' : 'ok'}'
+          '${health[k]?.bytes == null ? '' : ' ${health[k]!.bytes} B'}'
+          '${health[k]?.lastError == null ? '' : ' error ${health[k]!.lastError}'}'
+  ].join('; ')}');
   // ignore: avoid_print
   print('PM_VEHICLES ${vehicles.length} byType=$modes '
       'unknown=${unknown.take(20).toList()}');

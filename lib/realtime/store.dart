@@ -65,10 +65,13 @@ class FeedHealth {
   final int? status;
   final int? bytes;
 
-  /// Stale once three intervals have passed without a good answer.
-  bool staleAt(DateTime now, Duration interval) =>
-      lastSuccess == null ||
-      now.difference(lastSuccess!) > interval * 3;
+  /// Stale once three intervals have passed without a good answer, or as
+  /// soon as a first request failed. A first answer still on its way is not
+  /// stale: at launch the chip said "non disponibili" for feeds that were
+  /// simply loading (the 150 KB alerts feed takes a few seconds).
+  bool staleAt(DateTime now, Duration interval) => lastSuccess == null
+      ? lastError != null
+      : now.difference(lastSuccess!) > interval * 3;
 }
 
 @immutable

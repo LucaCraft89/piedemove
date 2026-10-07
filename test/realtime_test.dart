@@ -205,9 +205,18 @@ void main() {
     expect(buildDelayLookup(ix, rt)(0, 1), 120);
   });
 
-  test('a feed with no answer yet counts as stale', () {
-    const state = RealtimeState();
-    expect(state.staleFeeds(), RtFeedKind.values);
+  test('a feed still loading is not stale; one that failed is', () {
+    const loading = RealtimeState();
+    expect(loading.staleFeeds(), isEmpty);
+    const failed = RealtimeState(health: {
+      RtFeedKind.alerts: FeedHealth(lastError: 'HTTP 500'),
+    });
+    expect(failed.staleFeeds(), [RtFeedKind.alerts]);
+    final old = RealtimeState(health: {
+      RtFeedKind.vehicles: FeedHealth(
+          lastSuccess: DateTime.now().subtract(const Duration(minutes: 5))),
+    });
+    expect(old.staleFeeds(), [RtFeedKind.vehicles]);
   });
 
   test('the chip says which live data is missing', () {
@@ -221,8 +230,7 @@ void main() {
         'Posizioni dei mezzi ferme · niente avvisi');
     expect(staleFeedsLabel(RtFeedKind.values),
         'Dati in tempo reale non disponibili');
-    expect(const RealtimeState().staleLabel(),
-        'Dati in tempo reale non disponibili');
+    expect(const RealtimeState().staleLabel(), isNull, reason: 'still loading');
   });
 
   group('alerts kept between runs (GTT alert service down, Oct 2026)', () {
@@ -252,7 +260,7 @@ void main() {
       await c.pollOnce(RtFeedKind.alerts);
       expect(c.state.alerts, hasLength(1), reason: 'a failed poll keeps them');
       expect(c.state.health[RtFeedKind.alerts]!.lastError, contains('500'));
-      expect(c.state.staleLabel(), 'Dati in tempo reale non disponibili');
+      expect(c.state.staleLabel(), 'Avvisi GTT non disponibili');
       c.dispose();
     });
 
