@@ -56,6 +56,15 @@ jobs:
               else: break
           PY
           done
+          # Alerts only: does another way of asking get past the HTTP 500?
+          a=percorsieorari.gtt.to.it/das_gtfsrt/alerts.aspx
+          for v in "https://$a|-A Mozilla/5.0" "http://$a|-A PiedeMove-CI" \
+                   "https://$a|-H Accept:application/x-protobuf" "https://$a?|-A PiedeMove-CI"; do
+            u=${v%%|*}; o=${v#*|}
+            curl -sS -m 20 $o -o /tmp/alt.pb -w "PM_FEED alerts-variant [$u $o] http=%{http_code} bytes=%{size_download}\n" "$u" || echo "PM_FEED alerts-variant [$u] failed"
+          done
+          # What the 500 page says (title / first error line).
+          grep -o '<title>[^<]*' /tmp/alerts.pb | head -1 | sed 's/^/PM_FEED alerts-500 /' || true
       # The PM_* secrets must hold the key installed copies were signed with
       # (its public certificate fingerprint is android/release-cert-sha256.txt):
       # a wrong secret would publish an APK that cannot update the app.

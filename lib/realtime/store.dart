@@ -6,11 +6,13 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 
 import 'package:piedemove/data/feeds.dart';
 import 'package:piedemove/data/providers.dart';
@@ -47,7 +49,16 @@ const _maxAge = {
 };
 
 class FeedHealth {
-  const FeedHealth({this.lastSuccess, this.lastError, this.status, this.bytes});
+  const FeedHealth({
+    this.lastSuccess,
+    this.lastError,
+    this.status,
+    this.bytes,
+    this.cached = false,
+  });
+
+  /// The data came from the copy kept on the phone, not from this run.
+  final bool cached;
 
   final DateTime? lastSuccess;
   final String? lastError;
@@ -130,16 +141,86 @@ Future<Uint8List> _httpFetch(String url) async {
   return response.bodyBytes;
 }
 
+/// The last good alerts feed, kept between runs. GTT's alert service can be
+/// down for days (HTTP 500, October 2026) and alerts held only in memory
+/// vanished on every start - suspended stops and detours with them. Each
+/// alert carries its own active periods, so an old copy still drops what
+/// has ended.
+abstract class AlertCache {
+  Future<(Uint8List, DateTime)?> load();
+  Future<void> save(Uint8List bytes, DateTime at);
+}
+
+class FileAlertCache implements AlertCache {
+  Future<File> _file(String name) async => File(
+      '${(await getApplicationSupportDirectory()).path}/rt/$name');
+
+  @override
+  Future<(Uint8List, DateTime)?> load() async {
+    try {
+      final data = await _file('alerts.pb');
+      final at = await _file('alerts.at');
+      if (!await data.exists() || !await at.exists()) return null;
+      final ms = int.tryParse((await at.readAsString()).trim());
+      if (ms == null) return null;
+      return (await data.readAsBytes(), DateTime.fromMillisecondsSinceEpoch(ms));
+    } catch (e) {
+      debugPrint('pm: alert cache unreadable: $e');
+      return null;
+    }
+  }
+
+  @override
+  Future<void> save(Uint8List bytes, DateTime at) async {
+    try {
+      final data = await _file('alerts.pb');
+      await data.parent.create(recursive: true);
+      // Write then rename: a crash mid-write never leaves half a feed.
+      final tmp = File('${data.path}.tmp');
+      await tmp.writeAsBytes(bytes, flush: true);
+      await tmp.rename(data.path);
+      await (await _file('alerts.at'))
+          .writeAsString('${at.millisecondsSinceEpoch}', flush: true);
+    } catch (e) {
+      debugPrint('pm: alert cache not saved: $e');
+    }
+  }
+}
+
 class RealtimeController extends StateNotifier<RealtimeState>
     with WidgetsBindingObserver {
-  RealtimeController({this.fetch = _httpFetch, bool autoStart = true})
-      : super(const RealtimeState()) {
+  RealtimeController({
+    this.fetch = _httpFetch,
+    this.alertCache,
+    bool autoStart = true,
+  }) : super(const RealtimeState()) {
+    unawaited(restoreAlerts());
     if (!autoStart) return;
     WidgetsBinding.instance.addObserver(this);
     start();
   }
 
   final FeedFetch fetch;
+  final AlertCache? alertCache;
+
+  /// Loads the cached alerts, unless the feed has already answered.
+  Future<void> restoreAlerts() async {
+    final cached = await alertCache?.load();
+    if (cached == null || !mounted) return;
+    final (bytes, at) = cached;
+    final last = state.health[RtFeedKind.alerts]?.lastSuccess;
+    if (last != null && !last.isBefore(at)) return;
+    try {
+      final feed = decodeFeed(bytes);
+      state = state.copyWith(alerts: feed.alerts, health: {
+        ...state.health,
+        RtFeedKind.alerts: FeedHealth(
+            lastSuccess: at, status: 200, bytes: bytes.length, cached: true),
+      });
+    } catch (e) {
+      debugPrint('pm: cached alerts undecodable: $e');
+    }
+  }
   final _timers = <RtFeedKind, Timer>{};
   final _backoff = <RtFeedKind, Duration>{};
   var _running = false;
@@ -177,6 +258,9 @@ class RealtimeController extends StateNotifier<RealtimeState>
       _backoff.remove(kind);
       if (!mounted) return;
       state = _apply(kind, feed, bytes.length);
+      if (kind == RtFeedKind.alerts) {
+        unawaited(alertCache?.save(bytes, DateTime.now()));
+      }
     } catch (e) {
       if (!mounted) return;
       final previous = state.health[kind] ?? const FeedHealth();
@@ -198,6 +282,7 @@ class RealtimeController extends StateNotifier<RealtimeState>
           lastError: '$e',
           status: previous.status,
           bytes: previous.bytes,
+          cached: previous.cached,
         ),
       });
       final grown = (_backoff[kind] ?? _interval[kind]!) * 2;
@@ -242,7 +327,7 @@ class RealtimeController extends StateNotifier<RealtimeState>
 
 final realtimeProvider =
     StateNotifierProvider<RealtimeController, RealtimeState>(
-  (ref) => RealtimeController(),
+  (ref) => RealtimeController(alertCache: FileAlertCache()),
 );
 
 /// Delays as an offset onto the static index. A `stop_time_update` carries

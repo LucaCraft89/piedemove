@@ -189,4 +189,9 @@ Feed facts as built on 2026-09-19 (`feed_version` 20260919):
   `unavailableLookupProvider` feeds departures and the planner (today's runs
   only). Every alert `active_period` counts. Realtime fetches time out after
   15 s; vehicles older than 3 min / delays older than 10 min with every poll
-  failing since are dropped, not shown as live.
+  failing since are dropped, not shown as live. Alerts are the exception:
+  the last good feed is saved (`FileAlertCache`, `<support>/rt/alerts.pb` +
+  `alerts.at`) and restored at start (`FeedHealth.cached`); the alert list
+  dates it while the feed is down (`alertsAsOfLabel`). GTT's alert service
+  answered HTTP 500 from 4 to 6 Oct 2026; vehicles and delays stayed up.
+  CI's check job probes all three feeds each run (`PM_FEED` lines).
