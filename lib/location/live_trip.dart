@@ -2,8 +2,9 @@
 /// vehicle's: the vehicle's GTFS-RT position is only a fallback when the fix is
 /// poor, and stays a separate concept everywhere else.
 ///
-/// Foreground only: the position stream runs while the app is resumed and is
-/// cancelled on pause, then re-synced on resume. No background service.
+/// The position stream runs in geolocator's location foreground service, so
+/// fixes, cues and the notification go on with the screen off; see
+/// [LocationController.handOver] for why the stream is opened through it.
 ///
 /// The geometry build and [advanceLive] are pure so the whole progress rule is
 /// unit-testable without a phone: the controller below only wires sensors,
@@ -30,6 +31,7 @@ import 'package:piedemove/realtime/store.dart';
 import 'package:piedemove/routing/journey.dart';
 import 'package:piedemove/settings/settings.dart';
 import 'package:piedemove/location/bus_match.dart';
+import 'package:piedemove/location/device_location.dart';
 import 'package:piedemove/location/trip_history.dart';
 import 'package:piedemove/location/trip_log.dart';
 import 'package:piedemove/location/trip_summary.dart';
@@ -1054,7 +1056,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     // Android 13+: the trip notification needs the user's yes (asked once).
     unawaited(requestNotificationPermission());
     onTripNotificationAction(_onNotificationAction);
-    _listen();
+    _ref.read(locationProvider.notifier).handOver(_listen);
     _stale = Timer.periodic(const Duration(seconds: 5), (_) => _onStale());
     unawaited(_wake(true));
   }
@@ -1072,8 +1074,14 @@ class LiveTripController extends StateNotifier<LiveTripState?>
       ].join(', ')}');
       unawaited(_log.save());
     }
-    _sub?.cancel();
-    _sub = null;
+    // Through the dot too: with it still listening, the service stream
+    // (and its notification) would outlive the trip.
+    if (_sub != null) {
+      _ref.read(locationProvider.notifier).handOver(() {
+        _sub?.cancel();
+        _sub = null;
+      });
+    }
     _stale?.cancel();
     _stale = null;
     _retry?.cancel();
@@ -1120,7 +1128,7 @@ class LiveTripController extends StateNotifier<LiveTripState?>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (this.state == null) return;
     if (state == AppLifecycleState.resumed) {
-      _listen();
+      if (_sub == null) _ref.read(locationProvider.notifier).handOver(_listen);
       unawaited(_wake(true));
     } else {
       // Screen off or another app: the position stream keeps running in the
@@ -1175,9 +1183,14 @@ class LiveTripController extends StateNotifier<LiveTripState?>
     _sub = null;
     _retry?.cancel();
     if (state == null) return;
-    // Background too: the trip is running in a pocket.
+    // Foreground only: reopening restarts the location foreground service,
+    // which Android 12+ refuses (and may crash on) from the background. The
+    // resume handler reopens it instead.
     _retry = Timer(liveStreamRetry, () {
-      if (state != null) _listen();
+      if (state != null &&
+          WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
+        _ref.read(locationProvider.notifier).handOver(_listen);
+      }
     });
   }
 

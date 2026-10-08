@@ -127,6 +127,22 @@ class LocationController extends StateNotifier<LocState>
     _sub = null;
   }
 
+  /// geolocator keeps ONE position stream per app and hands every later
+  /// caller the first caller's settings. The dot opens first, so the live
+  /// trip's foreground-service settings were silently dropped and fixes
+  /// stopped in a pocket. [swap] opens or closes the live stream while the
+  /// dot holds none, so the stream is rebuilt with the right settings; the
+  /// dot then rejoins whatever stream is current.
+  void handOver(void Function() swap) {
+    final had = _sub != null;
+    _stop();
+    try {
+      swap();
+    } finally {
+      if (had && _foreground && mounted) _listen();
+    }
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _foreground = state == AppLifecycleState.resumed;

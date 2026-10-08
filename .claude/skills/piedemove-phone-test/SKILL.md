@@ -271,3 +271,19 @@ counts, no sprite icons (pies, vehicles). The layers are placed
 layer exists and holds the right features; what it looks like needs the phone.
 Circles and lines do render, and `E Mbgl ... Error setting property` in
 logcat.txt catches rejected expressions.
+
+## Background tracking (2026-10 rider report: "background breaks everything")
+
+geolocator_android caches **one** position stream per app and returns it to
+every later `getPositionStream` caller with the *first* caller's settings.
+The dot (`LocationController`) always opened first, plain, so the live
+trip's `ForegroundNotificationConfig` was ignored: no foreground service,
+and in background Android throttled fixes to a few an hour - no progress,
+cues, vibration or notification. Now the live trip opens and closes its
+stream through `LocationController.handOver`: the dot drops its
+subscription (the cached stream is torn down), the live stream is built
+with the service settings, the dot rejoins it. Stop does the same, or the
+service would outlive the trip. A dead stream is reopened only when
+resumed (restarting a location FGS from background is refused on 12+).
+Check on a phone: Avvia, the "Viaggio live" notification appears at once;
+screen off for a walk, the trip log keeps a fix every 10 s.
