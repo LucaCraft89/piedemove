@@ -77,7 +77,7 @@ TLS (the author uses NPMplus).
    | name | value |
    |---|---|
    | `GTT_MIRROR_URL` | `https://feed.example.org/gtt_gtfs.zip` |
-   | `GTT_MIRROR_TOKEN` | the `FEED_TOKEN` from `.env` |
+   | `FEED_TOKEN` (or `GTT_MIRROR_TOKEN`) | the `FEED_TOKEN` from `.env` |
 
    Then run the `lines` workflow once by hand (*Actions, lines, Run workflow*).
 
