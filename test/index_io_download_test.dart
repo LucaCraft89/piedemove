@@ -57,6 +57,20 @@ void main() {
       expect(File('$path.part').existsSync(), isFalse);
     });
 
+    test('sends the given headers (the mirror token)', () async {
+      final path = '${dir.path}/feed.zip';
+      Map<String, String>? seen;
+      final client = MockClient.streaming((req, _) async {
+        seen = req.headers;
+        return http.StreamedResponse(Stream.value([1]), 200);
+      });
+      await downloadToFile('https://example.test/f.zip', path,
+          timeout: const Duration(seconds: 5),
+          headers: {'Authorization': 'Bearer t0k'},
+          client: client);
+      expect(seen!['Authorization'], 'Bearer t0k');
+    });
+
     test('a non-200 answer throws and writes nothing', () async {
       final path = '${dir.path}/feed.zip';
       final client = MockClient((_) async => http.Response('gone', 404));

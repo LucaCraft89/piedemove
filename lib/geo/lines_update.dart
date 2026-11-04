@@ -83,6 +83,42 @@ enum LinesUpdateResult { tooSoon, current, updated, incompatible, failed }
   }
 }
 
+/// What Settings says about the line geometry in use.
+class LinesStatus {
+  const LinesStatus({this.feedVersion, this.installedAt, this.checkedAt});
+
+  /// Feed of the downloaded set, null while the shipped assets are in use.
+  final String? feedVersion;
+
+  /// When the downloaded set was installed; null for the shipped assets.
+  final DateTime? installedAt;
+
+  /// Last time the release answered (a new set or "nothing new"); null if never.
+  final DateTime? checkedAt;
+}
+
+/// Reads the pointer and the check bookkeeping; never throws.
+LinesStatus linesStatus(Directory root) {
+  String? feed;
+  DateTime? installed;
+  final set = currentLinesSet(root);
+  if (set != null) {
+    feed = set.feedVersion;
+    final ms = int.tryParse(set.dir.uri.pathSegments
+        .lastWhere((e) => e.isNotEmpty, orElse: () => '')
+        .replaceFirst('set-', ''));
+    if (ms != null) installed = DateTime.fromMillisecondsSinceEpoch(ms);
+  }
+  DateTime? checked;
+  try {
+    final j = jsonDecode(File('${root.path}/$_metaName').readAsStringSync())
+        as Map<String, dynamic>;
+    final ms = j['checkedAt'] as int?;
+    if (ms != null) checked = DateTime.fromMillisecondsSinceEpoch(ms);
+  } catch (_) {}
+  return LinesStatus(feedVersion: feed, installedAt: installed, checkedAt: checked);
+}
+
 class LinesUpdater {
   LinesUpdater({
     required this.root,

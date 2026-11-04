@@ -118,6 +118,11 @@ jobs:
             build/piemonte_bus.zip
           key: gtfs-${{ steps.day.outputs.d }}
       - name: Build the timetable index
+        # GTT drops GitHub's runner addresses: the zip comes from our mirror
+        # (tool/feed-mirror, secrets GTT_MIRROR_*) when configured.
+        env:
+          PIEDEMOVE_GTT_ZIP_URL: ${{ secrets.GTT_MIRROR_URL }}
+          PIEDEMOVE_GTT_ZIP_TOKEN: ${{ secrets.GTT_MIRROR_TOKEN || secrets.FEED_TOKEN }}
         run: |
           for i in 1 2 3; do dart tool/build_index.dart && break; sleep $((i * 20)); done
           test -s build/index.bin

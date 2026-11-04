@@ -10,6 +10,7 @@ import 'package:http/testing.dart';
 import 'package:piedemove/geo/lines_io.dart';
 import 'package:piedemove/geo/lines_update.dart';
 import 'package:piedemove/geo/pattern_snap.dart';
+import 'package:piedemove/ui/settings/settings_page.dart' show linesStatusLine;
 
 Uint8List _linesGz(String feed) {
   final g = SnappedPattern(
@@ -151,5 +152,40 @@ void main() {
     );
     expect(await u.checkAndUpdate(), LinesUpdateResult.failed);
     expect(await u.checkAndUpdate(), LinesUpdateResult.failed);
+  });
+
+  group('linesStatus / linesStatusLine', () {
+    test('nothing installed, never checked: the shipped lines, said plainly', () {
+      final dir = Directory.systemTemp.createTempSync('pm_ls');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final st = linesStatus(dir);
+      expect(st.installedAt, isNull);
+      expect(st.checkedAt, isNull);
+      expect(linesStatusLine(st, DateTime(2026, 11, 4)),
+          'incluse nell\'app · mai controllate');
+    });
+
+    test('a set and a check are dated; a week without one is flagged', () {
+      final dir = Directory.systemTemp.createTempSync('pm_ls');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final inst = DateTime(2026, 10, 23, 10);
+      final setName = 'set-${inst.millisecondsSinceEpoch}';
+      Directory('${dir.path}/$setName').createSync();
+      for (final n in linesSetFiles) {
+        File('${dir.path}/$setName/$n').writeAsStringSync('x');
+      }
+      File('${dir.path}/current.json')
+          .writeAsStringSync(jsonEncode({'set': setName, 'feedVersion': 'F1'}));
+      final chk = DateTime(2026, 10, 23, 11);
+      File('${dir.path}/lines_update.json')
+          .writeAsStringSync(jsonEncode({'checkedAt': chk.millisecondsSinceEpoch}));
+      final st = linesStatus(dir);
+      expect(st.feedVersion, 'F1');
+      expect(st.installedAt, inst);
+      expect(linesStatusLine(st, DateTime(2026, 10, 24)),
+          'scaricate il 23/10/2026 · controllate il 23/10/2026');
+      expect(linesStatusLine(st, DateTime(2026, 11, 4)),
+          'scaricate il 23/10/2026 · non controllate da 11 giorni');
+    });
   });
 }

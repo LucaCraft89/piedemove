@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:piedemove/app/app_update.dart';
+import 'package:piedemove/geo/line_providers.dart';
+import 'package:piedemove/geo/lines_update.dart';
 import 'package:piedemove/geo/offline_map.dart';
 
 import 'package:piedemove/data/feeds.dart';
@@ -325,6 +327,7 @@ class _DataStatus extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final rt = ref.watch(realtimeProvider);
     final ix = ref.watch(transitIndexProvider).valueOrNull;
+    final lines = ref.watch(linesStatusProvider).valueOrNull;
     final now = DateTime.now();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -336,6 +339,12 @@ class _DataStatus extends ConsumerWidget {
           subtitle: Text(ix == null
               ? 'non caricati'
               : 'versione ${ix.feedVersion} · ${ix.stopCount} fermate'),
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.timeline),
+          title: const Text('Linee sulla mappa'),
+          subtitle: Text(linesStatusLine(lines, now)),
         ),
         for (final kind in RtFeedKind.values)
           ListTile(
@@ -386,6 +395,21 @@ IconData _feedIcon(RtFeedKind kind) => switch (kind) {
       RtFeedKind.tripUpdates => Icons.timer,
       RtFeedKind.alerts => Icons.warning_amber,
     };
+
+/// One line on the geometry of the lines: which set, how fresh. A set that
+/// has not been confirmed for a week says so plainly instead of looking current.
+String linesStatusLine(LinesStatus? s, DateTime now) {
+  String d(DateTime t) =>
+      '${t.day.toString().padLeft(2, '0')}/${t.month.toString().padLeft(2, '0')}/${t.year}';
+  final set = s?.installedAt == null
+      ? 'incluse nell\'app'
+      : 'scaricate il ${d(s!.installedAt!)}';
+  final checked = s?.checkedAt;
+  if (checked == null) return '$set · mai controllate';
+  final days = now.difference(checked).inDays;
+  if (days >= 7) return '$set · non controllate da $days giorni';
+  return '$set · controllate il ${d(checked)}';
+}
 
 String _healthLine(FeedHealth? health, DateTime now) {
   if (health == null) return 'mai aggiornato';

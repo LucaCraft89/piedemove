@@ -23,14 +23,33 @@ const indexPath = 'build/index.bin';
 const zipPath = 'build/gtt_gtfs.zip';
 const regionalZipPath = 'build/piemonte_bus.zip';
 
+/// Where the GTT zip comes from. GTT drops connections from GitHub's runner
+/// addresses, so CI points this at its own mirror (tool/feed-mirror) through
+/// `PIEDEMOVE_GTT_ZIP_URL`, with the mirror's bearer token in
+/// `PIEDEMOVE_GTT_ZIP_TOKEN`. Unset (a developer machine, the app) it is GTT.
+String get _gttUrl {
+  final u = Platform.environment['PIEDEMOVE_GTT_ZIP_URL'];
+  return u == null || u.trim().isEmpty ? Feeds.gttStaticGtfs : u.trim();
+}
+
+/// Sent only to the mirror, never to GTT or the regional server.
+Map<String, String>? _headersFor(String url) {
+  final t = Platform.environment['PIEDEMOVE_GTT_ZIP_TOKEN'];
+  if (t == null || t.isEmpty || url == Feeds.gttStaticGtfs) return null;
+  return url == _gttUrl ? {'Authorization': 'Bearer $t'} : null;
+}
+
 /// Downloads unless cached; null on failure (the caller decides if it is fatal).
 Future<File?> _download(String url, String path, {bool force = false}) async {
   final file = File(path);
   if (force || !file.existsSync()) {
+    // The token is never printed; a mirror host is not a secret.
     stdout.writeln('downloading $url ...');
     try {
       await downloadToFile(url, path,
-          timeout: feedStallTimeout, headerTimeout: feedHeaderTimeout);
+          timeout: feedStallTimeout,
+          headerTimeout: feedHeaderTimeout,
+          headers: _headersFor(url));
     } catch (e) {
       stderr.writeln('download failed: $e');
       return null;
@@ -45,7 +64,7 @@ Future<void> main(List<String> args) async {
   final zip = zipArg >= 0 && zipArg + 1 < args.length ? args[zipArg + 1] : zipPath;
 
   Directory('build').createSync(recursive: true);
-  final zipFile = await _download(Feeds.gttStaticGtfs, zip, force: force);
+  final zipFile = await _download(_gttUrl, zip, force: force);
   if (zipFile == null) exit(1);
   stdout.writeln('zip ${(zipFile.lengthSync() / 1e6).toStringAsFixed(1)} MB');
 
