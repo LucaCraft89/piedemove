@@ -1,0 +1,33 @@
+# Temporary: why does www.gtt.to.it time out from runners? Remove after use.
+name: net-diag
+on:
+  push:
+    paths: ['.github/workflows/net-diag.yml']
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Egress IP
+        continue-on-error: true
+        run: curl -sS -m 15 https://api.ipify.org; echo
+      - name: Probe hosts
+        continue-on-error: true
+        run: |
+          for h in www.gtt.to.it percorsieorari.gtt.to.it aperto.comune.torino.it download.geofabrik.de github.com; do
+            echo "=== $h"
+            getent ahosts "$h" | head -3 || echo "dns FAILED"
+            for p in 80 443; do
+              timeout 12 bash -c "exec 3<>/dev/tcp/$h/$p" 2>/dev/null \
+                && echo "tcp $p: open" || echo "tcp $p: no connect (timeout/refused)"
+            done
+            curl -sS -m 20 --connect-timeout 10 -o /dev/null -I \
+              -w "https head: http=%{http_code} connect=%{time_connect}s tls=%{time_appconnect}s total=%{time_total}s\n" \
+              "https://$h/" 2>&1 | tail -2
+          done
+      - name: Feed URL itself
+        continue-on-error: true
+        run: |
+          curl -sS -m 30 --connect-timeout 10 -o /dev/null -I \
+            -w "feed: http=%{http_code} connect=%{time_connect}s total=%{time_total}s\n" \
+            https://www.gtt.to.it/open_data/gtt_gtfs.zip 2>&1 | tail -3
