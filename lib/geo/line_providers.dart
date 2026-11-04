@@ -89,6 +89,13 @@ final ambientLinesProvider =
   return ambient;
 });
 
+/// The line geometry in use and when it was last checked, for Settings.
+/// Re-read whenever Settings opens.
+final linesStatusProvider = FutureProvider.autoDispose<LinesStatus?>((ref) async {
+  final root = await linesDir();
+  return root == null ? null : linesStatus(root);
+});
+
 /// Dashed stop-to-road connectors.
 final stopConnectorsProvider = FutureProvider<Map<String, dynamic>?>(
   (_) => _loadJson(
