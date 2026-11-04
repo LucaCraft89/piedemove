@@ -11,21 +11,22 @@ import 'package:http/http.dart' as http;
 /// Downloads [url] to [path]. Throws on a non-200 answer, a wait longer than
 /// [headerTimeout] for the response to start (the regional server assembles
 /// its zip first, well over a minute), a gap longer than [timeout] between
-/// two body chunks, or an I/O error; the partial file is removed either way.
+/// two body chunks, or an I/O error ([headers] go on the request); the partial file is removed either way.
 Future<void> downloadToFile(
   String url,
   String path, {
   required Duration timeout,
   Duration? headerTimeout,
+  Map<String, String>? headers,
   http.Client? client,
 }) async {
   final c = client ?? http.Client();
   final part = File('$path.part');
   IOSink? sink;
   try {
-    final response =
-        await c.send(http.Request('GET', Uri.parse(url)))
-            .timeout(headerTimeout ?? timeout);
+    final request = http.Request('GET', Uri.parse(url));
+    if (headers != null) request.headers.addAll(headers);
+    final response = await c.send(request).timeout(headerTimeout ?? timeout);
     if (response.statusCode != 200) {
       throw HttpException('HTTP ${response.statusCode}', uri: Uri.parse(url));
     }

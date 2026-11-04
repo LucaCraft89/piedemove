@@ -1,0 +1,20 @@
+# nginx replaces ${FEED_TOKEN} from the environment at start (envsubst).
+server {
+    listen 80;
+    server_name _;
+
+    # The token is checked here as well as (optionally) in the reverse proxy,
+    # so a mis-set proxy rule does not open the file.
+    # Bodies, other paths and other methods get nothing.
+    location = /gtt_gtfs.zip {
+        limit_except GET HEAD { deny all; }
+        if ($http_authorization != "Bearer ${FEED_TOKEN}") { return 401; }
+        alias /feed/gtt_gtfs.zip;      # Last-Modified / ETag come from the file
+        add_header Cache-Control "no-store" always;
+    }
+
+    # For the reverse proxy / uptime checks: no token, no data.
+    location = /healthz { return 200 "ok\n"; }
+
+    location / { return 404; }
+}

@@ -43,13 +43,30 @@ jobs:
       - run: flutter pub get
 
       # GTT only: regional buses have no geometry to match.
+      # GTT drops GitHub's runner addresses, so the zip comes from our mirror
+      # (tool/feed-mirror) when GTT_MIRROR_URL is set.
+      # Mirror configured and failing = a real fault, the run goes red.
+      # No mirror and GTT unreachable = a warning, not a daily red run.
       - name: Timetable index
+        id: feed
+        env:
+          PIEDEMOVE_GTT_ZIP_URL: ${{ secrets.GTT_MIRROR_URL }}
+          PIEDEMOVE_GTT_ZIP_TOKEN: ${{ secrets.GTT_MIRROR_TOKEN }}
         run: |
           for i in 1 2 3; do dart tool/build_index.dart --no-regional && break; sleep $((i * 20)); done
-          test -s build/index.bin
+          if [ -s build/index.bin ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          elif [ -n "$PIEDEMOVE_GTT_ZIP_URL" ]; then
+            echo "::error::the feed mirror did not deliver the GTT zip"
+            exit 1
+          else
+            echo "::warning::GTT unreachable from this runner and no mirror configured (secret GTT_MIRROR_URL); the published line set is left as it is"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Changed since the published set?
         id: need
+        if: steps.feed.outputs.ok == 'true'
         run: |
           feed=$(dart tool/index_feed.dart)
           format=$(sed -n 's/^const linesFormatVersion = \([0-9]*\);/\1/p' lib/geo/lines_io.dart)

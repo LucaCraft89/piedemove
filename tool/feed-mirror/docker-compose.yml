@@ -1,0 +1,36 @@
+# GTT feed mirror for PiedeMove's CI. See README.md for why and how.
+#
+#   cp .env.example .env     # set FEED_TOKEN
+#   docker compose up -d
+#
+# Two tiny stock images, nothing to build:
+#   fetch  downloads GTT's zip every few hours, keeps the last good copy
+#   web    serves exactly one file, and only with the right bearer token
+services:
+  fetch:
+    image: alpine:3.20
+    restart: unless-stopped
+    environment:
+      FEED_URL: ${FEED_URL:-https://www.gtt.to.it/open_data/gtt_gtfs.zip}
+      REFRESH_HOURS: ${REFRESH_HOURS:-6}
+    volumes:
+      - ./fetch.sh:/fetch.sh:ro
+      - feed:/feed
+    command: ["/bin/sh", "/fetch.sh"]
+
+  web:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on: [fetch]
+    environment:
+      FEED_TOKEN: ${FEED_TOKEN:?set FEED_TOKEN in .env}
+    volumes:
+      - ./nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - feed:/feed:ro
+    ports:
+      # Plain HTTP on the LAN only: TLS and access lists live in the reverse
+      # proxy in front (NPMplus). Do not publish this port to the internet.
+      - "${BIND:-127.0.0.1}:${PORT:-8080}:80"
+
+volumes:
+  feed:
