@@ -501,6 +501,7 @@ class PatternSnapper {
     final n = path.lat.length;
     // Segment i (1..n-1) leads into vertex i; keep[] marks the survivors.
     final stack = <int>[];
+    final joint = <int>{}; // survivors redrawn as a dotted joint
     var acc = 0.0;
     for (var i = 1; i < n; i++) {
       final e = path.edge[i];
@@ -523,6 +524,11 @@ class PatternSnapper {
                 hairpinShapeClearMetres) {
           stack.removeLast();
           stats.spursRemoved++;
+          // The segment that stays no longer starts where its edge does, so
+          // it is no road any more: a few metres of marked, dotted joint, the
+          // same as where two pieces do not meet on the graph. A plain chord
+          // would be a hop the ambient geometry has no feature for.
+          joint.add(i);
         }
       }
       acc = 0;
@@ -536,7 +542,12 @@ class PatternSnapper {
     final first = stack.first;
     out.start(path.lat[first - 1], path.lon[first - 1]);
     for (final i in stack) {
-      out.add(path.lat[i], path.lon[i], path.way[i], path.dir[i], path.edge[i]);
+      if (joint.contains(i)) {
+        stats.approxGaps++;
+        out.add(path.lat[i], path.lon[i], -1, 0, edgeApprox);
+      } else {
+        out.add(path.lat[i], path.lon[i], path.way[i], path.dir[i], path.edge[i]);
+      }
     }
     return out;
   }
