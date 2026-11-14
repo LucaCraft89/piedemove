@@ -84,12 +84,13 @@ void scorePattern(QualityReport r, SnappedPattern p, ShapePolyline? shape) {
       r.folds++;
       // A fold the shape itself makes (a turnaround) is real; one the matcher
       // made up, away from the shape, is a spur.
-      if (shape != null && shape.distanceTo(p.vertexLat[i] / 1e6, p.vertexLon[i] / 1e6) <= 20) {
-        continue;
-      }
+      final off = shape?.distanceTo(p.vertexLat[i] / 1e6, p.vertexLon[i] / 1e6);
+      if (off != null && off <= 20) continue;
       r.spurs++;
       r.spurAt.add('pattern ${p.pattern} ${p.vertexLat[i] / 1e6},${p.vertexLon[i] / 1e6} '
-          'legs ${a.round()}/${b.round()} m');
+          'legs ${a.round()}/${b.round()} m, ways ${p.vertexWay[i - 1]}/${p.vertexWay[i]}/'
+          '${p.vertexWay[i + 1]}, ${off == null ? 'no shape' : '${off.round()} m off shape'}, '
+          'angle ${bearingDelta(b1, b2).round()}');
     }
   }
 
