@@ -116,7 +116,7 @@ jobs:
       - name: Quality gate
         if: steps.need.outputs.build == 'true'
         run: |
-          dart tool/lines_report.dart --fail
+          dart tool/lines_report.dart --fail --spurs --dev
           dart tool/gap_detector.dart
 
       - name: Publish lines-latest
