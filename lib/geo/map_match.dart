@@ -41,6 +41,13 @@ const uTurnPenalty = 6.0;
 const bridgeCorridorMetres = 40.0;
 const corridorFreeMetres = 15.0;
 const spurMaxMetres = 60.0;
+/// A hairpin between two different short edges (out 5 m, back 9 m onto another
+/// way) is no there-and-back pair, but it is a spur all the same: both legs at
+/// most [hairpinLegMetres], the apex further than [hairpinShapeClearMetres]
+/// from the GTFS shape (nearer, the shape itself turns round there: real).
+/// Same limits as the line report, so what it would count is what is removed.
+const hairpinLegMetres = 15.0;
+const hairpinShapeClearMetres = 20.0;
 const stopChainSnapMetres = 40.0;
 
 /// Min-heap over (cost, item).
@@ -273,7 +280,7 @@ class PatternSnapper {
       stats.cause('trailing unmatched');
       _approxSpan(path, lat, lon, runs.last.last + 1, n - 1, arc, 'trailing unmatched');
     }
-    return _collapseSpurs(path);
+    return _collapseSpurs(path, shape);
   }
 
   void _resample(ShapePolyline shape, List<double> lat, List<double> lon,
@@ -485,10 +492,16 @@ class PatternSnapper {
   /// followed by its own reverse, cascading inward, while the stub stays under
   /// [spurMaxMetres]. Longer excursions are real turnarounds and stay. Working
   /// on the whole path also catches stubs at the joins between runs.
-  PathBuilder _collapseSpurs(PathBuilder path) {
+  ///
+  /// With a [shape], also short hairpins between two different edges that the
+  /// shape does not make itself: the leg into the apex is dropped, so the path
+  /// goes straight on to where the second leg ends (a few metres along the same
+  /// street).
+  PathBuilder _collapseSpurs(PathBuilder path, ShapePolyline? shape) {
     final n = path.lat.length;
     // Segment i (1..n-1) leads into vertex i; keep[] marks the survivors.
     final stack = <int>[];
+    final joint = <int>{}; // survivors redrawn as a dotted joint
     var acc = 0.0;
     for (var i = 1; i < n; i++) {
       final e = path.edge[i];
@@ -502,6 +515,22 @@ class PatternSnapper {
           continue;
         }
       }
+      if (shape != null && e >= 0 && stack.isNotEmpty && path.edge[stack.last] >= 0) {
+        final a = path.edge[stack.last];
+        if (graph.edgeLen[a] <= hairpinLegMetres &&
+            graph.edgeLen[e] <= hairpinLegMetres &&
+            bearingDelta(graph.bearingOf(a), graph.bearingOf(e)) > 150 &&
+            shape.distanceTo(path.lat[stack.last], path.lon[stack.last]) >
+                hairpinShapeClearMetres) {
+          stack.removeLast();
+          stats.spursRemoved++;
+          // The segment that stays no longer starts where its edge does, so
+          // it is no road any more: a few metres of marked, dotted joint, the
+          // same as where two pieces do not meet on the graph. A plain chord
+          // would be a hop the ambient geometry has no feature for.
+          joint.add(i);
+        }
+      }
       acc = 0;
       stack.add(i);
     }
@@ -513,7 +542,12 @@ class PatternSnapper {
     final first = stack.first;
     out.start(path.lat[first - 1], path.lon[first - 1]);
     for (final i in stack) {
-      out.add(path.lat[i], path.lon[i], path.way[i], path.dir[i], path.edge[i]);
+      if (joint.contains(i)) {
+        stats.approxGaps++;
+        out.add(path.lat[i], path.lon[i], -1, 0, edgeApprox);
+      } else {
+        out.add(path.lat[i], path.lon[i], path.way[i], path.dir[i], path.edge[i]);
+      }
     }
     return out;
   }

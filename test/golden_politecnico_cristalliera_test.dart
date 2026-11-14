@@ -35,6 +35,7 @@ void main() {
   late Planner planner;
   late WalkRoutes routes;
   late List<Journey> journeys;
+  late DateTime serviceDay; // a weekday the current feed covers
 
   setUpAll(() async {
     if (missing) {
@@ -51,6 +52,7 @@ void main() {
     while (day.weekday > DateTime.friday) {
       day = day.add(const Duration(days: 1));
     }
+    serviceDay = day;
     final request = PlanRequest(
       originLat: ix.stopLat[politecnico],
       originLon: ix.stopLon[politecnico],
@@ -158,7 +160,9 @@ void main() {
       originLon: ix.stopLon[ix.stopIndexById['3454']!],
       destLat: 45.0620,
       destLon: 7.6780,
-      when: DateTime(2026, 9, 25, 12),
+      // Never a fixed date: the feed only covers the next weeks, and a date
+      // that falls out of it empties the plan (this test failed that way).
+      when: DateTime(serviceDay.year, serviceDay.month, serviceDay.day, 12),
     ));
     final multi = [...journeys, ...busy]
         .expand((j) => j.legs)
