@@ -50,7 +50,7 @@ jobs:
       - name: Fetch extract
         run: |
           mkdir -p build
-          [ -s build/nord-ovest.osm.pbf ] || curl -fL --retry 5 --retry-all-errors \
+          [ -s build/nord-ovest.osm.pbf ] || curl -fL --retry 10 --retry-delay 30 --retry-all-errors --connect-timeout 30 \
             https://download.geofabrik.de/europe/italy/nord-ovest-latest.osm.pbf \
             -o build/nord-ovest.osm.pbf
           sudo apt-get update -qq && sudo apt-get install -y -qq osmium-tool
